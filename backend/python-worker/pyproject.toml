@@ -1,0 +1,20 @@
+[project]
+name = "actio-worker"
+version = "0.1.0"
+description = "ASR + Speaker embedding inference worker"
+requires-python = ">=3.12"
+dependencies = [
+    "grpcio>=1.68",
+    "grpcio-health-checking>=1.68",
+    "numpy>=2.0",
+    "soundfile>=0.12",
+    "funasr>=1.2",
+    "modelscope>=1.22",
+    "torch>=2.5",
+    "torchaudio>=2.5",
+    "pydantic>=2.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"

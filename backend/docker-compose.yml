@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: actio-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: actio
+      POSTGRES_PASSWORD: actio
+      POSTGRES_DB: actio
+    volumes:
+      - actio-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U actio"]
+      interval: 5s
+      retries: 5
+
+volumes:
+  actio-pgdata:
