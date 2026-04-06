@@ -50,15 +50,8 @@ export function BoardWindow() {
             >
               <div className="desktop-toolbar">
                 <div className="desktop-toolbar__brand">
-                  <div className="desktop-toolbar__mark" aria-hidden="true">
-                    <span className="tray-brand-dot" />
-                  </div>
                   <div>
-                    <div className="desktop-toolbar__eyebrow">Actio board</div>
-                    <div className="desktop-toolbar__title">Focus what needs action next</div>
-                    <div className="desktop-toolbar__copy">
-                      A centered review surface for search, labels, fast capture, and quick completion.
-                    </div>
+                    <div className="desktop-toolbar__title">Actio board</div>
                   </div>
                 </div>
 

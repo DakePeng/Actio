@@ -1,6 +1,5 @@
 import { useFilteredReminders, useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
-import { getLabelById } from '../utils/labels';
 import { Card } from './Card';
 import { EmptyState } from './EmptyState';
 import { AnimatePresence } from 'framer-motion';
@@ -14,7 +13,6 @@ export function Board() {
   ];
 
   const filtered = useFilteredReminders();
-  const reminders = useStore((s) => s.reminders);
   const filter = useStore((s) => s.filter);
   const setFilter = useStore((s) => s.setFilter);
   const clearFilter = useStore((s) => s.clearFilter);
@@ -24,59 +22,10 @@ export function Board() {
   const expandedCardId = useStore((s) => s.ui.expandedCardId);
 
   const sorted = [...filtered].sort(sortByPriority);
-  const now = Date.now();
-  const dueToday = reminders.filter((reminder) => {
-    if (!reminder.dueTime) return false;
-    const due = new Date(reminder.dueTime).getTime();
-    return due >= now && due - now < 24 * 60 * 60 * 1000;
-  }).length;
-  const highPriority = reminders.filter((reminder) => reminder.priority === 'high').length;
   const hasActiveFilters = Boolean(filter.priority || filter.label || filter.search);
-  const activeLabel = filter.label ? getLabelById(filter.label) : null;
-  const boardStatus =
-    sorted.length === 0
-      ? 'No matching notes'
-      : `${sorted.length} visible`;
-  const newCount = reminders.filter((reminder) => reminder.isNew).length;
 
   return (
     <main className="board-shell">
-      <section className="board-hero">
-        <div className="board-hero__main">
-          <div className="board-hero__eyebrow">Voice capture workspace</div>
-          <div className="board-hero__title-row">
-            <h1 className="board-hero__title">Your notes, ordered for action</h1>
-            <span className="active-pill">{boardStatus}</span>
-          </div>
-          <div className="board-hero__chips" aria-label="Board highlights">
-            <span className="hero-chip">New arrivals {newCount}</span>
-            <span className="hero-chip">Due soon {dueToday}</span>
-            <span className="hero-chip">High focus {highPriority}</span>
-          </div>
-          <p className="board-hero__copy">
-            Scan the full board first, then tighten by priority or label only when the queue gets noisy.
-          </p>
-        </div>
-
-        <div className="board-hero__stats" aria-label="Board stats">
-          <div className="board-stat">
-            <span className="board-stat__label">High priority</span>
-            <strong className="board-stat__value">{highPriority}</strong>
-            <span className="board-stat__hint">Items that likely need a same-day decision.</span>
-          </div>
-          <div className="board-stat">
-            <span className="board-stat__label">Due soon</span>
-            <strong className="board-stat__value">{dueToday}</strong>
-            <span className="board-stat__hint">Reminders landing in the next 24 hours.</span>
-          </div>
-          <div className="board-stat">
-            <span className="board-stat__label">Total notes</span>
-            <strong className="board-stat__value">{reminders.length}</strong>
-            <span className="board-stat__hint">Everything captured and ready for review.</span>
-          </div>
-        </div>
-      </section>
-
       <section className="board-summary">
         <div className="board-summary__cluster">
           <div className="board-summary__label">Priority</div>
@@ -100,14 +49,6 @@ export function Board() {
         </div>
 
         <div className="board-summary__cluster board-summary__cluster--right">
-          <div className="board-summary__scope">
-            <span className="board-summary__label">Scope</span>
-            <div className="active-filter-row">
-              {activeLabel && <span className="active-pill">Label: {activeLabel.name}</span>}
-              {filter.search && <span className="active-pill">Search: {filter.search}</span>}
-              {!hasActiveFilters && <span className="board-summary__hint">Showing the full board</span>}
-            </div>
-          </div>
           {hasActiveFilters && (
             <button
               type="button"
@@ -121,7 +62,7 @@ export function Board() {
       </section>
 
       {sorted.length === 0 ? (
-        <EmptyState />
+        <EmptyState hasFilters={hasActiveFilters} />
       ) : (
         <div className="board-grid">
           <AnimatePresence mode="popLayout">

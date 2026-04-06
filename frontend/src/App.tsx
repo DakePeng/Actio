@@ -73,12 +73,6 @@ export default function App() {
 
   return (
     <div className={`app-shell${showBoardWindow ? '' : ' app-shell--standby'}`}>
-      {showBoardWindow && (
-        <div className="desktop-stage">
-          <div className="ambient-orb ambient-orb--left" />
-          <div className="ambient-orb ambient-orb--right" />
-        </div>
-      )}
       <StandbyTray />
       <BoardWindow />
       <FeedbackToast />

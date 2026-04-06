@@ -65,8 +65,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
         <motion.div 
           style={{ 
             position: 'absolute', inset: 0, 
-            background: 'rgba(228, 249, 244, 0.82)', 
-            backdropFilter: 'blur(4px)',
+            background: '#e4f9f4', 
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             opacity: dragFeedbackOpacity, zIndex: 20, borderRadius: 'inherit'
           }}

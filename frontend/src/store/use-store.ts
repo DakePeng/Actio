@@ -1,13 +1,15 @@
 import { create } from 'zustand';
-import type { Reminder, FilterState, UIState } from '../types';
+import type { Reminder, FilterState, UIState, Label } from '../types';
 
 interface AppState {
   reminders: Reminder[];
+  customLabels: Label[];
   filter: FilterState;
   ui: UIState;
 
   setReminders: (reminders: Reminder[]) => void;
   addReminder: (reminder: Omit<Reminder, 'id' | 'isNew'>) => void;
+  addCustomLabel: (label: Omit<Label, 'id'>) => void;
   markDone: (id: string) => void;
   setFilter: (filter: Partial<FilterState>) => void;
   clearFilter: () => void;
@@ -74,6 +76,7 @@ function pushFeedback(
 
 export const useStore = create<AppState>((set) => ({
   reminders: [],
+  customLabels: [],
   filter: initialFilter,
   ui: initialUI,
 
@@ -87,6 +90,16 @@ export const useStore = create<AppState>((set) => ({
       ],
     }));
     pushFeedback(set, 'Reminder added to the board', 'success');
+  },
+
+  addCustomLabel: (label) => {
+    set((state) => ({
+      customLabels: [
+        ...state.customLabels,
+        { ...label, id: crypto.randomUUID() },
+      ],
+    }));
+    pushFeedback(set, 'Label created', 'success');
   },
 
   markDone: (id) => {
@@ -183,7 +196,7 @@ export const useStore = create<AppState>((set) => ({
       ),
     })),
 
-  reset: () => set({ reminders: [], filter: initialFilter, ui: initialUI }),
+  reset: () => set({ reminders: [], customLabels: [], filter: initialFilter, ui: initialUI }),
 }));
 
 // Convenience selector — call inside component, not in selector callback

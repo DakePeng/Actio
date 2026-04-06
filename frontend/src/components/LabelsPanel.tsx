@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useStore } from '../store/use-store';
 import { BUILTIN_LABELS, computeLabelCounts } from '../utils/labels';
 
@@ -17,7 +18,25 @@ export function LabelsPanel() {
   const setFilter = useStore((s) => s.setFilter);
   const setFeedback = useStore((s) => s.setFeedback);
   const reminders = useStore((s) => s.reminders);
+  const customLabels = useStore((s) => s.customLabels || []);
+  const addCustomLabel = useStore((s) => s.addCustomLabel);
   const labelCounts = computeLabelCounts(reminders);
+  
+  const [newLabelName, setNewLabelName] = useState('');
+
+  const handleAddLabel = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLabelName.trim()) return;
+    
+    addCustomLabel({
+      name: newLabelName.trim(),
+      color: '#4f46e5', // var(--color-accent)
+      bgColor: '#eef2ff' // var(--color-accent-wash)
+    });
+    setNewLabelName('');
+  };
+
+  const allLabels = [...BUILTIN_LABELS, ...customLabels];
 
   return (
     <>
@@ -43,8 +62,9 @@ export function LabelsPanel() {
         </div>
 
         <div className="labels-list">
-          {BUILTIN_LABELS.map((label) => {
+          {allLabels.map((label) => {
             const count = labelCounts.get(label.id) ?? 0;
+            const dotColor = labelDotColors[label.id] || label.color;
             return (
               <button
                 key={label.id}
@@ -60,7 +80,7 @@ export function LabelsPanel() {
                 <div className="label-row-item__meta">
                   <span
                     className="label-row-item__dot"
-                    style={{ backgroundColor: labelDotColors[label.id] }}
+                    style={{ backgroundColor: dotColor }}
                   />
                   {label.name}
                 </div>
@@ -70,9 +90,24 @@ export function LabelsPanel() {
           })}
         </div>
 
+        <form onSubmit={handleAddLabel} style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+          <input 
+            type="text" 
+            placeholder="New label..." 
+            value={newLabelName}
+            onChange={(e) => setNewLabelName(e.target.value)}
+            className="field-input"
+            style={{ flex: 1, minHeight: '40px', padding: '8px 12px' }}
+          />
+          <button type="submit" className="primary-button" style={{ height: '40px' }} disabled={!newLabelName.trim()}>
+            Add
+          </button>
+        </form>
+
         <button
           type="button"
           className="secondary-button"
+          style={{ marginTop: '16px', width: '100%' }}
           onClick={() => {
             setFilter({ label: null });
             setFeedback('Label filter cleared');
