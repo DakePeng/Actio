@@ -37,18 +37,24 @@ export function Board() {
     sorted.length === 0
       ? 'No matching notes'
       : `${sorted.length} visible`;
+  const newCount = reminders.filter((reminder) => reminder.isNew).length;
 
   return (
     <main className="board-shell">
       <section className="board-hero">
         <div className="board-hero__main">
-          <div className="board-hero__eyebrow">Board overview</div>
+          <div className="board-hero__eyebrow">Voice capture workspace</div>
           <div className="board-hero__title-row">
-            <h1 className="board-hero__title">Today&apos;s notes</h1>
+            <h1 className="board-hero__title">Your notes, ordered for action</h1>
             <span className="active-pill">{boardStatus}</span>
           </div>
+          <div className="board-hero__chips" aria-label="Board highlights">
+            <span className="hero-chip">New arrivals {newCount}</span>
+            <span className="hero-chip">Due soon {dueToday}</span>
+            <span className="hero-chip">High focus {highPriority}</span>
+          </div>
           <p className="board-hero__copy">
-            Review what needs action first, then narrow the board only when you need to.
+            Scan the full board first, then tighten by priority or label only when the queue gets noisy.
           </p>
         </div>
 
@@ -56,14 +62,17 @@ export function Board() {
           <div className="board-stat">
             <span className="board-stat__label">High priority</span>
             <strong className="board-stat__value">{highPriority}</strong>
+            <span className="board-stat__hint">Items that likely need a same-day decision.</span>
           </div>
           <div className="board-stat">
             <span className="board-stat__label">Due soon</span>
             <strong className="board-stat__value">{dueToday}</strong>
+            <span className="board-stat__hint">Reminders landing in the next 24 hours.</span>
           </div>
           <div className="board-stat">
             <span className="board-stat__label">Total notes</span>
             <strong className="board-stat__value">{reminders.length}</strong>
+            <span className="board-stat__hint">Everything captured and ready for review.</span>
           </div>
         </div>
       </section>
@@ -105,7 +114,7 @@ export function Board() {
               className="ghost-button board-summary__reset"
               onClick={clearFilter}
             >
-              Reset filters
+              Clear filters
             </button>
           )}
         </div>

@@ -65,21 +65,29 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
         <motion.div 
           style={{ 
             position: 'absolute', inset: 0, 
-            background: 'rgba(240, 253, 244, 0.8)', 
-            backdropFilter: 'blur(2px)',
+            background: 'rgba(228, 249, 244, 0.82)', 
+            backdropFilter: 'blur(4px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             opacity: dragFeedbackOpacity, zIndex: 20, borderRadius: 'inherit'
           }}
         >
-          <motion.div style={{ scale: dragFeedbackScale, color: '#15803d', fontWeight: 'bold', fontSize: '1.2rem', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <motion.div style={{ scale: dragFeedbackScale, color: '#0f766e', fontWeight: 800, fontSize: '1rem', display: 'flex', gap: '8px', alignItems: 'center', letterSpacing: '-0.03em' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            Done
+            Mark done
           </motion.div>
         </motion.div>
         <div className="reminder-accent" style={{ background: priorityColors.accent }} aria-hidden="true" />
         <div className="card-shell">
           <div className="card-head">
-            <div style={{ flex: 1 }} />
+            <span
+              className="card-badge"
+              style={{
+                background: priorityColors.bg,
+                color: priorityColors.text,
+              }}
+            >
+              {priorityColors.label}
+            </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {reminder.isNew && <span className="mini-badge">New</span>}
               <button
@@ -112,14 +120,14 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
           )}
 
           <div className="card-meta">
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <div className="card-meta__item">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '15px', height: '15px' }}>
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" />
               </svg>
               <span>{timeDisplay}</span>
             </div>
-            <span>{labels.length} labels</span>
+            <span className="card-meta__count">{labels.length} labels</span>
           </div>
 
           <div className="label-row">

@@ -31,12 +31,11 @@ export function LabelsPanel() {
         }}
         aria-hidden={!showLabelsPanel}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+        <div className="sheet-header">
           <div>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, letterSpacing: '-0.04em' }}>Labels</h2>
-            <p style={{ marginTop: '4px', fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-              Keep one category in focus and tighten the board.
-            </p>
+            <div className="sheet-eyebrow">Label focus</div>
+            <h2 className="sheet-title">Tighten the board by context</h2>
+            <p className="sheet-copy">Hold one category in view and suppress the rest of the queue.</p>
           </div>
           <button type="button" className="ghost-button" onClick={toggleLabelsPanel}>
             Close
@@ -58,22 +57,14 @@ export function LabelsPanel() {
                   toggleLabelsPanel();
                 }}
               >
-                <div
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                >
+                <div className="label-row-item__meta">
                   <span
-                    style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '4px',
-                      backgroundColor: labelDotColors[label.id],
-                    }}
+                    className="label-row-item__dot"
+                    style={{ backgroundColor: labelDotColors[label.id] }}
                   />
                   {label.name}
                 </div>
-                <span style={{ fontSize: '0.82rem', color: 'var(--color-text-tertiary)' }}>
-                  {count}
-                </span>
+                <span className="label-row-item__count">{count}</span>
               </button>
             );
           })}

@@ -50,10 +50,15 @@ export function BoardWindow() {
             >
               <div className="desktop-toolbar">
                 <div className="desktop-toolbar__brand">
-                  <span className="tray-brand-dot" aria-hidden="true" />
+                  <div className="desktop-toolbar__mark" aria-hidden="true">
+                    <span className="tray-brand-dot" />
+                  </div>
                   <div>
-                    <div className="desktop-toolbar__title">Sticky notes board</div>
-                    <div className="desktop-toolbar__copy">Your reminder board opens centered while the rest of the screen stays dimmed.</div>
+                    <div className="desktop-toolbar__eyebrow">Actio board</div>
+                    <div className="desktop-toolbar__title">Focus what needs action next</div>
+                    <div className="desktop-toolbar__copy">
+                      A centered review surface for search, labels, fast capture, and quick completion.
+                    </div>
                   </div>
                 </div>
 
@@ -76,7 +81,7 @@ export function BoardWindow() {
                     className={`pill-button${activeLabel ? ' is-active' : ''}`}
                     onClick={toggleLabelsPanel}
                   >
-                    {activeLabel ? 'Label active' : 'Labels'}
+                    {activeLabel ? 'Label active' : 'Browse labels'}
                   </button>
                   <button
                     type="button"
@@ -86,10 +91,10 @@ export function BoardWindow() {
                       setBoardWindow(false);
                     }}
                   >
-                    Close
+                    Return to tray
                   </button>
                   <button type="button" className="primary-button" onClick={() => setNewReminderBar(true)}>
-                    Add note
+                    Capture note
                   </button>
                 </div>
               </div>

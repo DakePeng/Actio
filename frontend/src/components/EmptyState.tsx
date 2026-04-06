@@ -1,12 +1,13 @@
 export function EmptyState() {
   return (
     <div className="empty-shell">
-      <div>
-        <div className="relative mb-6 flex justify-center">
-          <div className="empty-pulse animate-pulse" />
+      <div className="empty-shell__inner">
+        <div className="empty-shell__mark" aria-hidden="true">
+          <div className="empty-pulse" />
         </div>
-        <h2 className="mb-2 text-3xl font-semibold tracking-[-0.04em] text-text">All clear.</h2>
-        <p className="mx-auto max-w-md text-sm leading-6 text-text-secondary">
+        <div className="empty-shell__eyebrow">No active matches</div>
+        <h2 className="empty-shell__title">The board is clear for now.</h2>
+        <p className="empty-shell__copy">
           No reminders match the current view. Clear your filters or capture a new task to refill the board.
         </p>
       </div>

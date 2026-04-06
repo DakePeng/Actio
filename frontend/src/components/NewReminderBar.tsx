@@ -67,10 +67,11 @@ export function NewReminderBar() {
             className="quick-add"
           >
             <div className="quick-add__panel">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '16px' }}>
+              <div className="sheet-header quick-add__header">
                 <div>
-                  <div className="filters-title">Quick add</div>
-                  <div className="filters-copy">Capture a reminder manually and keep moving.</div>
+                  <div className="sheet-eyebrow">Manual capture</div>
+                  <div className="sheet-title">Add a note without leaving the board</div>
+                  <div className="sheet-copy">Keep the entry short. Triage and labeling can happen after capture.</div>
                 </div>
                 <div className="active-pill">Cmd/Ctrl + Enter to save</div>
               </div>
@@ -98,7 +99,7 @@ export function NewReminderBar() {
                     className="field-input"
                   />
                 </label>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="quick-add__actions">
                   <button type="button" onClick={() => setNewReminderBar(false)} className="secondary-button">
                     Cancel
                   </button>

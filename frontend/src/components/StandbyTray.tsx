@@ -58,7 +58,7 @@ export function StandbyTray() {
               <div>
                 <div className="tray-brand-name">actio</div>
                 <div className="tray-brand-subtitle">
-                  {newCount > 0 ? `${newCount} fresh captures` : 'Open sticky notes'}
+                  {newCount > 0 ? `${newCount} fresh captures waiting` : 'Quiet queue, board ready'}
                 </div>
               </div>
             </div>
