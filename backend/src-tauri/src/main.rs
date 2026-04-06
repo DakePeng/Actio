@@ -9,8 +9,8 @@ const STANDBY_HEIGHT: f64 = 72.0;
 const STANDBY_ROW_HEIGHT: f64 = 45.0;
 const STANDBY_CTA_HEIGHT: f64 = 56.0;
 const WINDOW_MARGIN: f64 = 16.0;
-const BOARD_WIDTH: f64 = 1320.0;
-const BOARD_HEIGHT: f64 = 860.0;
+const BOARD_MIN_WIDTH: f64 = 1024.0;
+const BOARD_MIN_HEIGHT: f64 = 720.0;
 
 #[derive(Deserialize)]
 struct StandbyPosition {
@@ -33,18 +33,13 @@ fn apply_window_mode(
         .current_monitor()?
         .or(window.primary_monitor()?)
         .or_else(|| window.available_monitors().ok().and_then(|mut monitors| monitors.drain(..).next()));
-
-    let next_width = if show_board {
-        BOARD_WIDTH
-    } else if tray_expanded {
+    let mut next_width = if tray_expanded {
         STANDBY_EXPANDED_WIDTH
     } else {
         STANDBY_WIDTH
     };
 
-    let next_height = if show_board {
-        BOARD_HEIGHT
-    } else if tray_expanded {
+    let mut next_height = if tray_expanded {
         STANDBY_HEIGHT + (reminder_count.min(6) as f64 * STANDBY_ROW_HEIGHT) + STANDBY_CTA_HEIGHT
     } else {
         STANDBY_HEIGHT
@@ -56,7 +51,7 @@ fn apply_window_mode(
     window.set_resizable(show_board)?;
     window.set_shadow(show_board)?;
     window.set_min_size(Some(if show_board {
-        LogicalSize::new(1024.0, 720.0)
+        LogicalSize::new(BOARD_MIN_WIDTH, BOARD_MIN_HEIGHT)
     } else {
         LogicalSize::new(next_width, next_height)
     }))?;
@@ -65,15 +60,27 @@ fn apply_window_mode(
     } else {
         Some(LogicalSize::new(next_width, next_height))
     })?;
-    window.set_size(LogicalSize::new(next_width, next_height))?;
 
     if let Some(monitor) = monitor {
+        let monitor_position = monitor.position();
+        let monitor_size = monitor.size();
         let work_area = monitor.work_area();
         let scale_factor = monitor.scale_factor();
+        let screen_x = monitor_position.x as f64 / scale_factor;
+        let screen_y = monitor_position.y as f64 / scale_factor;
+        let screen_width = monitor_size.width as f64 / scale_factor;
+        let screen_height = monitor_size.height as f64 / scale_factor;
         let work_x = work_area.position.x as f64 / scale_factor;
         let work_y = work_area.position.y as f64 / scale_factor;
         let work_width = work_area.size.width as f64 / scale_factor;
         let work_height = work_area.size.height as f64 / scale_factor;
+
+        if show_board {
+            next_width = screen_width.max(BOARD_MIN_WIDTH);
+            next_height = screen_height.max(BOARD_MIN_HEIGHT);
+        }
+
+        window.set_size(LogicalSize::new(next_width, next_height))?;
 
         let default_x = work_x + work_width - next_width - WINDOW_MARGIN;
         let default_y = work_y + work_height - next_height - WINDOW_MARGIN;
@@ -99,17 +106,19 @@ fn apply_window_mode(
             .unwrap_or(default_y);
 
         let x = if show_board {
-            work_x + ((work_width - next_width) / 2.0)
+            screen_x
         } else {
             standby_x
         };
         let y = if show_board {
-            work_y + ((work_height - next_height) / 2.0)
+            screen_y
         } else {
             standby_y
         };
 
         window.set_position(LogicalPosition::new(x, y))?;
+    } else {
+        window.set_size(LogicalSize::new(next_width, next_height))?;
     }
 
     window.set_focus()?;

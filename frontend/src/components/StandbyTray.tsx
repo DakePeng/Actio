@@ -1,4 +1,4 @@
-import { createContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
@@ -20,7 +20,6 @@ export function StandbyTray() {
   const highlightCard = useStore((s) => s.highlightCard);
   const newCount = reminders.filter((r) => r.isNew).length;
   const [expanded, setExpanded] = useState(false);
-  const trayRef = useRef<HTMLDivElement>(null);
 
   const topReminders = useMemo(() => {
     return [...reminders].sort(sortByPriority).slice(0, 6);
@@ -30,19 +29,6 @@ export function StandbyTray() {
     setTrayExpanded(expanded);
   }, [expanded, setTrayExpanded]);
 
-  useEffect(() => {
-    if (!expanded) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!trayRef.current?.contains(event.target as Node)) {
-        setExpanded(false);
-      }
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [expanded]);
-
   if (showBoardWindow) return null;
 
   const priorityDotColor = (p: string) =>
@@ -51,7 +37,6 @@ export function StandbyTray() {
   return (
     <StandbyTrayContext.Provider value={{ expanded }}>
       <motion.div
-        ref={trayRef}
         className={`tray tray--launcher${expanded ? ' tray--hovered' : ' tray--collapsed'}`}
         initial={false}
         animate={{

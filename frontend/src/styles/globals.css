@@ -65,7 +65,8 @@ html:has(body.body--standby) {
 }
 
 body.body--native-board {
-  background: var(--color-bg);
+  background: transparent;
+  overflow: hidden;
 }
 
 #root {
@@ -1179,18 +1180,28 @@ button {
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.4);
 }
 
+.desktop-window-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.desktop-window-shell .desktop-window {
+  pointer-events: auto;
+}
+
 body.body--native-board .desktop-window-backdrop {
   display: block;
 }
 
 body.body--native-board .desktop-window {
-  position: fixed;
+  position: relative;
   inset: auto;
-  top: 50%;
-  left: 50%;
-  width: min(calc(100vw - 64px), 1320px);
-  height: min(calc(100vh - 64px), 860px);
-  transform: translate(-50%, -50%);
+  width: min(75vw, 1600px);
+  height: min(75vh, 1080px);
   border-radius: 28px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.4);
@@ -1238,11 +1249,22 @@ body.body--native-board .desktop-window {
 
 .desktop-window__body {
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.desktop-window__body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .desktop-window__body .board-shell {
   max-width: none;
   padding: 20px 22px 120px;
+}
+
+body.body--native-board .desktop-window__body .board-shell {
+  height: 100%;
 }
 
 .feedback-toast {
@@ -1328,6 +1350,16 @@ body.body--native-board .desktop-window {
 
   .desktop-window {
     inset: 16px 16px 96px;
+  }
+
+  body.body--native-board .desktop-window {
+    position: relative;
+    inset: auto;
+    width: min(calc(100vw - 32px), 75vw);
+    height: min(calc(100vh - 32px), 75vh);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.36);
   }
 
   .desktop-toolbar {
