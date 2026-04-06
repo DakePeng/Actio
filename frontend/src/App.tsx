@@ -9,7 +9,8 @@ import type { Reminder } from './types';
 
 const STANDBY_POSITION_KEY = 'actio-standby-position';
 const STANDBY_POSITION_PINNED_KEY = 'actio-standby-position-pinned';
-const STANDBY_POSITION_VERSION = 2;
+const STANDBY_POSITION_VERSION = 3;
+const STANDBY_DRAG_ARMED_KEY = 'actio-standby-drag-armed';
 
 function readStandbyPosition() {
   if (typeof window === 'undefined') return null;
@@ -111,10 +112,15 @@ export default function App() {
 
       unlisten = await getCurrentWindow().onMoved(({ payload }) => {
         if (showBoardWindow) return;
+        const isDraggingTray = sessionStorage.getItem(STANDBY_DRAG_ARMED_KEY) === 'true';
+        if (!isDraggingTray) return;
+
+        localStorage.setItem(STANDBY_POSITION_PINNED_KEY, 'true');
         localStorage.setItem(
           STANDBY_POSITION_KEY,
           JSON.stringify({ x: payload.x, y: payload.y, version: STANDBY_POSITION_VERSION }),
         );
+        sessionStorage.removeItem(STANDBY_DRAG_ARMED_KEY);
       });
     };
 

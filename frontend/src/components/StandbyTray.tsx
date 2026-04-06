@@ -9,7 +9,7 @@ export const StandbyTrayContext = createContext({ expanded: false });
 
 const STANDBY_COLLAPSED_WIDTH = 320;
 const STANDBY_EXPANDED_WIDTH = 440;
-const STANDBY_POSITION_PINNED_KEY = 'actio-standby-position-pinned';
+const STANDBY_DRAG_ARMED_KEY = 'actio-standby-drag-armed';
 
 export function StandbyTray() {
   const reminders = useStore((s) => s.reminders);
@@ -45,9 +45,9 @@ export function StandbyTray() {
           boxShadow: expanded ? 'var(--shadow-card-lg)' : 'var(--shadow-card-md)',
         }}
         transition={{
-          width: { duration: 0.22, ease: [0.22, 1, 0.36, 1] },
-          y: { duration: 0.18, ease: 'easeOut' },
-          boxShadow: { duration: 0.18, ease: 'easeOut' },
+          width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
+          y: { duration: 0.24, ease: 'easeOut' },
+          boxShadow: { duration: 0.24, ease: 'easeOut' },
         }}
       >
         {newCount > 0 && <span className="tray-badge">{newCount > 9 ? '9+' : newCount}</span>}
@@ -56,7 +56,13 @@ export function StandbyTray() {
             className="tray-drag-handle"
             data-tauri-drag-region
             onPointerDown={() => {
-              localStorage.setItem(STANDBY_POSITION_PINNED_KEY, 'true');
+              sessionStorage.setItem(STANDBY_DRAG_ARMED_KEY, 'true');
+            }}
+            onPointerUp={() => {
+              sessionStorage.removeItem(STANDBY_DRAG_ARMED_KEY);
+            }}
+            onPointerCancel={() => {
+              sessionStorage.removeItem(STANDBY_DRAG_ARMED_KEY);
             }}
             aria-label="Drag standby bar"
             title="Drag standby bar"
@@ -112,8 +118,8 @@ export function StandbyTray() {
             opacity: expanded ? 1 : 0,
           }}
           transition={{
-            height: { duration: 0.22, ease: [0.22, 1, 0.36, 1] },
-            opacity: { duration: expanded ? 0.18 : 0.12, ease: 'easeOut' },
+            height: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
+            opacity: { duration: expanded ? 0.24 : 0.16, ease: 'easeOut' },
           }}
           style={{ pointerEvents: expanded ? 'auto' : 'none' }}
         >
@@ -127,7 +133,7 @@ export function StandbyTray() {
                 opacity: expanded ? 1 : 0,
                 x: expanded ? 0 : 8,
               }}
-              transition={{ duration: 0.16, delay: expanded ? 0.02 + index * 0.02 : 0 }}
+              transition={{ duration: 0.2, delay: expanded ? 0.04 + index * 0.025 : 0 }}
               onClick={() => {
                 setExpandedCard(reminder.id);
                 highlightCard(reminder.id);
@@ -150,7 +156,7 @@ export function StandbyTray() {
               opacity: expanded ? 1 : 0,
               y: expanded ? 0 : 6,
             }}
-            transition={{ duration: 0.16, delay: expanded ? 0.08 : 0 }}
+            transition={{ duration: 0.2, delay: expanded ? 0.12 : 0 }}
           >
             <button
               type="button"

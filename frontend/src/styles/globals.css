@@ -58,6 +58,7 @@ body {
 
 body.body--standby {
   background: transparent;
+  overflow: hidden;
 }
 
 html:has(body.body--standby) {
@@ -69,12 +70,20 @@ body.body--native-board {
   overflow: hidden;
 }
 
+body.body--native-board,
+body.body--native-board #root,
+body.body--native-board .app-shell {
+  width: 100vw;
+  height: 100vh;
+}
+
 #root {
   min-height: 100vh;
 }
 
 body.body--standby #root {
   min-height: auto;
+  width: fit-content;
   background: transparent;
 }
 
@@ -98,7 +107,7 @@ button {
 }
 
 .app-shell--standby {
-  min-height: 100vh;
+  min-height: auto;
   background: transparent;
 }
 
@@ -108,6 +117,16 @@ button {
   bottom: 16px;
   width: auto;
   border-radius: 14px;
+}
+
+body.body--standby .app-shell--standby {
+  width: fit-content;
+}
+
+body.body--standby .app-shell--standby .tray {
+  position: relative;
+  right: auto;
+  bottom: auto;
 }
 
 .desktop-stage {
@@ -1184,8 +1203,10 @@ button {
   position: fixed;
   inset: 0;
   z-index: 200;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
   pointer-events: none;
 }
 
@@ -1200,8 +1221,13 @@ body.body--native-board .desktop-window-backdrop {
 body.body--native-board .desktop-window {
   position: relative;
   inset: auto;
+  flex: none;
+  margin: auto;
+  align-self: center;
   width: min(75vw, 1600px);
   height: min(75vh, 1080px);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
   border-radius: 28px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.4);
