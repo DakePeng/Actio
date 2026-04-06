@@ -2,14 +2,19 @@
 
 use serde::Deserialize;
 use std::{thread, time::Duration};
-use tauri::{LogicalPosition, LogicalSize, Manager, WebviewWindow};
+use tauri::{
+    LogicalPosition, LogicalSize, Manager, WebviewWindow, utils::config::WindowEffectsConfig,
+    window::Color,
+};
 
-const STANDBY_WIDTH: f64 = 320.0;
-const STANDBY_EXPANDED_WIDTH: f64 = 440.0;
-const STANDBY_HEIGHT: f64 = 72.0;
-const STANDBY_ROW_HEIGHT: f64 = 45.0;
-const STANDBY_CTA_HEIGHT: f64 = 56.0;
-const WINDOW_MARGIN: f64 = 16.0;
+const STANDBY_TRAY_WIDTH: f64 = 320.0;
+const STANDBY_TRAY_EXPANDED_WIDTH: f64 = 440.0;
+const STANDBY_TRAY_HEIGHT: f64 = 72.0;
+const STANDBY_TRAY_ROW_HEIGHT: f64 = 45.0;
+const STANDBY_TRAY_CTA_HEIGHT: f64 = 56.0;
+const WINDOW_MARGIN_X: f64 = 16.0;
+const WINDOW_MARGIN_Y: f64 = 42.0;
+
 #[derive(Deserialize)]
 struct StandbyPosition {
     x: f64,
@@ -57,6 +62,21 @@ fn animate_standby_window(
     Ok(())
 }
 
+fn set_window_background_transparent(window: &WebviewWindow) -> tauri::Result<()> {
+    window
+        .as_ref()
+        .window()
+        .set_background_color(None::<Color>)?;
+    window
+        .as_ref()
+        .set_background_color(Some(Color(0, 0, 0, 0)))
+}
+
+fn clear_window_compositor_effects(window: &WebviewWindow) -> tauri::Result<()> {
+    window.set_shadow(false)?;
+    window.set_effects(None::<WindowEffectsConfig>)
+}
+
 fn apply_window_mode(
     window: &WebviewWindow,
     show_board: bool,
@@ -67,24 +87,34 @@ fn apply_window_mode(
     let monitor = window
         .current_monitor()?
         .or(window.primary_monitor()?)
-        .or_else(|| window.available_monitors().ok().and_then(|mut monitors| monitors.drain(..).next()));
-    let next_width = if tray_expanded {
-        STANDBY_EXPANDED_WIDTH
+        .or_else(|| {
+            window
+                .available_monitors()
+                .ok()
+                .and_then(|mut monitors| monitors.drain(..).next())
+        });
+    let tray_width = if tray_expanded {
+        STANDBY_TRAY_EXPANDED_WIDTH
     } else {
-        STANDBY_WIDTH
+        STANDBY_TRAY_WIDTH
     };
 
-    let next_height = if tray_expanded {
-        STANDBY_HEIGHT + (reminder_count.min(6) as f64 * STANDBY_ROW_HEIGHT) + STANDBY_CTA_HEIGHT
+    let tray_height = if tray_expanded {
+        STANDBY_TRAY_HEIGHT
+            + (reminder_count.min(6) as f64 * STANDBY_TRAY_ROW_HEIGHT)
+            + STANDBY_TRAY_CTA_HEIGHT
     } else {
-        STANDBY_HEIGHT
+        STANDBY_TRAY_HEIGHT
     };
+    let next_width = tray_width;
+    let next_height = tray_height;
 
     window.set_always_on_top(!show_board)?;
     window.set_skip_taskbar(!show_board)?;
     window.set_decorations(false)?;
     window.set_resizable(false)?;
-    window.set_shadow(false)?;
+    clear_window_compositor_effects(window)?;
+    set_window_background_transparent(window)?;
 
     if show_board {
         window.set_fullscreen(true)?;
@@ -110,15 +140,15 @@ fn apply_window_mode(
         window.set_min_size(Some(LogicalSize::new(next_width, next_height)))?;
         window.set_max_size(Some(LogicalSize::new(next_width, next_height)))?;
 
-        let default_x = work_x + work_width - next_width - WINDOW_MARGIN;
-        let default_y = work_y + work_height - next_height - WINDOW_MARGIN;
+        let default_x = work_x + work_width - next_width - WINDOW_MARGIN_X;
+        let default_y = work_y + work_height - next_height - WINDOW_MARGIN_Y;
         let standby_x = standby_position
             .as_ref()
             .map(|position| {
                 clamp(
                     position.x,
-                    work_x + WINDOW_MARGIN,
-                    work_x + work_width - next_width - WINDOW_MARGIN,
+                    work_x + WINDOW_MARGIN_X,
+                    work_x + work_width - next_width - WINDOW_MARGIN_X,
                 )
             })
             .unwrap_or(default_x);
@@ -127,8 +157,8 @@ fn apply_window_mode(
             .map(|position| {
                 clamp(
                     position.y,
-                    work_y + WINDOW_MARGIN,
-                    work_y + work_height - next_height - WINDOW_MARGIN,
+                    work_y + WINDOW_MARGIN_Y,
+                    work_y + work_height - next_height - WINDOW_MARGIN_Y,
                 )
             })
             .unwrap_or(default_y);
@@ -168,6 +198,7 @@ fn configure_startup_window(app: &tauri::App) -> tauri::Result<()> {
         return Ok(());
     };
 
+    set_window_background_transparent(&window)?;
     apply_window_mode(&window, false, false, 0, None)
 }
 

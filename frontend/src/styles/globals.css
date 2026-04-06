@@ -48,9 +48,13 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  background: transparent !important;
+}
+
 body {
   font-family: var(--font-sans);
-  background: var(--color-bg);
   color: var(--color-text);
   overflow-x: hidden;
   min-height: 100vh;
@@ -59,6 +63,15 @@ body {
 body.body--standby {
   background: transparent;
   overflow: hidden;
+}
+
+body.body--standby,
+body.body--standby #root,
+body.body--standby .app-shell--standby {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  background: transparent;
 }
 
 html:has(body.body--standby) {
@@ -79,12 +92,11 @@ body.body--native-board .app-shell {
 
 #root {
   min-height: 100vh;
+  background: transparent;
 }
 
 body.body--standby #root {
-  min-height: auto;
-  width: fit-content;
-  background: transparent;
+  min-height: 100vh;
 }
 
 ::selection {
@@ -104,29 +116,34 @@ button {
 .app-shell {
   position: relative;
   min-height: 100vh;
+  background: var(--color-bg);
 }
 
 .app-shell--standby {
-  min-height: auto;
+  min-height: 100vh;
   background: transparent;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0;
 }
 
 .app-shell--standby .tray {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  width: auto;
-  border-radius: 14px;
-}
-
-body.body--standby .app-shell--standby {
-  width: fit-content;
-}
-
-body.body--standby .app-shell--standby .tray {
   position: relative;
   right: auto;
   bottom: auto;
+  width: auto;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+body.body--standby .app-shell--standby {
+  width: 100vw;
+}
+
+body.body--standby .tray--hovered,
+body.body--standby .tray--launcher:hover {
+  box-shadow: none;
 }
 
 .desktop-stage {
@@ -1406,6 +1423,13 @@ body.body--native-board .desktop-window__body .board-shell {
   .tray--collapsed {
     left: 16px;
     right: 16px;
+    width: auto;
+  }
+
+  body.body--standby .tray,
+  body.body--standby .tray--collapsed {
+    left: auto;
+    right: auto;
     width: auto;
   }
 }

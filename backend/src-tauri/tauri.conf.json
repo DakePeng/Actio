@@ -14,7 +14,7 @@
       {
         "title": "Actio",
         "label": "main",
-        "width": 360,
+        "width": 320,
         "height": 72,
         "resizable": false,
         "fullscreen": false,
@@ -22,7 +22,8 @@
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "shadow": false
+        "shadow": false,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {

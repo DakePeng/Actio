@@ -20,6 +20,7 @@ export function StandbyTray() {
   const highlightCard = useStore((s) => s.highlightCard);
   const newCount = reminders.filter((r) => r.isNew).length;
   const [expanded, setExpanded] = useState(false);
+  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
   const topReminders = useMemo(() => {
     return [...reminders].sort(sortByPriority).slice(0, 6);
@@ -42,7 +43,7 @@ export function StandbyTray() {
         animate={{
           width: expanded ? STANDBY_EXPANDED_WIDTH : STANDBY_COLLAPSED_WIDTH,
           y: expanded ? -2 : 0,
-          boxShadow: expanded ? 'var(--shadow-card-lg)' : 'var(--shadow-card-md)',
+          boxShadow: isTauri ? 'none' : expanded ? 'var(--shadow-card-lg)' : 'var(--shadow-card-md)',
         }}
         transition={{
           width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },

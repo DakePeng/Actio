@@ -9,7 +9,7 @@ import type { Reminder } from './types';
 
 const STANDBY_POSITION_KEY = 'actio-standby-position';
 const STANDBY_POSITION_PINNED_KEY = 'actio-standby-position-pinned';
-const STANDBY_POSITION_VERSION = 3;
+const STANDBY_POSITION_VERSION = 5;
 const STANDBY_DRAG_ARMED_KEY = 'actio-standby-drag-armed';
 
 function readStandbyPosition() {
