@@ -1,6 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use serde::Deserialize;
 use std::{thread, time::Duration};
 use tauri::{
     LogicalPosition, LogicalSize, Manager, WebviewWindow, utils::config::WindowEffectsConfig,
@@ -14,17 +13,6 @@ const STANDBY_TRAY_ROW_HEIGHT: f64 = 45.0;
 const STANDBY_TRAY_CTA_HEIGHT: f64 = 56.0;
 const WINDOW_MARGIN_X: f64 = 16.0;
 const WINDOW_MARGIN_Y: f64 = 42.0;
-
-#[derive(Deserialize)]
-struct StandbyPosition {
-    x: f64,
-    y: f64,
-}
-
-fn clamp(value: f64, min: f64, max: f64) -> f64 {
-    value.max(min).min(max)
-}
-
 fn lerp(start: f64, end: f64, progress: f64) -> f64 {
     start + (end - start) * progress
 }
@@ -82,7 +70,6 @@ fn apply_window_mode(
     show_board: bool,
     tray_expanded: bool,
     reminder_count: usize,
-    standby_position: Option<StandbyPosition>,
 ) -> tauri::Result<()> {
     let monitor = window
         .current_monitor()?
@@ -142,26 +129,8 @@ fn apply_window_mode(
 
         let default_x = work_x + work_width - next_width - WINDOW_MARGIN_X;
         let default_y = work_y + work_height - next_height - WINDOW_MARGIN_Y;
-        let standby_x = standby_position
-            .as_ref()
-            .map(|position| {
-                clamp(
-                    position.x,
-                    work_x + WINDOW_MARGIN_X,
-                    work_x + work_width - next_width - WINDOW_MARGIN_X,
-                )
-            })
-            .unwrap_or(default_x);
-        let standby_y = standby_position
-            .as_ref()
-            .map(|position| {
-                clamp(
-                    position.y,
-                    work_y + WINDOW_MARGIN_Y,
-                    work_y + work_height - next_height - WINDOW_MARGIN_Y,
-                )
-            })
-            .unwrap_or(default_y);
+        let standby_x = default_x;
+        let standby_y = default_y;
 
         if let (Some(current_size), Some(current_position)) = (current_size, current_position) {
             let start_width = current_size.width as f64 / scale_factor;
@@ -199,7 +168,7 @@ fn configure_startup_window(app: &tauri::App) -> tauri::Result<()> {
     };
 
     set_window_background_transparent(&window)?;
-    apply_window_mode(&window, false, false, 0, None)
+    apply_window_mode(&window, false, false, 0)
 }
 
 #[tauri::command]
@@ -208,16 +177,9 @@ fn sync_window_mode(
     show_board: bool,
     tray_expanded: bool,
     reminder_count: usize,
-    standby_position: Option<StandbyPosition>,
 ) -> Result<(), String> {
-    apply_window_mode(
-        &window,
-        show_board,
-        tray_expanded,
-        reminder_count,
-        standby_position,
-    )
-    .map_err(|error| error.to_string())
+    apply_window_mode(&window, show_board, tray_expanded, reminder_count)
+        .map_err(|error| error.to_string())
 }
 
 fn main() {

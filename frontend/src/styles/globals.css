@@ -937,41 +937,6 @@ body.body--standby .tray--launcher:hover {
   overflow: hidden;
 }
 
-.tray-drag-handle {
-  display: grid;
-  place-items: center;
-  background: transparent;
-  cursor: grab;
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
-  flex: none;
-  transition: background 0.16s ease;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.tray-drag-handle:hover {
-  background: rgba(190, 91, 49, 0.08);
-}
-
-.tray-drag-handle:active {
-  cursor: grabbing;
-}
-
-.tray-drag-handle__dots {
-  display: grid;
-  grid-template-columns: repeat(2, 4px);
-  gap: 3px 4px;
-}
-
-.tray-drag-handle__dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.7);
-}
-
 .tray--collapsed {
 }
 

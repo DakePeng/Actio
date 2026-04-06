@@ -9,7 +9,6 @@ export const StandbyTrayContext = createContext({ expanded: false });
 
 const STANDBY_COLLAPSED_WIDTH = 320;
 const STANDBY_EXPANDED_WIDTH = 440;
-const STANDBY_DRAG_ARMED_KEY = 'actio-standby-drag-armed';
 
 export function StandbyTray() {
   const reminders = useStore((s) => s.reminders);
@@ -53,27 +52,6 @@ export function StandbyTray() {
       >
         {newCount > 0 && <span className="tray-badge">{newCount > 9 ? '9+' : newCount}</span>}
         <div className="tray-toggle">
-          <div
-            className="tray-drag-handle"
-            data-tauri-drag-region
-            onPointerDown={() => {
-              sessionStorage.setItem(STANDBY_DRAG_ARMED_KEY, 'true');
-            }}
-            onPointerUp={() => {
-              sessionStorage.removeItem(STANDBY_DRAG_ARMED_KEY);
-            }}
-            onPointerCancel={() => {
-              sessionStorage.removeItem(STANDBY_DRAG_ARMED_KEY);
-            }}
-            aria-label="Drag standby bar"
-            title="Drag standby bar"
-          >
-            <span className="tray-drag-handle__dots" aria-hidden="true">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <span key={index} className="tray-drag-handle__dot" />
-              ))}
-            </span>
-          </div>
           <button type="button" className="tray-brand-trigger" onClick={() => setExpanded((prev) => !prev)}>
             <div className="tray-brand">
               <span className="tray-brand-dot" aria-hidden="true" />

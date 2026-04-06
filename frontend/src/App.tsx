@@ -7,31 +7,6 @@ import { OnboardingCard } from './components/OnboardingCard';
 import { MOCK_REMINDERS } from './tauri/mock-data';
 import type { Reminder } from './types';
 
-const STANDBY_POSITION_KEY = 'actio-standby-position';
-const STANDBY_POSITION_PINNED_KEY = 'actio-standby-position-pinned';
-const STANDBY_POSITION_VERSION = 5;
-const STANDBY_DRAG_ARMED_KEY = 'actio-standby-drag-armed';
-
-function readStandbyPosition() {
-  if (typeof window === 'undefined') return null;
-
-  const raw = localStorage.getItem(STANDBY_POSITION_KEY);
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw) as { x: number; y: number; version?: number };
-    if (
-      parsed.version === STANDBY_POSITION_VERSION &&
-      typeof parsed.x === 'number' &&
-      typeof parsed.y === 'number'
-    ) {
-      return parsed;
-    }
-  } catch {}
-
-  return null;
-}
-
 export default function App() {
   const hasSeenOnboarding = useStore((s) => s.ui.hasSeenOnboarding);
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
@@ -79,14 +54,11 @@ export default function App() {
       const [{ invoke }] = await Promise.all([import('@tauri-apps/api/core')]);
 
       if (cancelled) return;
-      const isPinned = localStorage.getItem(STANDBY_POSITION_PINNED_KEY) === 'true';
-      const standbyPosition = isPinned ? readStandbyPosition() : null;
 
       await invoke('sync_window_mode', {
         showBoard: showBoardWindow,
         trayExpanded,
         reminderCount: reminders.length,
-        standbyPosition,
       });
     };
 
@@ -98,39 +70,6 @@ export default function App() {
       document.body.classList.remove('body--native-board');
     };
   }, [showBoardWindow, trayExpanded, reminders.length]);
-
-  useEffect(() => {
-    const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-    if (!isTauri) return;
-
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    const watchWindowMoves = async () => {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      if (cancelled) return;
-
-      unlisten = await getCurrentWindow().onMoved(({ payload }) => {
-        if (showBoardWindow) return;
-        const isDraggingTray = sessionStorage.getItem(STANDBY_DRAG_ARMED_KEY) === 'true';
-        if (!isDraggingTray) return;
-
-        localStorage.setItem(STANDBY_POSITION_PINNED_KEY, 'true');
-        localStorage.setItem(
-          STANDBY_POSITION_KEY,
-          JSON.stringify({ x: payload.x, y: payload.y, version: STANDBY_POSITION_VERSION }),
-        );
-        sessionStorage.removeItem(STANDBY_DRAG_ARMED_KEY);
-      });
-    };
-
-    void watchWindowMoves();
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [showBoardWindow]);
 
   return (
     <div className={`app-shell${showBoardWindow ? '' : ' app-shell--standby'}`}>
