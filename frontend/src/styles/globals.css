@@ -187,9 +187,9 @@ body.body--standby .tray--launcher:hover {
 }
 
 .topbar__inner {
-  max-width: 1320px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 18px 24px;
+  padding: 24px 48px;
   display: flex;
   align-items: center;
   gap: 18px;
@@ -318,9 +318,9 @@ body.body--standby .tray--launcher:hover {
 .board-shell {
   position: relative;
   z-index: 1;
-  max-width: 1320px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 28px 24px 160px;
+  padding: 28px 48px 160px;
 }
 
 .board-hero,
@@ -817,7 +817,7 @@ body.body--standby .tray--launcher:hover {
 
 @media (max-width: 720px) {
   .board-shell {
-    padding-inline: 16px;
+    padding-inline: 32px;
   }
 
   .board-hero {
@@ -847,7 +847,7 @@ body.body--standby .tray--launcher:hover {
   position: fixed;
   left: 16px;
   right: 16px;
-  bottom: 16px;
+  bottom: 24px;
   z-index: 220;
 }
 
@@ -1241,10 +1241,9 @@ body.body--native-board .desktop-window {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 18px 22px;
+  padding: 26px 40px;
   border-bottom: 1px solid rgba(185, 159, 130, 0.24);
   background: rgba(255, 252, 247, 0.74);
-  
 }
 
 .desktop-toolbar__brand {
@@ -1288,7 +1287,7 @@ body.body--native-board .desktop-window {
 
 .desktop-window__body .board-shell {
   max-width: none;
-  padding: 20px 22px 120px;
+  padding: 24px 40px 120px;
 }
 
 body.body--native-board .desktop-window__body .board-shell {
@@ -1298,7 +1297,7 @@ body.body--native-board .desktop-window__body .board-shell {
 .feedback-toast {
   position: fixed;
   left: 50%;
-  bottom: 28px;
+  bottom: 42px;
   transform: translateX(-50%);
   z-index: 320;
   display: inline-flex;
@@ -1335,9 +1334,11 @@ body.body--native-board .desktop-window__body .board-shell {
 
 @media (max-width: 768px) {
   .topbar__inner,
-  .board-shell {
-    padding-left: 16px;
-    padding-right: 16px;
+  .board-shell,
+  .desktop-toolbar,
+  .desktop-window__body .board-shell {
+    padding-left: 32px;
+    padding-right: 32px;
   }
 
   .topbar__inner {
@@ -1536,7 +1537,7 @@ body {
 }
 
 .board-shell {
-  max-width: 1380px;
+  max-width: 1280px;
 }
 
 .board-hero,
@@ -1966,7 +1967,7 @@ body.body--native-board .desktop-window {
 .desktop-toolbar {
   border-bottom-color: rgba(15, 118, 110, 0.12);
   background: rgba(255, 252, 247, 0.72);
-  
+  padding: 26px 40px;
 }
 
 .desktop-toolbar__brand {
