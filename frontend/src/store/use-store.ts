@@ -1,21 +1,24 @@
 import { create } from 'zustand';
-import type { Reminder, FilterState, UIState, Label } from '../types';
+import type { Reminder, FilterState, UIState, Label, Priority } from '../types';
 
 interface AppState {
   reminders: Reminder[];
-  customLabels: Label[];
+  labels: Label[];
   filter: FilterState;
   ui: UIState;
 
   setReminders: (reminders: Reminder[]) => void;
   addReminder: (reminder: Omit<Reminder, 'id' | 'isNew'>) => void;
-  addCustomLabel: (label: Omit<Label, 'id'>) => void;
+  updateReminder: (id: string, patch: Partial<Pick<Reminder, 'title' | 'description' | 'dueTime'>>) => void;
+  addLabel: (label: Omit<Label, 'id'>) => void;
+  deleteLabel: (id: string) => void;
   markDone: (id: string) => void;
+  setPriority: (id: string, priority: Priority) => void;
+  setLabels: (id: string, labels: string[]) => void;
   setFilter: (filter: Partial<FilterState>) => void;
   clearFilter: () => void;
   setBoardWindow: (show: boolean) => void;
   setTrayExpanded: (expanded: boolean) => void;
-  toggleLabelsPanel: () => void;
   setExpandedCard: (id: string | null) => void;
   highlightCard: (id: string | null) => void;
   setNewReminderBar: (show: boolean) => void;
@@ -30,7 +33,6 @@ const initialFilter: FilterState = { priority: null, label: null, search: '' };
 
 const initialUI: UIState = {
   showBoardWindow: false,
-  showLabelsPanel: false,
   trayExpanded: false,
   expandedCardId: null,
   highlightedCardId: null,
@@ -74,9 +76,11 @@ function pushFeedback(
   }, 2200);
 }
 
+import { BUILTIN_LABELS } from '../utils/labels';
+
 export const useStore = create<AppState>((set) => ({
   reminders: [],
-  customLabels: [],
+  labels: [...BUILTIN_LABELS],
   filter: initialFilter,
   ui: initialUI,
 
@@ -92,14 +96,32 @@ export const useStore = create<AppState>((set) => ({
     pushFeedback(set, 'Reminder added to the board', 'success');
   },
 
-  addCustomLabel: (label) => {
+  updateReminder: (id, patch) => {
     set((state) => ({
-      customLabels: [
-        ...state.customLabels,
+      reminders: state.reminders.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+    }));
+  },
+
+  addLabel: (label) => {
+    set((state) => ({
+      labels: [
+        ...state.labels,
         { ...label, id: crypto.randomUUID() },
       ],
     }));
     pushFeedback(set, 'Label created', 'success');
+  },
+
+  deleteLabel: (id) => {
+    set((state) => ({
+      labels: state.labels.filter((l) => l.id !== id),
+      reminders: state.reminders.map((r) => ({
+        ...r,
+        labels: r.labels.filter((lId) => lId !== id),
+      })),
+      filter: state.filter.label === id ? { ...state.filter, label: null } : state.filter,
+    }));
+    pushFeedback(set, 'Label deleted', 'neutral');
   },
 
   markDone: (id) => {
@@ -107,6 +129,20 @@ export const useStore = create<AppState>((set) => ({
       reminders: state.reminders.filter((r) => r.id !== id),
     }));
     pushFeedback(set, 'Reminder marked done', 'success');
+  },
+
+  setPriority: (id, priority) => {
+    set((state) => ({
+      reminders: state.reminders.map((r) => (r.id === id ? { ...r, priority } : r)),
+    }));
+    pushFeedback(set, `Priority set to ${priority}`, 'success');
+  },
+
+  setLabels: (id, labels) => {
+    set((state) => ({
+      reminders: state.reminders.map((r) => (r.id === id ? { ...r, labels } : r)),
+    }));
+    pushFeedback(set, 'Labels updated', 'success');
   },
 
   setFilter: (filter) =>
@@ -125,7 +161,6 @@ export const useStore = create<AppState>((set) => ({
         ...state.ui,
         showBoardWindow: show,
         trayExpanded: show ? false : state.ui.trayExpanded,
-        showLabelsPanel: show ? state.ui.showLabelsPanel : false,
         showNewReminderBar: show ? state.ui.showNewReminderBar : false,
       },
     })),
@@ -133,11 +168,6 @@ export const useStore = create<AppState>((set) => ({
   setTrayExpanded: (expanded) =>
     set((state) => ({
       ui: { ...state.ui, trayExpanded: expanded },
-    })),
-
-  toggleLabelsPanel: () =>
-    set((state) => ({
-      ui: { ...state.ui, showLabelsPanel: !state.ui.showLabelsPanel },
     })),
 
   setExpandedCard: (id) =>
@@ -196,7 +226,7 @@ export const useStore = create<AppState>((set) => ({
       ),
     })),
 
-  reset: () => set({ reminders: [], customLabels: [], filter: initialFilter, ui: initialUI }),
+  reset: () => set({ reminders: [], labels: [...BUILTIN_LABELS], filter: initialFilter, ui: initialUI }),
 }));
 
 // Convenience selector — call inside component, not in selector callback

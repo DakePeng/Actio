@@ -9,6 +9,7 @@ export function NewReminderBar() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [dueTime, setDueTime] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -27,17 +28,27 @@ export function NewReminderBar() {
     return () => window.removeEventListener('keydown', handler);
   }, [setNewReminderBar]);
 
+  const handleClose = () => {
+    setTitle('');
+    setDescription('');
+    setDueTime('');
+    setNewReminderBar(false);
+  };
+
   const handleSubmit = () => {
     if (!title.trim()) return;
     addReminder({
       title: title.trim(),
       description: description.trim(),
+      dueTime: dueTime.trim() || undefined,
       priority: 'medium',
       labels: [],
       createdAt: new Date().toISOString(),
+      archivedAt: null,
     });
     setTitle('');
     setDescription('');
+    setDueTime('');
     setNewReminderBar(false);
   };
 
@@ -57,7 +68,7 @@ export function NewReminderBar() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="sheet-overlay"
-            onClick={() => setNewReminderBar(false)}
+            onClick={handleClose}
           />
           <motion.div
             initial={{ y: '100%' }}
@@ -99,8 +110,19 @@ export function NewReminderBar() {
                     className="field-input"
                   />
                 </label>
+                <label>
+                  <span className="field-label">Due time</span>
+                  <input
+                    type="text"
+                    placeholder="e.g. 3pm, tomorrow 9am"
+                    value={dueTime}
+                    onChange={(e) => setDueTime(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="field-input"
+                  />
+                </label>
                 <div className="quick-add__actions">
-                  <button type="button" onClick={() => setNewReminderBar(false)} className="secondary-button">
+                  <button type="button" onClick={handleClose} className="secondary-button">
                     Cancel
                   </button>
                   <button type="button" onClick={handleSubmit} disabled={!title.trim()} className="primary-button">

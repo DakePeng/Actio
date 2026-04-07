@@ -2,16 +2,11 @@ import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { Board } from './Board';
-import { LabelsPanel } from './LabelsPanel';
 import { NewReminderBar } from './NewReminderBar';
 
 export function BoardWindow() {
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
-  const search = useStore((s) => s.filter.search);
-  const activeLabel = useStore((s) => s.filter.label);
-  const setFilter = useStore((s) => s.setFilter);
   const setBoardWindow = useStore((s) => s.setBoardWindow);
-  const toggleLabelsPanel = useStore((s) => s.toggleLabelsPanel);
   const setNewReminderBar = useStore((s) => s.setNewReminderBar);
   const clearFeedback = useStore((s) => s.clearFeedback);
 
@@ -56,26 +51,6 @@ export function BoardWindow() {
                 </div>
 
                 <div className="desktop-toolbar__actions">
-                  <div className="search-shell desktop-toolbar__search">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="11" cy="11" r="7" />
-                      <path d="m21 21-4.3-4.3" />
-                    </svg>
-                    <input
-                      className="search-input"
-                      type="text"
-                      placeholder="Search reminders"
-                      value={search}
-                      onChange={(e) => setFilter({ search: e.target.value })}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className={`pill-button${activeLabel ? ' is-active' : ''}`}
-                    onClick={toggleLabelsPanel}
-                  >
-                    {activeLabel ? 'Label active' : 'Browse labels'}
-                  </button>
                   <button
                     type="button"
                     className="secondary-button"
@@ -95,8 +70,6 @@ export function BoardWindow() {
               <div className="desktop-window__body">
                 <Board />
               </div>
-
-              <LabelsPanel />
               <NewReminderBar />
             </motion.section>
           </div>

@@ -13,6 +13,7 @@ export const MOCK_REMINDERS: Reminder[] = [
     sourceTime: new Date(Date.now() - 86400000).toISOString(),
     isNew: false,
     createdAt: new Date(Date.now() - 86400000).toISOString(),
+    archivedAt: null,
   },
   {
     id: '2',
@@ -22,6 +23,7 @@ export const MOCK_REMINDERS: Reminder[] = [
     labels: ['health', 'personal'],
     dueTime: new Date(Date.now() + 3 * 3600000).toISOString(),
     createdAt: new Date(Date.now() - 172800000).toISOString(),
+    archivedAt: null,
   },
   {
     id: '3',
@@ -31,6 +33,7 @@ export const MOCK_REMINDERS: Reminder[] = [
     labels: ['meeting', 'work'],
     dueTime: new Date(Date.now() + 26 * 3600000).toISOString(),
     createdAt: new Date(Date.now() - 86400000).toISOString(),
+    archivedAt: null,
   },
   {
     id: '4',
@@ -39,6 +42,7 @@ export const MOCK_REMINDERS: Reminder[] = [
     priority: 'low',
     labels: ['personal'],
     createdAt: new Date(Date.now() - 345600000).toISOString(),
+    archivedAt: null,
   },
   {
     id: '5',
@@ -48,6 +52,7 @@ export const MOCK_REMINDERS: Reminder[] = [
     labels: ['work', 'urgent'],
     dueTime: new Date(Date.now() + 48 * 3600000).toISOString(),
     createdAt: new Date(Date.now() - 43200000).toISOString(),
+    archivedAt: null,
   },
   {
     id: '6',
@@ -57,5 +62,6 @@ export const MOCK_REMINDERS: Reminder[] = [
     labels: ['finance', 'work'],
     dueTime: new Date(Date.now() + 96 * 3600000).toISOString(),
     createdAt: new Date(Date.now() - 172800000).toISOString(),
+    archivedAt: null,
   },
 ];

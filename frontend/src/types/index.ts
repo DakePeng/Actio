@@ -12,6 +12,7 @@ export interface Reminder {
   sourceTime?: string;
   isNew?: boolean;
   createdAt: string;
+  archivedAt: string | null;
 }
 
 export interface Label {
@@ -29,7 +30,6 @@ export interface FilterState {
 
 export interface UIState {
   showBoardWindow: boolean;
-  showLabelsPanel: boolean;
   trayExpanded: boolean;
   expandedCardId: string | null;
   highlightedCardId: string | null;

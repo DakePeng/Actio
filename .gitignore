@@ -1,1 +1,10 @@
 .worktrees/
+.claude/
+.codex/
+.gemini/
+
+# Python cache artifacts
+__pycache__/
+*.py[cod]
+.superpowers
+.omx

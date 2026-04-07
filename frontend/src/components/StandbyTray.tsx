@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
 import { formatTimeShort } from '../utils/time';
+import { SwipeActionRow } from './swipe/SwipeActionRow';
+import { SwipeActionCoordinatorProvider } from './swipe/SwipeActionCoordinator';
 
 // Context to share tray state with FAB
 export const StandbyTrayContext = createContext({ expanded: false });
@@ -17,6 +19,7 @@ export function StandbyTray() {
   const setTrayExpanded = useStore((s) => s.setTrayExpanded);
   const setExpandedCard = useStore((s) => s.setExpandedCard);
   const highlightCard = useStore((s) => s.highlightCard);
+  const markDone = useStore((s) => s.markDone);
   const newCount = reminders.filter((r) => r.isNew).length;
   const [expanded, setExpanded] = useState(false);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -102,7 +105,13 @@ export function StandbyTray() {
           }}
           style={{ pointerEvents: expanded ? 'auto' : 'none' }}
         >
+          <SwipeActionCoordinatorProvider>
           {topReminders.map((reminder, index) => (
+            <SwipeActionRow
+              key={reminder.id}
+              rowId={reminder.id}
+              rightAction={{ label: 'Done', confirmLabel: 'Confirm', onExecute: () => markDone(reminder.id) }}
+            >
             <motion.button
               key={reminder.id}
               type="button"
@@ -126,7 +135,9 @@ export function StandbyTray() {
                 {reminder.dueTime && <span className="tray-item-time">{formatTimeShort(reminder.dueTime)}</span>}
               </div>
             </motion.button>
+            </SwipeActionRow>
           ))}
+          </SwipeActionCoordinatorProvider>
 
           <motion.div
             className="tray-cta"

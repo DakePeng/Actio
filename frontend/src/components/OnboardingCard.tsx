@@ -36,19 +36,8 @@ export function OnboardingCard() {
         >
           <div className="onboarding__panel">
             <div className="onboarding__content">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-                <div
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '14px',
-                    background: 'linear-gradient(135deg, var(--color-accent), #d68b4f)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                  }}
-                >
+              <div className="onboarding__header">
+                <div className="onboarding__mark">
                   <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                     <path
                       d="M3 5L7.5 9L3 13"
@@ -65,12 +54,12 @@ export function OnboardingCard() {
                     />
                   </svg>
                 </div>
-                <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text)' }}>Welcome to Actio</span>
+                <span className="onboarding__eyebrow">Welcome to Actio</span>
               </div>
-              <p style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--color-text)', marginBottom: '6px', letterSpacing: '-0.04em' }}>
+              <p className="onboarding__title">
                 Capture first, organize second.
               </p>
-              <p style={{ fontSize: '0.95rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+              <p className="onboarding__copy">
                 Your board is set up for fast scanning, quick completion, and label-based focus. Start talking and refine later.
               </p>
               <button
@@ -79,15 +68,15 @@ export function OnboardingCard() {
                   setHasSeenOnboarding(true);
                 }}
                 type="button"
-                className="ghost-button"
-                style={{ marginTop: '16px', padding: 0, height: 'auto', color: 'var(--color-accent-strong)', fontWeight: 700 }}
+                className="ghost-button onboarding__action"
               >
                 Got it →
               </button>
             </div>
             <div className="onboarding__progress">
               <motion.div
-                style={{ height: '100%', width: `${progressWidth}%`, background: 'rgba(190, 91, 49, 0.55)' }}
+                className="onboarding__progress-bar"
+                style={{ width: `${progressWidth}%` }}
                 transition={{ duration: 0.1 }}
               />
             </div>

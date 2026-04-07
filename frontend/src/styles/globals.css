@@ -348,8 +348,17 @@ body.body--standby .tray--launcher:hover {
 }
 
 .board-hero__eyebrow,
-.board-summary__label,
 .board-stat__label {
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.board-summary__label {
+  width: 76px;
+  flex-shrink: 0;
   font-size: 0.73rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -416,7 +425,7 @@ body.body--standby .tray--launcher:hover {
 
 .board-summary__cluster {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   flex-wrap: wrap;
   min-width: 0;
@@ -483,6 +492,9 @@ body.body--standby .tray--launcher:hover {
 }
 
 .filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 38px;
   padding: 0 14px;
   border-radius: var(--radius-pill);
@@ -593,6 +605,26 @@ body.body--standby .tray--launcher:hover {
   color: var(--color-text-secondary);
   line-height: 1.6;
   font-size: 0.92rem;
+}
+
+/* Editable card fields */
+.card-editable {
+  border: none;
+  outline: none;
+  background: transparent;
+  width: 100%;
+  padding: 0;
+  resize: none;
+  display: block;
+  border-radius: 4px;
+  transition: box-shadow 0.15s ease;
+  caret-color: var(--color-accent);
+}
+.card-editable:hover {
+  box-shadow: inset 0 -1px 0 0 rgba(0,0,0,0.18);
+}
+.card-editable:focus {
+  box-shadow: inset 0 -2px 0 0 var(--color-accent);
 }
 
 .card-meta {
@@ -1986,4 +2018,151 @@ body.body--native-board .desktop-window {
   .empty-shell__title {
     font-size: 1.75rem;
   }
+}
+
+/* ─── Card expand-to-edit ─── */
+
+.card-edit {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(185, 159, 130, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card-edit__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  min-width: 56px;
+}
+
+.card-edit__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.priority-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(185, 159, 130, 0.42);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.14s ease;
+}
+
+.priority-btn:hover {
+  border-color: rgba(185, 159, 130, 0.65);
+}
+
+.priority-btn.is-active {
+  border-color: transparent;
+  font-weight: 700;
+}
+
+.label-add-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 160px;
+  background: #ffffff;
+  border: 1px solid rgba(185, 159, 130, 0.42);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.label-add-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 0.82rem;
+  color: var(--color-text);
+  transition: background 0.14s ease;
+}
+
+.label-add-dropdown__item:hover {
+  background: var(--color-accent-wash);
+}
+
+/* ─── SwipeActionRow done-action style ─── */
+
+.swipe-row__action--done {
+  background: #e4f9f4;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+/* ─── Onboarding card CSS classes ─── */
+
+.onboarding__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.onboarding__mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  background: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  flex-shrink: 0;
+}
+
+.onboarding__eyebrow {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.onboarding__title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 6px;
+  letter-spacing: -0.04em;
+}
+
+.onboarding__copy {
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.onboarding__action {
+  margin-top: 16px;
+  padding: 0;
+  height: auto;
+  color: var(--color-accent-strong);
+  font-weight: 700;
+}
+
+.onboarding__progress-bar {
+  height: 100%;
+  background: var(--color-accent);
+  opacity: 0.55;
+  transition: width 0.1s linear;
 }

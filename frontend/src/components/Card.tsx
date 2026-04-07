@@ -1,4 +1,5 @@
-import type { Reminder } from '../types';
+import { useState, useEffect, useRef } from 'react';
+import type { Reminder, Priority } from '../types';
 import { useStore } from '../store/use-store';
 import { getLabelById } from '../utils/labels';
 import { formatTimeShort } from '../utils/time';
@@ -10,19 +11,16 @@ interface CardProps {
   onToggle: () => void;
 }
 
-// CSS for line-clamp since we're using inline styles
-const lineClampStyle: React.CSSProperties = {
-  display: '-webkit-box',
-  WebkitLineClamp: 2,
-  WebkitBoxOrient: 'vertical',
-  overflow: 'hidden',
-};
-
 export function Card({ reminder, isExpanded, onToggle }: CardProps) {
   const setFilter = useStore((s) => s.setFilter);
   const markDone = useStore((s) => s.markDone);
+  const setPriority = useStore((s) => s.setPriority);
+  const setLabels = useStore((s) => s.setLabels);
+  const updateReminder = useStore((s) => s.updateReminder);
+  const allLabels = useStore((s) => s.labels);
   const setFeedback = useStore((s) => s.setFeedback);
   const highlightedCardId = useStore((s) => s.ui.highlightedCardId);
+
   const { title, description, priority: p, labels, dueTime, transcript, context } = reminder;
   const displayLabels = labels.slice(0, 3);
   const timeDisplay = dueTime ? formatTimeShort(dueTime) : 'No deadline';
@@ -35,13 +33,72 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
     low: { accent: '#1e7a53', bg: '#edf9f1', text: '#166534', label: 'Low priority' },
   }[priority];
 
+  // Inline editing state
+  const [editTitle, setEditTitle] = useState(title);
+  const [editDescription, setEditDescription] = useState(description);
+
+  // Sync when reminder changes externally
+  useEffect(() => { setEditTitle(title); }, [title]);
+  useEffect(() => { setEditDescription(description); }, [description]);
+
+  // Commit edits on blur / on collapse
+  const commitEdits = () => {
+    const t = editTitle.trim();
+    const d = editDescription.trim();
+    if (t !== title || d !== description) {
+      updateReminder(reminder.id, {
+        title: t || title,
+        description: d,
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!isExpanded) commitEdits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded]);
+
+  // Drag-to-done
   const x = useMotionValue(0);
   const rot = useTransform(x, [-200, 200], [-10, 10]);
   const opac = useTransform(x, [-200, -100, 0, 100, 200], [0, 1, 1, 1, 0]);
-  
-  // Drag feedback properties
   const dragFeedbackOpacity = useTransform(x, [-120, -80, 0, 80, 120], [1, 0, 0, 0, 1]);
   const dragFeedbackScale = useTransform(x, [-120, -80, 0, 80, 120], [1, 0.8, 0.8, 0.8, 1]);
+
+  // Label dropdown
+  const [labelDropdownOpen, setLabelDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!labelDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setLabelDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [labelDropdownOpen]);
+
+  useEffect(() => {
+    if (!labelDropdownOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLabelDropdownOpen(false);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [labelDropdownOpen]);
+
+  const unassignedLabels = allLabels.filter((l) => !labels.includes(l.id));
+
+  const priorityOptions: Array<{ value: Priority; label: string }> = [
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' },
+  ];
+
+  // Stop drag from eating interactive-element clicks
+  const stopDrag = (e: React.PointerEvent) => e.stopPropagation();
 
   return (
     <motion.div
@@ -60,14 +117,18 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
         }
       }}
     >
-      <article className={`reminder-card${isExpanded ? ' is-expanded' : ''}${isHighlighted ? ' is-highlighted' : ''}`}>
-        
-        <motion.div 
-          style={{ 
-            position: 'absolute', inset: 0, 
-            background: '#e4f9f4', 
+      <article
+        className={`reminder-card${isExpanded ? ' is-expanded' : ''}${isHighlighted ? ' is-highlighted' : ''}`}
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      >
+        {/* Swipe-to-done overlay */}
+        <motion.div
+          style={{
+            position: 'absolute', inset: 0,
+            background: '#e4f9f4',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            opacity: dragFeedbackOpacity, zIndex: 20, borderRadius: 'inherit'
+            opacity: dragFeedbackOpacity, zIndex: 20, borderRadius: 'inherit',
+            pointerEvents: 'none',
           }}
         >
           <motion.div style={{ scale: dragFeedbackScale, color: '#0f766e', fontWeight: 800, fontSize: '1rem', display: 'flex', gap: '8px', alignItems: 'center', letterSpacing: '-0.03em' }}>
@@ -75,46 +136,70 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
             Mark done
           </motion.div>
         </motion.div>
+
         <div className="reminder-accent" style={{ background: priorityColors.accent }} aria-hidden="true" />
         <div className="card-shell">
+          {/* Head: badge only, no arrow button */}
           <div className="card-head">
             <span
               className="card-badge"
-              style={{
-                background: priorityColors.bg,
-                color: priorityColors.text,
-              }}
+              style={{ background: priorityColors.bg, color: priorityColors.text }}
             >
               {priorityColors.label}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {reminder.isNew && <span className="mini-badge">New</span>}
-              <button
-                type="button"
-                className="card-expand"
-                onClick={onToggle}
-                aria-expanded={isExpanded}
-                aria-label={isExpanded ? `Collapse ${title}` : `Expand ${title}`}
-              >
-                <span
-                  aria-hidden="true"
-                  style={{
-                    display: 'inline-block',
-                    transition: 'transform 0.18s ease',
-                    transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                  }}
-                >
-                  ↓
-                </span>
-              </button>
             </div>
           </div>
 
-          <div className="card-title">{title}</div>
+          {/* Title — editable when expanded */}
+          {isExpanded ? (
+            <input
+              className="card-title card-editable"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onBlur={commitEdits}
+              onPointerDown={stopDrag}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="Reminder title"
+              aria-label="Edit title"
+            />
+          ) : (
+            <div className="card-title">{title}</div>
+          )}
 
-          {description && (
-            <div className="card-description" style={!isExpanded ? lineClampStyle : undefined}>
+          {/* Description — editable textarea when expanded */}
+          {isExpanded ? (
+            <textarea
+              className="card-description card-editable"
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              onBlur={commitEdits}
+              onPointerDown={stopDrag}
+              onClick={(e) => e.stopPropagation()}
+              rows={3}
+              placeholder="Add a description…"
+              aria-label="Edit description"
+              style={{ lineHeight: '1.6' }}
+            />
+          ) : description ? (
+            <div
+              className="card-description"
+              style={{
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
               {description}
+            </div>
+          ) : null}
+
+          {/* Subtle edit hint shown briefly when expanded */}
+          {isExpanded && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)', marginTop: '2px', letterSpacing: '0.01em' }}>
+              Tap title or description to edit
             </div>
           )}
 
@@ -129,21 +214,18 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
             <span className="card-meta__count">{labels.length} labels</span>
           </div>
 
-          <div className="label-row">
+          {/* Label chips */}
+          <div className="label-row" onPointerDown={stopDrag} onClick={(e) => e.stopPropagation()}>
             {displayLabels.map((labelId) => {
-              const label = getLabelById(labelId);
+              const label = getLabelById(allLabels, labelId);
               if (!label) return null;
               return (
                 <button
                   key={labelId}
                   type="button"
-                  onClick={() => setFilter({ label: labelId })}
+                  onClick={(e) => { e.stopPropagation(); setFilter({ label: labelId }); }}
                   className="label-chip"
-                  style={{
-                    background: label.bgColor,
-                    color: label.color,
-                    borderColor: `${label.color}22`,
-                  }}
+                  style={{ background: label.bgColor, color: label.color, borderColor: `${label.color}22` }}
                 >
                   {label.name}
                 </button>
@@ -162,6 +244,115 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
               >
                 {transcript && <div>{transcript}</div>}
                 {context && <div className="card-context">{context}</div>}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {isExpanded && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="card-edit"
+                onPointerDown={stopDrag}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Priority row */}
+                <div className="card-edit__row">
+                  <span className="card-edit__label">Priority</span>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {priorityOptions.map((opt) => {
+                      const isActive = priority === opt.value;
+                      const colors = {
+                        high: { bg: '#fef2f2', text: '#b91c1c' },
+                        medium: { bg: '#fff7df', text: '#a16207' },
+                        low: { bg: '#edf9f1', text: '#166534' },
+                      }[opt.value];
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`priority-btn${isActive ? ' is-active' : ''}`}
+                          style={isActive ? { background: colors.bg, color: colors.text } : undefined}
+                          onClick={() => setPriority(reminder.id, opt.value)}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Labels row */}
+                <div className="card-edit__row">
+                  <span className="card-edit__label">Labels</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', flex: 1, position: 'relative' }} ref={dropdownRef}>
+                    {labels.map((labelId) => {
+                      const label = getLabelById(allLabels, labelId);
+                      if (!label) return null;
+                      return (
+                        <span
+                          key={labelId}
+                          className="label-chip"
+                          style={{ background: label.bgColor, color: label.color, borderColor: `${label.color}22`, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          {label.name}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${label.name}`}
+                            onClick={() => setLabels(reminder.id, labels.filter((id) => id !== labelId))}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1, color: 'inherit', opacity: 0.7 }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
+
+                    {unassignedLabels.length > 0 && (
+                      <button
+                        type="button"
+                        className="priority-btn"
+                        onClick={() => setLabelDropdownOpen((v) => !v)}
+                        aria-haspopup="listbox"
+                        aria-expanded={labelDropdownOpen}
+                      >
+                        + add
+                      </button>
+                    )}
+
+                    {labelDropdownOpen && (
+                      <div className="label-add-dropdown" role="listbox">
+                        {unassignedLabels.map((label) => (
+                          <button
+                            key={label.id}
+                            type="button"
+                            role="option"
+                            className="label-add-dropdown__item"
+                            onClick={() => {
+                              setLabels(reminder.id, [...labels, label.id]);
+                              setLabelDropdownOpen(false);
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                width: '8px',
+                                height: '8px',
+                                borderRadius: '50%',
+                                background: label.color,
+                                flexShrink: 0,
+                              }}
+                            />
+                            {label.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

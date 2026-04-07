@@ -1,6 +1,6 @@
-import { useStore } from '../store/use-store';
+import type { Label } from '../types';
 
-export const BUILTIN_LABELS = [
+export const BUILTIN_LABELS: Label[] = [
   { id: 'work', name: 'Work', color: '#6366F1', bgColor: '#EEF2FF' },
   { id: 'urgent', name: 'Urgent', color: '#DC2626', bgColor: '#FEF2F2' },
   { id: 'meeting', name: 'Meeting', color: '#D97706', bgColor: '#FFFBEB' },
@@ -9,12 +9,8 @@ export const BUILTIN_LABELS = [
   { id: 'finance', name: 'Finance', color: '#0284C7', bgColor: '#F0F9FF' },
 ] as const;
 
-export function getLabelById(id: string) {
-  const builtin = BUILTIN_LABELS.find((l) => l.id === id);
-  if (builtin) return builtin;
-  
-  const customLabels = useStore.getState().customLabels || [];
-  return customLabels.find((l) => l.id === id);
+export function getLabelById(labels: Label[], id: string) {
+  return labels.find((label) => label.id === id) ?? null;
 }
 
 export function computeLabelCounts(reminders: { labels: string[] }[]): Map<string, number> {

@@ -1,0 +1,5 @@
+export const ACTION_WIDTH_PX = 92;
+export const MOUSE_REVEAL_THRESHOLD_PX = 72;
+export const TOUCH_REVEAL_THRESHOLD_PX = 52;
+export const CLOSE_THRESHOLD_PX = 24;
+export const HORIZONTAL_INTENT_RATIO = 1.25;
