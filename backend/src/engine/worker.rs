@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Child;
@@ -24,8 +25,8 @@ impl WorkerManager {
 
     pub async fn start(&self) -> anyhow::Result<()> {
         info!(port = self.port, "Starting Python Worker");
-        let child = tokio::process::Command::new("python3")
-            .arg("python-worker/main.py")
+        let child = tokio::process::Command::new(worker_python_command())
+            .arg(worker_script_path())
             .env("WORKER_HOST", &self.host)
             .env("WORKER_PORT", self.port.to_string())
             .stdout(Stdio::piped())
@@ -63,8 +64,8 @@ impl WorkerManager {
                                 warn!(attempt = *count, "Restarting Python Worker");
                                 drop(proc);
                                 drop(count);
-                                if let Ok(new_child) = tokio::process::Command::new("python3")
-                                    .arg("python-worker/main.py")
+                                if let Ok(new_child) = tokio::process::Command::new(worker_python_command())
+                                    .arg(worker_script_path())
                                     .env("WORKER_HOST", &host)
                                     .env("WORKER_PORT", port.to_string())
                                     .stdout(Stdio::piped())
@@ -93,5 +94,84 @@ impl WorkerManager {
             let _ = child.kill().await;
             info!("Python Worker stopped");
         }
+    }
+}
+
+fn worker_script_path() -> &'static str {
+    "python-worker/main.py"
+}
+
+fn worker_python_command() -> PathBuf {
+    let override_bin = std::env::var("PYTHON_WORKER_BIN").ok();
+    resolve_worker_python(Path::new("."), override_bin.as_deref())
+}
+
+fn resolve_worker_python(root: &Path, override_bin: Option<&str>) -> PathBuf {
+    if let Some(bin) = override_bin.filter(|bin| !bin.trim().is_empty()) {
+        return PathBuf::from(bin);
+    }
+
+    let venv_python = if cfg!(windows) {
+        root.join("python-worker").join(".venv").join("Scripts").join("python.exe")
+    } else {
+        root.join("python-worker").join(".venv").join("bin").join("python")
+    };
+
+    if venv_python.exists() {
+        return venv_python;
+    }
+
+    if cfg!(windows) {
+        PathBuf::from("python")
+    } else {
+        PathBuf::from("python3")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_worker_python;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn expected_venv_path(root: &Path) -> PathBuf {
+        if cfg!(windows) {
+            root.join("python-worker").join(".venv").join("Scripts").join("python.exe")
+        } else {
+            root.join("python-worker").join(".venv").join("bin").join("python")
+        }
+    }
+
+    #[test]
+    fn prefers_local_venv_python_when_present() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let venv_python = expected_venv_path(temp_dir.path());
+        fs::create_dir_all(venv_python.parent().unwrap()).unwrap();
+        fs::write(&venv_python, b"").unwrap();
+
+        let resolved = resolve_worker_python(temp_dir.path(), None);
+
+        assert_eq!(resolved, venv_python);
+    }
+
+    #[test]
+    fn falls_back_to_platform_python_when_local_venv_is_missing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let resolved = resolve_worker_python(temp_dir.path(), None);
+        let expected = if cfg!(windows) { "python" } else { "python3" };
+
+        assert_eq!(resolved, PathBuf::from(expected));
+    }
+
+    #[test]
+    fn prefers_explicit_override_over_local_venv() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let venv_python = expected_venv_path(temp_dir.path());
+        fs::create_dir_all(venv_python.parent().unwrap()).unwrap();
+        fs::write(&venv_python, b"").unwrap();
+
+        let resolved = resolve_worker_python(temp_dir.path(), Some("custom-python"));
+
+        assert_eq!(resolved, PathBuf::from("custom-python"));
     }
 }

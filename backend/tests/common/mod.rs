@@ -6,36 +6,33 @@ use actio_asr::engine::circuit_breaker::CircuitBreaker;
 use actio_asr::engine::metrics::Metrics;
 use actio_asr::engine::transcript_aggregator::TranscriptAggregator;
 use actio_asr::repository::{db, session};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
-static TEST_POOL: OnceCell<PgPool> = OnceCell::const_new();
-
 pub async fn test_pool() -> PgPool {
-    TEST_POOL
-        .get_or_init(|| async {
-            dotenvy::dotenv().ok();
+    dotenvy::dotenv().ok();
 
-            let database_url = std::env::var("TEST_DATABASE_URL")
-                .or_else(|_| std::env::var("DATABASE_URL"))
-                .expect(
-                    "Set TEST_DATABASE_URL or DATABASE_URL before running integration tests. \
-                     The local default from .env is postgres://actio:actio@localhost:5433/actio",
-                );
+    let database_url = std::env::var("TEST_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .expect(
+            "Set TEST_DATABASE_URL or DATABASE_URL before running integration tests. \
+             The local default from .env is postgres://actio:actio@localhost:5433/actio",
+        );
 
-            let pool = db::create_pool(&database_url)
-                .await
-                .expect("failed to connect test database");
-
-            db::run_migrations(&pool)
-                .await
-                .expect("failed to run test migrations");
-
-            pool
-        })
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect(&database_url)
         .await
-        .clone()
+        .expect("failed to connect test database");
+
+    db::run_migrations(&pool)
+        .await
+        .expect("failed to run test migrations");
+
+    pool
 }
 
 pub fn new_tenant_id() -> Uuid {

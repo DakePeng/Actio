@@ -2,7 +2,7 @@
 name = "actio-worker"
 version = "0.1.0"
 description = "ASR + Speaker embedding inference worker"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "grpcio>=1.80.0",
     "grpcio-health-checking>=1.68",
@@ -17,6 +17,6 @@ dependencies = [
     "pydantic>=2.0",
 ]
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = false

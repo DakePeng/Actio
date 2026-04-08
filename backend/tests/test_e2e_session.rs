@@ -106,3 +106,54 @@ async fn session_lifecycle_routes_create_end_and_return_ended_session_state() {
     assert_eq!(session.tenant_id, tenant_id);
     assert!(session.ended_at.is_some());
 }
+
+#[tokio::test]
+async fn docs_ui_points_to_openapi_schema() {
+    let pool = common::test_pool().await;
+    let deps = common::test_app_deps(&pool);
+
+    let app = api::router(AppState {
+        pool: pool.clone(),
+        coordinator: deps.coordinator,
+        aggregator: deps.aggregator,
+        circuit_breaker: deps.circuit_breaker,
+        inference_router: None,
+        metrics: deps.metrics,
+        llm_client: None,
+    });
+
+    let openapi_response = app
+        .clone()
+        .oneshot(
+            Request::get("/api-docs/openapi.json")
+                .body(Body::empty())
+                .expect("openapi request should build"),
+        )
+        .await
+        .expect("router should serve openapi schema");
+
+    assert_eq!(openapi_response.status(), StatusCode::OK);
+    let openapi_body = axum::body::to_bytes(openapi_response.into_body(), usize::MAX)
+        .await
+        .expect("openapi body should be readable");
+    let openapi_json: serde_json::Value =
+        serde_json::from_slice(&openapi_body).expect("openapi response should be valid json");
+    assert_eq!(openapi_json["info"]["title"], "Actio ASR API");
+
+    let docs_response = app
+        .oneshot(
+            Request::get("/docs/swagger-initializer.js")
+                .body(Body::empty())
+                .expect("docs request should build"),
+        )
+        .await
+        .expect("router should serve docs ui");
+
+    assert_eq!(docs_response.status(), StatusCode::OK);
+    let docs_body = axum::body::to_bytes(docs_response.into_body(), usize::MAX)
+        .await
+        .expect("docs body should be readable");
+    let docs_js = String::from_utf8(docs_body.to_vec()).expect("docs response should be utf-8");
+
+    assert!(docs_js.contains("\"url\": \"/api-docs/openapi.json\""));
+}

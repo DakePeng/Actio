@@ -47,16 +47,15 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/sessions", post(session::create_session))
-        .route("/sessions/{id}", get(session::get_session))
-        .route("/sessions/{id}/end", post(session::end_session))
-        .route("/sessions/{id}/transcripts", get(session::get_transcripts))
-        .route("/sessions/{id}/todos", get(session::get_todo_items))
+        .route("/sessions/:id", get(session::get_session))
+        .route("/sessions/:id/end", post(session::end_session))
+        .route("/sessions/:id/transcripts", get(session::get_transcripts))
+        .route("/sessions/:id/todos", get(session::get_todo_items))
         .route("/speakers", post(session::create_speaker))
         .route("/speakers", get(session::list_speakers))
-        .route("/api-docs/openapi.json", get(openapi))
         .route("/ws", get(ws::ws_session))
         .with_state(state)
-        .merge(SwaggerUi::new("/docs"))
+        .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthSummary> {
@@ -77,6 +76,3 @@ async fn health(State(state): State<AppState>) -> Json<HealthSummary> {
     })
 }
 
-async fn openapi() -> Json<utoipa::openapi::OpenApi> {
-    Json(ApiDoc::openapi())
-}
