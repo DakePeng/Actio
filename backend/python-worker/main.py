@@ -3,9 +3,10 @@ import logging
 from concurrent import futures
 
 import grpc
-from grpc_health.v1 import health, health_pb2, health_pb2_grpc
+from grpc_health.v1 import health_pb2_grpc
 
 from config import WorkerConfig
+from health import build_health_servicer
 from models.loader import ModelLoader
 from services.vad import VADService
 from services.asr import ASRService
@@ -32,9 +33,8 @@ async def serve() -> None:
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
 
     # Health check service
-    health_servicer = health.HealthServicer()
+    health_servicer = build_health_servicer()
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
-    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
 
     # Inference services
     inference_pb2_grpc.add_VADServiceServicer_to_server(VADService(), server)

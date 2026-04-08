@@ -3,13 +3,24 @@ use axum::{
     response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use tracing::{info, warn};
 use std::sync::atomic::Ordering;
 
 use crate::AppState;
 use crate::repository::session;
+
+#[derive(Serialize)]
+struct WsTranscriptEvent {
+    kind: &'static str,
+    transcript_id: Uuid,
+    text: String,
+    start_ms: i64,
+    end_ms: i64,
+    is_final: bool,
+    speaker_id: Option<Uuid>,
+}
 
 #[derive(Deserialize, Clone, Default)]
 pub struct WsSessionParams {
@@ -135,12 +146,46 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
         }
     });
 
-    // Send heartbeats back to client
+    // Send transcript events and periodic heartbeats back to client
+    let mut transcript_rx = state.aggregator.subscribe();
     let send_task = tokio::spawn(async move {
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+        heartbeat.tick().await; // consume the immediate first tick
+
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            if sender.send(Message::Ping(vec![].into())).await.is_err() {
-                break;
+            tokio::select! {
+                event = transcript_rx.recv() => {
+                    match event {
+                        Ok(t) => {
+                            let msg = WsTranscriptEvent {
+                                kind: "transcript",
+                                transcript_id: t.id,
+                                text: t.text,
+                                start_ms: t.start_ms,
+                                end_ms: t.end_ms,
+                                is_final: t.is_final,
+                                speaker_id: t.speaker_id,
+                            };
+                            match serde_json::to_string(&msg) {
+                                Ok(json) => {
+                                    if sender.send(Message::Text(json.into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(e) => warn!(error = %e, "Failed to serialize transcript event"),
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(skipped = n, "WebSocket send lagged behind transcript events");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                _ = heartbeat.tick() => {
+                    if sender.send(Message::Ping(vec![].into())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });

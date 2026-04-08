@@ -10,6 +10,12 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::repository::{session, speaker, transcript, todo};
 use crate::domain::types::{AudioSession, Speaker, TodoItem, Transcript};
+
+#[derive(Serialize, ToSchema)]
+pub struct TodoListResponse {
+    pub todos: Vec<TodoItem>,
+    pub generated: bool,
+}
 use crate::engine::todo_generator;
 
 #[derive(Deserialize, ToSchema)]
@@ -97,7 +103,7 @@ pub async fn end_session(
         .await
         .map_err(|e| AppApiError(e.to_string()))?;
 
-    // Fire-and-forget todo generation
+    // Fire-and-forget todo generation (90s timeout)
     if let Some(llm_client) = state.llm_client.clone() {
         let pool = state.pool.clone();
         let tenant_id = session::get_session(&state.pool, id)
@@ -105,9 +111,15 @@ pub async fn end_session(
             .map(|session| session.tenant_id)
             .map_err(|e| AppApiError(e.to_string()))?;
         tokio::spawn(async move {
-            match todo_generator::generate_session_todos(&pool, &llm_client, id, tenant_id).await {
-                Ok(()) => info!(session_id = %id, "Todo generation completed"),
-                Err(e) => warn!(session_id = %id, error = %e, "Todo generation failed"),
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(90),
+                todo_generator::generate_session_todos(&pool, &llm_client, id, tenant_id),
+            )
+            .await;
+            match result {
+                Ok(Ok(())) => info!(session_id = %id, "Todo generation completed"),
+                Ok(Err(e)) => warn!(session_id = %id, error = %e, "Todo generation failed"),
+                Err(_) => warn!(session_id = %id, "Todo generation timed out after 90s"),
             }
         });
     } else {
@@ -150,18 +162,18 @@ pub async fn get_transcripts(
         ("id" = Uuid, Path, description = "Session ID"),
     ),
     responses(
-        (status = 200, description = "List of todo items", body = Vec<TodoItem>),
+        (status = 200, description = "List of todo items", body = TodoListResponse),
         (status = 500, description = "Internal server error", body = AppApiError),
     ),
 )]
 pub async fn get_todo_items(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<TodoItem>>, AppApiError> {
+) -> Result<Json<TodoListResponse>, AppApiError> {
     let todos = todo::get_todos_for_session(&state.pool, id)
         .await
         .map_err(|e| AppApiError(e.to_string()))?;
-    Ok(Json(todos))
+    Ok(Json(TodoListResponse { todos, generated: true }))
 }
 
 // --- Speaker ---

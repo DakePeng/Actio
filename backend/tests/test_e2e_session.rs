@@ -67,7 +67,7 @@ async fn session_lifecycle_routes_create_end_and_return_ended_session_state() {
         .expect("create body should be readable");
     let created_json: serde_json::Value =
         serde_json::from_slice(&create_body).expect("create response should be valid json");
-    let session_id = created_json["id"]
+    let session_id: uuid::Uuid = created_json["id"]
         .as_str()
         .expect("create response should include session id")
         .parse()

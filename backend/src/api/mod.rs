@@ -14,6 +14,7 @@ use crate::domain::types::*;
 use crate::engine::metrics::HealthSummary;
 use std::sync::atomic::Ordering;
 
+
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Actio ASR API", version = "0.1.0"),
@@ -36,6 +37,7 @@ use std::sync::atomic::Ordering;
         TodoItem,
         TodoStatus,
         TodoPriority,
+        TodoListResponse,
         AppApiError,
     )),
 )]
@@ -58,9 +60,20 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthSummary> {
+    let worker_state = if state.inference_router.is_some() {
+        "available"
+    } else {
+        "degraded"
+    }
+    .to_string();
+
     Json(HealthSummary {
         active_sessions: state.metrics.active_sessions.load(Ordering::Relaxed),
         uptime_secs: state.metrics.uptime_secs(),
+        worker_state,
+        local_route_count: state.metrics.local_route_count.load(Ordering::Relaxed),
+        worker_error_count: state.metrics.worker_error_count.load(Ordering::Relaxed),
+        unknown_speaker_count: state.metrics.unknown_speaker_count.load(Ordering::Relaxed),
     })
 }
 

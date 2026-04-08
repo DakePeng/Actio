@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::repository::{speaker, transcript};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AggregatedTranscript {
     pub id: Uuid,
     pub text: String,
@@ -15,11 +15,23 @@ pub struct AggregatedTranscript {
 
 pub struct TranscriptAggregator {
     pool: sqlx::PgPool,
+    events: tokio::sync::broadcast::Sender<AggregatedTranscript>,
 }
 
 impl TranscriptAggregator {
     pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+        let (events, _) = tokio::sync::broadcast::channel(256);
+        Self { pool, events }
+    }
+
+    /// Subscribe to transcript events for WebSocket push.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<AggregatedTranscript> {
+        self.events.subscribe()
+    }
+
+    fn publish(&self, t: &AggregatedTranscript) {
+        // Ignore send errors — no active subscribers is fine
+        let _ = self.events.send(t.clone());
     }
 
     pub async fn add_partial(
@@ -41,14 +53,16 @@ impl TranscriptAggregator {
         )
         .await?;
 
-        Ok(AggregatedTranscript {
+        let result = AggregatedTranscript {
             id: t.id,
             text: format!("[UNKNOWN] {}", text),
             start_ms: t.start_ms,
             end_ms: t.end_ms,
             speaker_id: None,
             is_final: false,
-        })
+        };
+        self.publish(&result);
+        Ok(result)
     }
 
     pub async fn add_final(
@@ -70,14 +84,16 @@ impl TranscriptAggregator {
         )
         .await?;
 
-        Ok(AggregatedTranscript {
+        let result = AggregatedTranscript {
             id: t.id,
             text: format!("[UNKNOWN] {}", text),
             start_ms: t.start_ms,
             end_ms: t.end_ms,
             speaker_id: None,
             is_final: true,
-        })
+        };
+        self.publish(&result);
+        Ok(result)
     }
 
     pub async fn finalize(
@@ -101,13 +117,31 @@ impl TranscriptAggregator {
 
         info!(%transcript_id, ?speaker_id, "Transcript finalized");
 
-        Ok(AggregatedTranscript {
+        let result = AggregatedTranscript {
             id: updated.id,
             text: display_text,
             start_ms: updated.start_ms,
             end_ms: updated.end_ms,
             speaker_id,
             is_final: true,
-        })
+        };
+        self.publish(&result);
+        Ok(result)
+    }
+
+    /// Backfill speaker tag on a previously stored transcript, then re-finalize it.
+    pub async fn backfill_speaker(
+        &self,
+        transcript_id: Uuid,
+        speaker_id: Uuid,
+    ) -> Result<AggregatedTranscript, sqlx::Error> {
+        let row: (String,) = sqlx::query_as(
+            "SELECT text FROM transcripts WHERE id = $1"
+        )
+        .bind(transcript_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        self.finalize(transcript_id, &row.0, Some(speaker_id)).await
     }
 }
