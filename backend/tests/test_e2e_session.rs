@@ -106,3 +106,161 @@ async fn session_lifecycle_routes_create_end_and_return_ended_session_state() {
     assert_eq!(session.tenant_id, tenant_id);
     assert!(session.ended_at.is_some());
 }
+
+#[tokio::test]
+async fn label_crud_create_list_patch_delete() {
+    let pool = common::test_pool().await;
+    let deps = common::test_app_deps(&pool);
+
+    let app = api::router(AppState {
+        pool: pool.clone(),
+        coordinator: deps.coordinator,
+        aggregator: deps.aggregator,
+        circuit_breaker: deps.circuit_breaker,
+        inference_router: None,
+        metrics: deps.metrics,
+        llm_client: None,
+    });
+
+    // POST /labels
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::post("/labels")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "name": "TestLabel",
+                        "color": "#123456",
+                        "bg_color": "#abcdef"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+    let body = axum::body::to_bytes(create_resp.into_body(), usize::MAX).await.unwrap();
+    let label: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let label_id: uuid::Uuid = label["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(label["name"], "TestLabel");
+
+    // GET /labels
+    let list_resp = app
+        .clone()
+        .oneshot(Request::get("/labels").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(list_resp.status(), StatusCode::OK);
+    let list_body = axum::body::to_bytes(list_resp.into_body(), usize::MAX).await.unwrap();
+    let labels: serde_json::Value = serde_json::from_slice(&list_body).unwrap();
+    assert!(labels.as_array().unwrap().iter().any(|l| l["id"] == label["id"]));
+
+    // PATCH /labels/{id}
+    let patch_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/labels/{label_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({"name": "Renamed"})).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch_resp.status(), StatusCode::OK);
+
+    // DELETE /labels/{id}
+    let del_resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/labels/{label_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(del_resp.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn reminder_create_and_patch_status() {
+    let pool = common::test_pool().await;
+    let deps = common::test_app_deps(&pool);
+
+    let app = api::router(AppState {
+        pool: pool.clone(),
+        coordinator: deps.coordinator,
+        aggregator: deps.aggregator,
+        circuit_breaker: deps.circuit_breaker,
+        inference_router: None,
+        metrics: deps.metrics,
+        llm_client: None,
+    });
+
+    // POST /reminders
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::post("/reminders")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "title": "Buy milk",
+                        "priority": "low"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+    let body = axum::body::to_bytes(create_resp.into_body(), usize::MAX).await.unwrap();
+    let reminder: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let reminder_id: uuid::Uuid = reminder["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(reminder["status"], "open");
+    assert_eq!(reminder["labels"].as_array().unwrap().len(), 0);
+
+    // PATCH /reminders/{id} — mark archived
+    let patch_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/reminders/{reminder_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({"status": "archived"})).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch_resp.status(), StatusCode::OK);
+
+    let patch_body = axum::body::to_bytes(patch_resp.into_body(), usize::MAX).await.unwrap();
+    let patched: serde_json::Value = serde_json::from_slice(&patch_body).unwrap();
+    assert_eq!(patched["status"], "archived");
+    assert!(patched["archived_at"].as_str().is_some());
+
+    // DELETE /reminders/{id}
+    let del_resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/reminders/{reminder_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(del_resp.status(), StatusCode::NO_CONTENT);
+}
