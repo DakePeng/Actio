@@ -84,12 +84,20 @@ pub enum TodoPriority {
 #[derive(Debug, Clone, Serialize, sqlx::FromRow, ToSchema)]
 pub struct TodoItem {
     pub id: Uuid,
-    pub session_id: Uuid,
+    pub session_id: Option<Uuid>,
     pub speaker_id: Option<Uuid>,
     pub assigned_to: Option<String>,
     pub description: String,
     pub status: TodoStatus,
     pub priority: Option<TodoPriority>,
+    // New columns from migration 007 — nullable, ignored by old callers
+    pub tenant_id: Uuid,
+    pub title: Option<String>,
+    pub due_time: Option<DateTime<Utc>>,
+    pub archived_at: Option<DateTime<Utc>>,
+    pub transcript_excerpt: Option<String>,
+    pub context: Option<String>,
+    pub source_time: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -113,4 +121,145 @@ impl TodoPriority {
             _ => None,
         }
     }
+}
+
+// ── Reminder ─────────────────────────────────────────────────────────────
+
+/// Raw DB row for the reminders table (no joined labels).
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ReminderRow {
+    pub id: Uuid,
+    pub session_id: Option<Uuid>,
+    pub tenant_id: Uuid,
+    pub speaker_id: Option<Uuid>,
+    pub assigned_to: Option<String>,
+    pub title: Option<String>,
+    pub description: String,
+    pub status: String,
+    pub priority: Option<String>,
+    pub due_time: Option<DateTime<Utc>>,
+    pub archived_at: Option<DateTime<Utc>>,
+    pub transcript_excerpt: Option<String>,
+    pub context: Option<String>,
+    pub source_time: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl ReminderRow {
+    pub fn into_reminder(self, labels: Vec<Uuid>) -> Reminder {
+        Reminder {
+            id: self.id,
+            session_id: self.session_id,
+            tenant_id: self.tenant_id,
+            speaker_id: self.speaker_id,
+            assigned_to: self.assigned_to,
+            title: self.title,
+            description: self.description,
+            status: self.status,
+            priority: self.priority,
+            due_time: self.due_time,
+            archived_at: self.archived_at,
+            transcript_excerpt: self.transcript_excerpt,
+            context: self.context,
+            source_time: self.source_time,
+            labels,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+/// API response type — includes joined label IDs.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct Reminder {
+    pub id: Uuid,
+    pub session_id: Option<Uuid>,
+    pub tenant_id: Uuid,
+    pub speaker_id: Option<Uuid>,
+    pub assigned_to: Option<String>,
+    pub title: Option<String>,
+    pub description: String,
+    pub status: String,
+    pub priority: Option<String>,
+    pub due_time: Option<DateTime<Utc>>,
+    pub archived_at: Option<DateTime<Utc>>,
+    pub transcript_excerpt: Option<String>,
+    pub context: Option<String>,
+    pub source_time: Option<DateTime<Utc>>,
+    pub labels: Vec<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Input for creating a new reminder (API or LLM generator).
+#[derive(Debug)]
+pub struct NewReminder {
+    pub session_id: Option<Uuid>,
+    pub tenant_id: Uuid,
+    pub speaker_id: Option<Uuid>,
+    pub assigned_to: Option<String>,
+    pub title: Option<String>,
+    pub description: String,
+    pub priority: Option<String>,
+    pub transcript_excerpt: Option<String>,
+    pub context: Option<String>,
+    pub source_time: Option<DateTime<Utc>>,
+}
+
+/// Query parameters for GET /reminders.
+#[derive(Debug, Default)]
+pub struct ReminderFilter {
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub label_id: Option<Uuid>,
+    pub search: Option<String>,
+    pub session_id: Option<Uuid>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// Body for PATCH /reminders/{id}.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PatchReminderRequest {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub priority: Option<String>,
+    pub due_time: Option<DateTime<Utc>>,
+    pub status: Option<String>,
+    pub labels: Option<Vec<Uuid>>,
+}
+
+// ── Label ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
+pub struct Label {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub color: String,
+    pub bg_color: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateLabelRequest {
+    pub name: String,
+    pub color: String,
+    pub bg_color: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PatchLabelRequest {
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub bg_color: Option<String>,
+}
+
+// ── Session listing ───────────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ListSessionsParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }

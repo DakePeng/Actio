@@ -1,4 +1,4 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::Json;
@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::repository::{session, speaker, transcript, todo};
-use crate::domain::types::{AudioSession, Speaker, TodoItem, Transcript};
+use crate::domain::types::{AudioSession, ListSessionsParams, Speaker, TodoItem, Transcript};
 
 #[derive(Serialize, ToSchema)]
 pub struct TodoListResponse {
@@ -224,6 +224,85 @@ pub async fn list_speakers(
         .await
         .map_err(|e| AppApiError(e.to_string()))?;
     Ok(Json(speakers))
+}
+
+// --- Session listing ---
+
+#[utoipa::path(
+    get,
+    path = "/sessions",
+    tag = "sessions",
+    responses(
+        (status = 200, description = "List of sessions", body = Vec<AudioSession>),
+    ),
+)]
+pub async fn list_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ListSessionsParams>,
+) -> Result<Json<Vec<AudioSession>>, AppApiError> {
+    let tenant_id = tenant_id_from_headers(&headers)?;
+    let limit = params.limit.unwrap_or(20).min(100);
+    let offset = params.offset.unwrap_or(0);
+    let sessions = session::list_sessions(&state.pool, tenant_id, limit, offset)
+        .await
+        .map_err(|e| AppApiError(e.to_string()))?;
+    Ok(Json(sessions))
+}
+
+// --- Speaker mutations ---
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateSpeakerRequest {
+    pub display_name: String,
+}
+
+#[utoipa::path(
+    patch,
+    path = "/speakers/{id}",
+    tag = "speakers",
+    params(("id" = Uuid, Path, description = "Speaker ID")),
+    responses(
+        (status = 200, description = "Updated speaker", body = Speaker),
+        (status = 500, description = "Internal server error", body = AppApiError),
+    ),
+)]
+pub async fn update_speaker(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateSpeakerRequest>,
+) -> Result<Json<Speaker>, AppApiError> {
+    match speaker::update_speaker(&state.pool, id, &req.display_name)
+        .await
+        .map_err(|e| AppApiError(e.to_string()))?
+    {
+        Some(s) => Ok(Json(s)),
+        None => Err(AppApiError("not found".into())),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/speakers/{id}",
+    tag = "speakers",
+    params(("id" = Uuid, Path, description = "Speaker ID")),
+    responses(
+        (status = 204, description = "Speaker soft-deleted"),
+        (status = 500, description = "Internal server error", body = AppApiError),
+    ),
+)]
+pub async fn delete_speaker(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppApiError> {
+    let deleted = speaker::soft_delete_speaker(&state.pool, id)
+        .await
+        .map_err(|e| AppApiError(e.to_string()))?;
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppApiError("not found".into()))
+    }
 }
 
 // --- Error ---

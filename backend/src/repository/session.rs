@@ -32,3 +32,19 @@ pub async fn end_session(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
         .await?;
     Ok(())
 }
+
+pub async fn list_sessions(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<AudioSession>, sqlx::Error> {
+    sqlx::query_as::<_, AudioSession>(
+        "SELECT * FROM audio_sessions WHERE tenant_id = $1 ORDER BY started_at DESC LIMIT $2 OFFSET $3",
+    )
+    .bind(tenant_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+}

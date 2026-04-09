@@ -31,3 +31,26 @@ pub async fn list_speakers(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Speaker
     .fetch_all(pool)
     .await
 }
+
+pub async fn update_speaker(
+    pool: &PgPool,
+    id: Uuid,
+    display_name: &str,
+) -> Result<Option<Speaker>, sqlx::Error> {
+    sqlx::query_as::<_, Speaker>(
+        "UPDATE speakers SET display_name = $1 WHERE id = $2 RETURNING *",
+    )
+    .bind(display_name)
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn soft_delete_speaker(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result =
+        sqlx::query("UPDATE speakers SET status = 'inactive' WHERE id = $1 AND status = 'active'")
+            .bind(id)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}
