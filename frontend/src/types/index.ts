@@ -28,6 +28,17 @@ export interface FilterState {
   search: string;
 }
 
+export interface Profile {
+  name: string;
+  initials: string;
+}
+
+export interface Preferences {
+  theme: 'light' | 'system' | 'dark';
+  launchAtLogin: boolean;
+  notifications: boolean;
+}
+
 export interface UIState {
   showBoardWindow: boolean;
   trayExpanded: boolean;
@@ -35,6 +46,7 @@ export interface UIState {
   highlightedCardId: string | null;
   showNewReminderBar: boolean;
   hasSeenOnboarding: boolean;
+  activeTab: 'board' | 'archive' | 'settings';
   feedback: {
     message: string;
     tone: 'neutral' | 'success';
