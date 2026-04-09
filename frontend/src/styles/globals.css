@@ -1237,11 +1237,11 @@ body.body--native-board .desktop-window {
 }
 
 .desktop-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 26px 40px;
+  min-height: 68px;
+  padding: 0 40px;
   border-bottom: 1px solid rgba(185, 159, 130, 0.24);
   background: rgba(255, 252, 247, 0.74);
 }
@@ -1250,6 +1250,7 @@ body.body--native-board .desktop-window {
   display: flex;
   align-items: center;
   gap: 12px;
+  justify-self: start;
 }
 
 .desktop-toolbar__title {
@@ -1268,6 +1269,7 @@ body.body--native-board .desktop-window {
   display: flex;
   align-items: center;
   gap: 12px;
+  justify-self: end;
 }
 
 .desktop-toolbar__search {
@@ -1967,7 +1969,8 @@ body.body--native-board .desktop-window {
 .desktop-toolbar {
   border-bottom-color: rgba(15, 118, 110, 0.12);
   background: rgba(255, 252, 247, 0.72);
-  padding: 26px 40px;
+  padding: 0 40px;
+  min-height: 68px;
 }
 
 .desktop-toolbar__brand {
@@ -2174,7 +2177,7 @@ body.body--native-board .desktop-window {
   display: flex;
   align-items: stretch;
   align-self: stretch;
-  gap: 0;
+  gap: 4px;
   background: none;
   border: none;
   padding: 0;
@@ -2183,7 +2186,7 @@ body.body--native-board .desktop-window {
 .tab-bar__tab {
   display: flex;
   align-items: flex-end;
-  padding: 0 16px 10px;
+  padding: 0 22px 12px;
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--color-text-secondary);
