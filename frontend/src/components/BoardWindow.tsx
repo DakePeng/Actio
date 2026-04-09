@@ -2,10 +2,14 @@ import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { Board } from './Board';
+import { ArchiveView } from './ArchiveView';
+import { SettingsView } from './settings/SettingsView';
+import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
 
 export function BoardWindow() {
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
+  const activeTab = useStore((s) => s.ui.activeTab);
   const setBoardWindow = useStore((s) => s.setBoardWindow);
   const setNewReminderBar = useStore((s) => s.setNewReminderBar);
   const clearFeedback = useStore((s) => s.clearFeedback);
@@ -61,14 +65,23 @@ export function BoardWindow() {
                   >
                     Return to tray
                   </button>
-                  <button type="button" className="primary-button" onClick={() => setNewReminderBar(true)}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={activeTab !== 'board'}
+                    onClick={() => setNewReminderBar(true)}
+                  >
                     Capture note
                   </button>
                 </div>
               </div>
 
+              <TabBar />
+
               <div className="desktop-window__body">
-                <Board />
+                {activeTab === 'board' && <Board />}
+                {activeTab === 'archive' && <ArchiveView />}
+                {activeTab === 'settings' && <SettingsView />}
               </div>
               <NewReminderBar />
             </motion.section>

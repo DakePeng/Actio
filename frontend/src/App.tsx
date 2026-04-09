@@ -13,6 +13,7 @@ export default function App() {
   const trayExpanded = useStore((s) => s.ui.trayExpanded);
   const reminders = useStore((s) => s.reminders);
   const setReminders = useStore((s) => s.setReminders);
+  const theme = useStore((s) => s.preferences.theme);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +71,15 @@ export default function App() {
       document.body.classList.remove('body--native-board');
     };
   }, [showBoardWindow, trayExpanded, reminders.length]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'system') {
+      root.removeAttribute('data-theme');
+    } else {
+      root.setAttribute('data-theme', theme);
+    }
+  }, [theme]);
 
   return (
     <div className={`app-shell${showBoardWindow ? '' : ' app-shell--standby'}`}>
