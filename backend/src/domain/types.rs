@@ -103,6 +103,7 @@ pub struct TodoItem {
 }
 
 /// Input struct for inserts (no id/created_at/updated_at — DB generates them)
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct NewTodo {
     pub session_id: Uuid,
@@ -110,17 +111,6 @@ pub struct NewTodo {
     pub assigned_to: Option<String>,
     pub description: String,
     pub priority: Option<TodoPriority>,
-}
-
-impl TodoPriority {
-    pub fn from_llm_label(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "high" => Some(Self::High),
-            "medium" => Some(Self::Medium),
-            "low" => Some(Self::Low),
-            _ => None,
-        }
-    }
 }
 
 // ── Reminder ─────────────────────────────────────────────────────────────
@@ -202,6 +192,7 @@ pub struct NewReminder {
     pub title: Option<String>,
     pub description: String,
     pub priority: Option<String>,
+    pub due_time: Option<DateTime<Utc>>,
     pub transcript_excerpt: Option<String>,
     pub context: Option<String>,
     pub source_time: Option<DateTime<Utc>>,

@@ -121,8 +121,8 @@ pub async fn create_reminder(
     let row: ReminderRow = sqlx::query_as(
         r#"INSERT INTO reminders
                (session_id, tenant_id, speaker_id, assigned_to, title, description,
-                priority, transcript_excerpt, context, source_time)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                priority, due_time, transcript_excerpt, context, source_time)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            RETURNING *"#,
     )
     .bind(item.session_id)
@@ -132,6 +132,7 @@ pub async fn create_reminder(
     .bind(&item.title)
     .bind(&item.description)
     .bind(&item.priority)
+    .bind(item.due_time)
     .bind(&item.transcript_excerpt)
     .bind(&item.context)
     .bind(item.source_time)
@@ -263,8 +264,8 @@ pub async fn create_reminders_batch(
         let row: Option<ReminderRow> = sqlx::query_as(
             r#"INSERT INTO reminders
                    (session_id, tenant_id, speaker_id, assigned_to, title, description,
-                    priority, transcript_excerpt, context, source_time)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    priority, due_time, transcript_excerpt, context, source_time)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                ON CONFLICT (session_id, description) DO NOTHING
                RETURNING *"#,
         )
@@ -275,6 +276,7 @@ pub async fn create_reminders_batch(
         .bind(&item.title)
         .bind(&item.description)
         .bind(&item.priority)
+        .bind(item.due_time)
         .bind(&item.transcript_excerpt)
         .bind(&item.context)
         .bind(item.source_time)

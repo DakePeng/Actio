@@ -39,12 +39,14 @@ pub fn new_tenant_id() -> Uuid {
     Uuid::new_v4()
 }
 
+#[allow(dead_code)]
 pub async fn create_test_session(pool: &PgPool, tenant_id: Uuid) -> AudioSession {
     session::create_session(pool, tenant_id, "microphone", "realtime")
         .await
         .expect("failed to create test session")
 }
 
+#[allow(dead_code)]
 pub struct TestAppDeps {
     pub coordinator: Arc<AudioCoordinator>,
     pub aggregator: Arc<TranscriptAggregator>,
@@ -52,6 +54,7 @@ pub struct TestAppDeps {
     pub metrics: Arc<Metrics>,
 }
 
+#[allow(dead_code)]
 pub fn test_app_deps(pool: &PgPool) -> TestAppDeps {
     TestAppDeps {
         coordinator: Arc::new(AudioCoordinator::new()),

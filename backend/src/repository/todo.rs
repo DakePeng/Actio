@@ -5,6 +5,7 @@ use crate::domain::types::TodoItem;
 use crate::domain::types::NewTodo;
 
 /// Check if any reminders already exist for a session (idempotency guard).
+#[allow(dead_code)]
 pub async fn has_todos(pool: &PgPool, session_id: Uuid) -> Result<bool, sqlx::Error> {
     let row: (bool,) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM reminders WHERE session_id = $1)"
@@ -16,6 +17,7 @@ pub async fn has_todos(pool: &PgPool, session_id: Uuid) -> Result<bool, sqlx::Er
 }
 
 /// Batch insert reminders — used by the backward-compat alias route.
+#[allow(dead_code)]
 pub async fn create_todos(
     pool: &PgPool,
     items: &[NewTodo],

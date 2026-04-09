@@ -68,6 +68,7 @@ pub async fn generate_session_todos(
             title: None,
             description: item.description.clone(),
             priority: item.priority.clone(),
+            due_time: None,
             transcript_excerpt: None,
             context: None,
             source_time: None,

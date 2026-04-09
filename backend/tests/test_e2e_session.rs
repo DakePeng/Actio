@@ -258,6 +258,7 @@ async fn reminder_create_and_patch_status() {
     });
 
     // POST /reminders
+    let due_time = "2026-05-01T09:30:00Z";
     let create_resp = app
         .clone()
         .oneshot(
@@ -266,7 +267,8 @@ async fn reminder_create_and_patch_status() {
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "title": "Buy milk",
-                        "priority": "low"
+                        "priority": "low",
+                        "due_time": due_time
                     }))
                     .unwrap(),
                 ))
@@ -281,6 +283,7 @@ async fn reminder_create_and_patch_status() {
     let reminder_id: uuid::Uuid = reminder["id"].as_str().unwrap().parse().unwrap();
     assert_eq!(reminder["status"], "open");
     assert_eq!(reminder["labels"].as_array().unwrap().len(), 0);
+    assert_eq!(reminder["due_time"], due_time);
 
     // PATCH /reminders/{id} — mark archived
     let patch_resp = app

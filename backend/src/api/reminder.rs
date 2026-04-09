@@ -77,6 +77,7 @@ pub async fn create_reminder(
         title: req.title,
         description: req.description.unwrap_or_default(),
         priority: req.priority,
+        due_time: req.due_time,
         transcript_excerpt: None,
         context: None,
         source_time: None,
