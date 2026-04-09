@@ -174,7 +174,8 @@ async fn label_crud_create_list_patch_delete() {
     });
 
 
-    // POST /labels
+    // POST /labels — use unique name to avoid collisions across test runs
+    let label_name = format!("TestLabel-{}", uuid::Uuid::new_v4());
     let create_resp = app
         .clone()
         .oneshot(
@@ -182,7 +183,7 @@ async fn label_crud_create_list_patch_delete() {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&json!({
-                        "name": "TestLabel",
+                        "name": label_name,
                         "color": "#123456",
                         "bg_color": "#abcdef"
                     }))
@@ -197,7 +198,7 @@ async fn label_crud_create_list_patch_delete() {
     let body = axum::body::to_bytes(create_resp.into_body(), usize::MAX).await.unwrap();
     let label: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let label_id: uuid::Uuid = label["id"].as_str().unwrap().parse().unwrap();
-    assert_eq!(label["name"], "TestLabel");
+    assert_eq!(label["name"], label_name);
 
     // GET /labels
     let list_resp = app

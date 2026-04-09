@@ -1,0 +1,1 @@
+ALTER TABLE reminders ALTER COLUMN session_id DROP NOT NULL;

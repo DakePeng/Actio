@@ -60,31 +60,29 @@ pub fn router(state: AppState) -> Router {
         // sessions
         .route("/sessions", get(session::list_sessions))
         .route("/sessions", post(session::create_session))
-        .route("/sessions/{id}", get(session::get_session))
-        .route("/sessions/{id}/end", post(session::end_session))
-        .route("/sessions/{id}/transcripts", get(session::get_transcripts))
-        .route("/sessions/{id}/todos", get(session::get_todo_items))
+        .route("/sessions/:id", get(session::get_session))
+        .route("/sessions/:id/end", post(session::end_session))
+        .route("/sessions/:id/transcripts", get(session::get_transcripts))
+        .route("/sessions/:id/todos", get(session::get_todo_items))
         // reminders
         .route("/reminders", get(reminder::list_reminders))
         .route("/reminders", post(reminder::create_reminder))
-        .route("/reminders/{id}", get(reminder::get_reminder))
-        .route("/reminders/{id}", patch(reminder::patch_reminder))
-        .route("/reminders/{id}", delete(reminder::delete_reminder))
+        .route("/reminders/:id", get(reminder::get_reminder))
+        .route("/reminders/:id", patch(reminder::patch_reminder))
+        .route("/reminders/:id", delete(reminder::delete_reminder))
         // labels
         .route("/labels", get(label::list_labels))
         .route("/labels", post(label::create_label))
-        .route("/labels/{id}", patch(label::patch_label))
-        .route("/labels/{id}", delete(label::delete_label))
+        .route("/labels/:id", patch(label::patch_label))
+        .route("/labels/:id", delete(label::delete_label))
         // speakers
         .route("/speakers", post(session::create_speaker))
         .route("/speakers", get(session::list_speakers))
-        .route("/speakers/{id}", patch(session::update_speaker))
-        .route("/speakers/{id}", delete(session::delete_speaker))
-        // docs
-        .route("/api-docs/openapi.json", get(openapi))
+        .route("/speakers/:id", patch(session::update_speaker))
+        .route("/speakers/:id", delete(session::delete_speaker))
         .route("/ws", get(ws::ws_session))
         .with_state(state)
-        .merge(SwaggerUi::new("/docs"))
+        .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthSummary> {
@@ -105,6 +103,4 @@ async fn health(State(state): State<AppState>) -> Json<HealthSummary> {
     })
 }
 
-async fn openapi() -> Json<utoipa::openapi::OpenApi> {
-    Json(ApiDoc::openapi())
-}
+
