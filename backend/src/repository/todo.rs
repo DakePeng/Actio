@@ -4,10 +4,10 @@ use uuid::Uuid;
 use crate::domain::types::TodoItem;
 use crate::domain::types::NewTodo;
 
-/// Check if any todos already exist for a session (idempotency guard)
+/// Check if any reminders already exist for a session (idempotency guard).
 pub async fn has_todos(pool: &PgPool, session_id: Uuid) -> Result<bool, sqlx::Error> {
     let row: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM todos WHERE session_id = $1)"
+        "SELECT EXISTS(SELECT 1 FROM reminders WHERE session_id = $1)"
     )
     .bind(session_id)
     .fetch_one(pool)
@@ -15,7 +15,7 @@ pub async fn has_todos(pool: &PgPool, session_id: Uuid) -> Result<bool, sqlx::Er
     Ok(row.0)
 }
 
-/// Batch insert todos in individual queries (idempotent via ON CONFLICT)
+/// Batch insert reminders — used by the backward-compat alias route.
 pub async fn create_todos(
     pool: &PgPool,
     items: &[NewTodo],
@@ -28,7 +28,7 @@ pub async fn create_todos(
 
     for item in items {
         let row: Option<TodoItem> = sqlx::query_as(
-            "INSERT INTO todos (session_id, speaker_id, assigned_to, description, priority) \
+            "INSERT INTO reminders (session_id, speaker_id, assigned_to, description, priority) \
              VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (session_id, description) DO NOTHING \
              RETURNING *"
@@ -49,13 +49,13 @@ pub async fn create_todos(
     Ok(results)
 }
 
-/// Get all todos for a session
+/// Get all reminders for a session — used by the backward-compat alias route.
 pub async fn get_todos_for_session(
     pool: &PgPool,
     session_id: Uuid,
 ) -> Result<Vec<TodoItem>, sqlx::Error> {
     sqlx::query_as::<_, TodoItem>(
-        "SELECT * FROM todos WHERE session_id = $1 ORDER BY created_at ASC"
+        "SELECT * FROM reminders WHERE session_id = $1 ORDER BY created_at ASC"
     )
     .bind(session_id)
     .fetch_all(pool)

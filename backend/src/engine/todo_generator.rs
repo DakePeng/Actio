@@ -3,8 +3,8 @@ use tracing::{info, warn, error};
 use uuid::Uuid;
 
 use crate::engine::llm_client::LlmClient;
-use crate::repository::{speaker as speaker_repo, todo as todo_repo, transcript};
-use crate::domain::types::{NewTodo, TodoPriority, Transcript};
+use crate::repository::{speaker as speaker_repo, reminder as reminder_repo, transcript};
+use crate::domain::types::{NewReminder, Transcript};
 
 /// Maximum transcript length before truncation (in characters).
 /// gpt-4o-mini has 128K context, but we cap to control cost.
@@ -16,32 +16,27 @@ pub async fn generate_session_todos(
     session_id: Uuid,
     tenant_id: Uuid,
 ) -> Result<(), anyhow::Error> {
-    info!(?session_id, "Generating todos for session");
+    info!(?session_id, "Generating reminders for session");
 
-    // 1. Fetch transcripts (only final ones, ordered by time)
-    if todo_repo::has_todos(pool, session_id).await? {
-        info!(?session_id, "Todos already exist for session, skipping regeneration");
+    if reminder_repo::has_reminders(pool, session_id).await? {
+        info!(?session_id, "Reminders already exist for session, skipping");
         return Ok(());
     }
 
     let transcripts = transcript::get_final_transcripts_for_session(pool, session_id).await?;
     if transcripts.is_empty() {
-        info!(?session_id, "No transcripts found, skipping todo generation");
+        info!(?session_id, "No transcripts found, skipping reminder generation");
         return Ok(());
     }
 
-    // 2. Build transcript string for the LLM
     let transcript_text = build_transcript_string(&transcripts);
     info!(chars = transcript_text.len(), "Built transcript string");
-
-    // 3. Truncate if needed
     let transcript_text = truncate_transcript(&transcript_text);
 
-    // 4. Call LLM
     let llm_items = match llm_client.generate_todos(transcript_text).await {
         Ok(items) => items,
         Err(e) => {
-            error!(error = %e, "LLM failed for todo generation");
+            error!(error = %e, "LLM failed for reminder generation");
             return Err(e.into());
         }
     };
@@ -51,8 +46,7 @@ pub async fn generate_session_todos(
         return Ok(());
     }
 
-    // 5. Convert to NewTodo, resolve speaker names
-    let mut new_todos = Vec::new();
+    let mut new_reminders = Vec::new();
     for item in &llm_items {
         let speaker_id = if let Some(ref name) = item.speaker_name {
             match resolve_speaker_id(pool, tenant_id, name).await {
@@ -66,28 +60,27 @@ pub async fn generate_session_todos(
             None
         };
 
-        new_todos.push(NewTodo {
-            session_id,
+        new_reminders.push(NewReminder {
+            session_id: Some(session_id),
+            tenant_id,
             speaker_id,
             assigned_to: item.assigned_to.clone(),
+            title: None,
             description: item.description.clone(),
-            priority: item
-                .priority
-                .as_deref()
-                .and_then(TodoPriority::from_llm_label),
+            priority: item.priority.clone(),
+            transcript_excerpt: None,
+            context: None,
+            source_time: None,
         });
     }
 
-    // 6. Batch insert
-    let inserted = todo_repo::create_todos(pool, &new_todos).await?;
-    info!(count = inserted.len(), "Inserted todos into database");
+    let inserted = reminder_repo::create_reminders_batch(pool, &new_reminders).await?;
+    info!(count = inserted.len(), "Inserted reminders into database");
 
     Ok(())
 }
 
 /// Build a human-readable transcript string for the LLM.
-/// Transcript has no speaker_id field, so we use [Unknown] as label.
-/// The LLM will infer speaker assignments from context in the text.
 pub fn build_transcript_string(transcripts: &[Transcript]) -> String {
     transcripts
         .iter()
@@ -101,14 +94,10 @@ pub fn truncate_transcript(text: &str) -> &str {
     if text.len() <= MAX_TRANSCRIPT_CHARS {
         return text;
     }
-
-    // Find the last "\n[" within the limit and truncate there
     let truncated = &text[..MAX_TRANSCRIPT_CHARS];
     if let Some(pos) = truncated.rfind("\n[") {
         return &text[..pos];
     }
-
-    // Fall back: hard cut
     &text[..MAX_TRANSCRIPT_CHARS]
 }
 
@@ -132,8 +121,7 @@ mod tests {
     #[test]
     fn test_truncate_transcript_short_enough() {
         let text = "[Alice]: Hello\n[Bob]: Hi";
-        let result = truncate_transcript(text);
-        assert_eq!(result, text);
+        assert_eq!(truncate_transcript(text), text);
     }
 
     #[test]
@@ -144,23 +132,19 @@ mod tests {
         }
         let result = truncate_transcript(&text);
         assert!(result.len() <= MAX_TRANSCRIPT_CHARS);
-        // Should truncate at a line boundary — the last line may be partial
-        // but should not end mid-word (should be clean cut at \n[ boundary)
         assert!(!result.ends_with("\n["));
     }
 
     #[test]
     fn test_build_transcript_empty() {
         let transcripts: Vec<Transcript> = vec![];
-        let result = build_transcript_string(&transcripts);
-        assert!(result.is_empty());
+        assert!(build_transcript_string(&transcripts).is_empty());
     }
 
     #[test]
     fn test_build_transcript_single_item() {
         use chrono::Utc;
         use uuid::Uuid;
-
         let t = Transcript {
             id: Uuid::nil(),
             session_id: Uuid::nil(),
@@ -172,7 +156,6 @@ mod tests {
             backend_type: "local".to_string(),
             created_at: Utc::now(),
         };
-        let result = build_transcript_string(&[t]);
-        assert_eq!(result, "[Unknown]: Hello world");
+        assert_eq!(build_transcript_string(&[t]), "[Unknown]: Hello world");
     }
 }
