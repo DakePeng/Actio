@@ -54,6 +54,8 @@ export function BoardWindow() {
                   </div>
                 </div>
 
+                <TabBar />
+
                 <div className="desktop-toolbar__actions">
                   <button
                     type="button"
@@ -75,8 +77,6 @@ export function BoardWindow() {
                   </button>
                 </div>
               </div>
-
-              <TabBar />
 
               <div className="desktop-window__body">
                 {activeTab === 'board' && <Board />}
