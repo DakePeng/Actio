@@ -13,10 +13,10 @@ interface CardProps {
 
 export function Card({ reminder, isExpanded, onToggle }: CardProps) {
   const setFilter = useStore((s) => s.setFilter);
-  const markDone = useStore((s) => s.markDone);
+  const archiveReminder = useStore((s) => s.archiveReminder);
   const setPriority = useStore((s) => s.setPriority);
   const setLabels = useStore((s) => s.setLabels);
-  const updateReminder = useStore((s) => s.updateReminder);
+  const updateReminderInline = useStore((s) => s.updateReminderInline);
   const allLabels = useStore((s) => s.labels);
   const setFeedback = useStore((s) => s.setFeedback);
   const highlightedCardId = useStore((s) => s.ui.highlightedCardId);
@@ -46,7 +46,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
     const t = editTitle.trim();
     const d = editDescription.trim();
     if (t !== title || d !== description) {
-      updateReminder(reminder.id, {
+      updateReminderInline(reminder.id, {
         title: t || title,
         description: d,
       });
@@ -112,8 +112,8 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
       dragConstraints={{ left: 0, right: 0 }}
       onDragEnd={(_e, { offset, velocity }) => {
         if (Math.abs(offset.x) > 120 || Math.abs(velocity.x) > 400) {
-          markDone(reminder.id);
-          setFeedback(`Completed: ${title}`);
+          archiveReminder(reminder.id);
+          setFeedback(`Archived: ${title}`);
         }
       }}
     >

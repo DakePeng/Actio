@@ -19,13 +19,13 @@ export function StandbyTray() {
   const setTrayExpanded = useStore((s) => s.setTrayExpanded);
   const setExpandedCard = useStore((s) => s.setExpandedCard);
   const highlightCard = useStore((s) => s.highlightCard);
-  const markDone = useStore((s) => s.markDone);
-  const newCount = reminders.filter((r) => r.isNew).length;
+  const archiveReminder = useStore((s) => s.archiveReminder);
+  const newCount = reminders.filter((r) => r.isNew && r.archivedAt === null).length;
   const [expanded, setExpanded] = useState(false);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
   const topReminders = useMemo(() => {
-    return [...reminders].sort(sortByPriority).slice(0, 6);
+    return [...reminders].filter((r) => r.archivedAt === null).sort(sortByPriority).slice(0, 6);
   }, [reminders]);
 
   useEffect(() => {
@@ -110,7 +110,7 @@ export function StandbyTray() {
             <SwipeActionRow
               key={reminder.id}
               rowId={reminder.id}
-              rightAction={{ label: 'Done', confirmLabel: 'Confirm', onExecute: () => markDone(reminder.id) }}
+              rightAction={{ label: 'Done', confirmLabel: 'Confirm', onExecute: () => archiveReminder(reminder.id) }}
             >
             <motion.button
               key={reminder.id}
