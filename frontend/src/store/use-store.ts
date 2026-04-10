@@ -10,6 +10,7 @@ import type {
   Reminder,
   ReminderDraft,
   ReminderPatch,
+  Tab,
   UIState,
 } from '../types';
 
@@ -37,7 +38,7 @@ interface AppState {
   clearFilter: () => void;
   setBoardWindow: (show: boolean) => void;
   setTrayExpanded: (expanded: boolean) => void;
-  setActiveTab: (tab: 'board' | 'archive' | 'settings') => void;
+  setActiveTab: (tab: Tab) => void;
   setExpandedCard: (id: string | null) => void;
   highlightCard: (id: string | null) => void;
   setNewReminderBar: (show: boolean) => void;
