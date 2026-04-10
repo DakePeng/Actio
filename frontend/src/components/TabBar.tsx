@@ -1,12 +1,14 @@
 import { useStore } from '../store/use-store';
 import { motion } from 'framer-motion';
-
-type Tab = 'board' | 'archive' | 'settings';
+import type { Tab } from '../types';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'board', label: 'Board' },
   { id: 'archive', label: 'Archive' },
   { id: 'settings', label: 'Settings' },
+  { id: 'recording', label: 'Recording' },
+  { id: 'clips', label: 'Clips' },
+  { id: 'people', label: 'People' },
 ];
 
 export function TabBar() {
