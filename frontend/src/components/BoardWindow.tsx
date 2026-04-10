@@ -4,6 +4,9 @@ import { useStore } from '../store/use-store';
 import { Board } from './Board';
 import { ArchiveView } from './ArchiveView';
 import { SettingsView } from './settings/SettingsView';
+import { RecordingTab } from './RecordingTab';
+import { ClipsTab } from './ClipsTab';
+import { PeopleTab } from './PeopleTab';
 import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
 
@@ -82,6 +85,9 @@ export function BoardWindow() {
                 {activeTab === 'board' && <Board />}
                 {activeTab === 'archive' && <ArchiveView />}
                 {activeTab === 'settings' && <SettingsView />}
+                {activeTab === 'recording' && <RecordingTab />}
+                {activeTab === 'clips' && <ClipsTab />}
+                {activeTab === 'people' && <PeopleTab />}
               </div>
               <NewReminderBar />
             </motion.section>
