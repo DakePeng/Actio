@@ -1,7 +1,7 @@
 export type Priority = 'high' | 'medium' | 'low';
 export type ReminderStatus = 'open' | 'completed' | 'archived';
 
-export type Tab = 'board' | 'archive' | 'settings' | 'recording' | 'clips' | 'people';
+export type Tab = 'board' | 'archive' | 'settings' | 'recording' | 'people';
 
 export interface Segment {
   id: string;

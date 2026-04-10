@@ -7,7 +7,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'archive', label: 'Archive' },
   { id: 'settings', label: 'Settings' },
   { id: 'recording', label: 'Recording' },
-  { id: 'clips', label: 'Clips' },
   { id: 'people', label: 'People' },
 ];
 
