@@ -98,7 +98,7 @@ interface VoiceState {
 3. Runs expiration
 4. Clears `liveTranscript`
 
-**On stop:** Any accumulated `liveTranscript` since the last flush is saved as a final partial segment (even if < full interval). Both intervals are cleared. `currentSession` is set to null.
+**On stop:** If `liveTranscript` is non-empty, it is saved as a final partial segment. If empty (recording stopped immediately after a flush), no segment is created. Both intervals are cleared. `currentSession` is set to null.
 
 Both intervals are created on `startRecording` and cleared on `stopRecording` or component unmount.
 
@@ -117,6 +117,8 @@ A scrollable list of `Segment` entries, newest first.
 - Delete button (trash icon) — removes segment immediately
 
 No batch operations, no search, no reordering.
+
+**Automatic pruning:** The store keeps all starred segments plus the 30 most recent unstarred segments. Pruning runs silently after each new segment is added — the user sees no notification.
 
 ---
 
