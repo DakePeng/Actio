@@ -30,8 +30,8 @@ export function LabelManager() {
 
   useEffect(() => {
     if (!showColorWheel) return;
-    const handler = (e: MouseEvent) => {
-      if (colorWheelRef.current && !colorWheelRef.current.contains(e.target as Node)) {
+    const handler = (event: MouseEvent) => {
+      if (colorWheelRef.current && !colorWheelRef.current.contains(event.target as Node)) {
         setShowColorWheel(false);
       }
     };
@@ -39,14 +39,17 @@ export function LabelManager() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showColorWheel]);
 
-  const usedColors = new Set(labels.map((l) => l.color));
-  const availableColors = PALETTE.filter((p) => !usedColors.has(p.c));
+  const usedColors = new Set(labels.map((label) => label.color));
+  const availableColors = PALETTE.filter((palette) => !usedColors.has(palette.c));
 
-  const handleAddLabel = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddLabel = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!newLabelText.trim()) return;
-    if (!newLabelColor) { setColorError(true); return; }
-    addLabel({ name: newLabelText.trim(), color: newLabelColor.c, bgColor: newLabelColor.b });
+    if (!newLabelColor) {
+      setColorError(true);
+      return;
+    }
+    await addLabel({ name: newLabelText.trim(), color: newLabelColor.c, bgColor: newLabelColor.b });
     setNewLabelText('');
     setNewLabelColor(null);
     setColorError(false);
@@ -78,7 +81,7 @@ export function LabelManager() {
             <button
               type="button"
               aria-label={`Delete ${label.name}`}
-              onClick={() => deleteLabel(label.id)}
+              onClick={() => void deleteLabel(label.id)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', marginLeft: '2px', lineHeight: 1, fontSize: '14px', color: 'inherit', opacity: 0.7, display: 'inline-flex', alignItems: 'center' }}
             >
               ×
@@ -87,27 +90,38 @@ export function LabelManager() {
         ))}
       </div>
 
-      <form onSubmit={handleAddLabel} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <form onSubmit={(event) => void handleAddLabel(event)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <div ref={colorWheelRef} style={{ position: 'relative', marginTop: '5px' }}>
           <button
             type="button"
-            onClick={() => { setShowColorWheel((v) => !v); setColorError(false); }}
+            onClick={() => {
+              setShowColorWheel((value) => !value);
+              setColorError(false);
+            }}
             aria-label="Choose color"
             style={{
-              width: '28px', height: '28px', borderRadius: '50%',
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
               background: newLabelColor ? newLabelColor.c : '#fff',
-              border: colorError ? '2px solid #dc2626' : newLabelColor ? '2px solid rgba(0,0,0,0.12)' : '2px dashed rgba(0,0,0,0.25)',
-              cursor: 'pointer', padding: 0, flexShrink: 0,
+              border: colorError
+                ? '2px solid #dc2626'
+                : newLabelColor
+                  ? '2px solid rgba(0,0,0,0.12)'
+                  : '2px dashed rgba(0,0,0,0.25)',
+              cursor: 'pointer',
+              padding: 0,
+              flexShrink: 0,
               boxShadow: showColorWheel ? '0 0 0 3px rgba(0,0,0,0.12)' : 'none',
               transition: 'box-shadow 0.15s, border-color 0.15s',
             }}
           />
           <AnimatePresence>
             {showColorWheel && (() => {
-              const RADIUS = 42;
-              const DOT = 22;
-              const n = availableColors.length;
-              const offset = RADIUS + DOT / 2 + 4;
+              const radius = 42;
+              const dot = 22;
+              const count = availableColors.length;
+              const offset = radius + dot / 2 + 4;
               return (
                 <motion.div
                   key="colorwheel"
@@ -118,22 +132,33 @@ export function LabelManager() {
                   style={{ position: 'absolute', left: `${14 - offset}px`, top: `${14 - offset}px`, width: `${offset * 2}px`, height: `${offset * 2}px`, zIndex: 200, pointerEvents: 'none', transformOrigin: `${offset}px ${offset}px` }}
                 >
                   <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--color-surface, #fff)', boxShadow: '0 8px 32px rgba(0,0,0,0.16)', border: '1px solid rgba(0,0,0,0.07)', pointerEvents: 'auto' }} />
-                  {availableColors.map((p, i) => {
-                    const angle = (2 * Math.PI * i) / n - Math.PI / 2;
-                    const cx = offset + RADIUS * Math.cos(angle);
-                    const cy = offset + RADIUS * Math.sin(angle);
-                    const isChosen = newLabelColor?.c === p.c;
+                  {availableColors.map((palette, index) => {
+                    const angle = (2 * Math.PI * index) / count - Math.PI / 2;
+                    const cx = offset + radius * Math.cos(angle);
+                    const cy = offset + radius * Math.sin(angle);
+                    const isChosen = newLabelColor?.c === palette.c;
                     return (
                       <button
-                        key={p.c}
+                        key={palette.c}
                         type="button"
-                        aria-label={`Pick color ${p.c}`}
-                        onClick={() => { setNewLabelColor(p); setShowColorWheel(false); setColorError(false); }}
+                        aria-label={`Pick color ${palette.c}`}
+                        onClick={() => {
+                          setNewLabelColor(palette);
+                          setShowColorWheel(false);
+                          setColorError(false);
+                        }}
                         style={{
-                          position: 'absolute', left: `${cx - DOT / 2}px`, top: `${cy - DOT / 2}px`,
-                          width: `${DOT}px`, height: `${DOT}px`, borderRadius: '50%', background: p.c,
+                          position: 'absolute',
+                          left: `${cx - dot / 2}px`,
+                          top: `${cy - dot / 2}px`,
+                          width: `${dot}px`,
+                          height: `${dot}px`,
+                          borderRadius: '50%',
+                          background: palette.c,
                           border: isChosen ? '3px solid var(--color-text-primary)' : '2px solid rgba(255,255,255,0.7)',
-                          cursor: 'pointer', padding: 0, pointerEvents: 'auto',
+                          cursor: 'pointer',
+                          padding: 0,
+                          pointerEvents: 'auto',
                           boxShadow: isChosen ? '0 0 0 1px rgba(0,0,0,0.25)' : '0 1px 4px rgba(0,0,0,0.18)',
                           transition: 'transform 0.1s, box-shadow 0.1s',
                           transform: isChosen ? 'scale(1.25)' : 'scale(1)',
@@ -150,7 +175,7 @@ export function LabelManager() {
         <input
           type="text"
           value={newLabelText}
-          onChange={(e) => setNewLabelText(e.target.value)}
+          onChange={(event) => setNewLabelText(event.target.value)}
           placeholder="Label name…"
           className="filter-chip"
           style={{ maxWidth: '160px', padding: '0 12px', outline: 'none', cursor: 'text' }}

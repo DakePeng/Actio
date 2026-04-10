@@ -1,4 +1,5 @@
 import { useStore } from '../store/use-store';
+import { motion } from 'framer-motion';
 
 type Tab = 'board' | 'archive' | 'settings';
 
@@ -14,18 +15,29 @@ export function TabBar() {
 
   return (
     <div className="tab-bar" role="tablist" aria-label="Board navigation">
-      {TABS.map(({ id, label }) => (
-        <button
-          key={id}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === id}
-          className={`tab-bar__tab${activeTab === id ? ' is-active' : ''}`}
-          onClick={() => setActiveTab(id)}
-        >
-          {label}
-        </button>
-      ))}
+      {TABS.map(({ id, label }) => {
+        const isActive = activeTab === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            className={`tab-bar__tab${isActive ? ' is-active' : ''}`}
+            onClick={() => setActiveTab(id)}
+          >
+            {label}
+            {isActive && (
+              <motion.div
+                layoutId="tabBarIndicator"
+                className="tab-bar__indicator"
+                initial={false}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

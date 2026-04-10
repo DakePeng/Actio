@@ -1,4 +1,5 @@
 export type Priority = 'high' | 'medium' | 'low';
+export type ReminderStatus = 'open' | 'completed' | 'archived';
 
 export interface Reminder {
   id: string;
@@ -15,11 +16,74 @@ export interface Reminder {
   archivedAt: string | null;
 }
 
+export interface ReminderDraft {
+  title: string;
+  description: string;
+  priority: Priority;
+  dueTime?: string;
+  labels: string[];
+  transcript?: string;
+  context?: string;
+  sourceTime?: string;
+  createdAt: string;
+  archivedAt: string | null;
+}
+
+export interface ReminderPatch {
+  title?: string;
+  description?: string;
+  priority?: Priority;
+  dueTime?: string;
+  labels?: string[];
+  status?: ReminderStatus;
+}
+
 export interface Label {
   id: string;
   name: string;
   color: string;
   bgColor: string;
+}
+
+export interface LabelDraft {
+  name: string;
+  color: string;
+  bgColor: string;
+}
+
+export interface LabelPatch {
+  name?: string;
+  color?: string;
+  bgColor?: string;
+}
+
+export interface BackendReminderDto {
+  id: string;
+  session_id: string | null;
+  tenant_id: string;
+  speaker_id: string | null;
+  assigned_to: string | null;
+  title: string | null;
+  description: string;
+  status: ReminderStatus;
+  priority: Priority | null;
+  due_time: string | null;
+  archived_at: string | null;
+  transcript_excerpt: string | null;
+  context: string | null;
+  source_time: string | null;
+  labels: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackendLabelDto {
+  id: string;
+  tenant_id: string;
+  name: string;
+  color: string;
+  bg_color: string;
+  created_at: string;
 }
 
 export interface FilterState {

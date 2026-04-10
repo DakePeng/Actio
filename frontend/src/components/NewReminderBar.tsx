@@ -19,8 +19,8 @@ export function NewReminderBar() {
   }, [show]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
         setNewReminderBar(false);
       }
     };
@@ -35,9 +35,9 @@ export function NewReminderBar() {
     setNewReminderBar(false);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!title.trim()) return;
-    addReminder({
+    await addReminder({
       title: title.trim(),
       description: description.trim(),
       dueTime: dueTime.trim() || undefined,
@@ -52,10 +52,10 @@ export function NewReminderBar() {
     setNewReminderBar(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
-      handleSubmit();
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      void handleSubmit();
     }
   };
 
@@ -94,7 +94,7 @@ export function NewReminderBar() {
                     type="text"
                     placeholder="What needs attention?"
                     value={title}
-                    onChange={(e) => setTitle(e.target.value)}
+                    onChange={(event) => setTitle(event.target.value)}
                     onKeyDown={handleKeyDown}
                     className="field-input"
                   />
@@ -105,7 +105,7 @@ export function NewReminderBar() {
                     rows={2}
                     placeholder="Optional context, owner, or timing"
                     value={description}
-                    onChange={(e) => setDescription(e.target.value)}
+                    onChange={(event) => setDescription(event.target.value)}
                     onKeyDown={handleKeyDown}
                     className="field-input"
                   />
@@ -114,9 +114,9 @@ export function NewReminderBar() {
                   <span className="field-label">Due time</span>
                   <input
                     type="text"
-                    placeholder="e.g. 3pm, tomorrow 9am"
+                    placeholder="e.g. 2026-04-09T18:30:00Z"
                     value={dueTime}
-                    onChange={(e) => setDueTime(e.target.value)}
+                    onChange={(event) => setDueTime(event.target.value)}
                     onKeyDown={handleKeyDown}
                     className="field-input"
                   />
@@ -125,7 +125,7 @@ export function NewReminderBar() {
                   <button type="button" onClick={handleClose} className="secondary-button">
                     Cancel
                   </button>
-                  <button type="button" onClick={handleSubmit} disabled={!title.trim()} className="primary-button">
+                  <button type="button" onClick={() => void handleSubmit()} disabled={!title.trim()} className="primary-button">
                     Add reminder
                   </button>
                 </div>

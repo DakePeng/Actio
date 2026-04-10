@@ -1,6 +1,17 @@
 import { create } from 'zustand';
-import type { Reminder, FilterState, UIState, Label, Priority, Profile, Preferences } from '../types';
-import { BUILTIN_LABELS } from '../utils/labels';
+import { createActioApiClient } from '../api/actio-api';
+import type {
+  FilterState,
+  Label,
+  LabelDraft,
+  Preferences,
+  Priority,
+  Profile,
+  Reminder,
+  ReminderDraft,
+  ReminderPatch,
+  UIState,
+} from '../types';
 
 interface AppState {
   reminders: Reminder[];
@@ -10,17 +21,18 @@ interface AppState {
   profile: Profile;
   preferences: Preferences;
 
+  loadBoard: () => Promise<void>;
   setReminders: (reminders: Reminder[]) => void;
-  addReminder: (reminder: Omit<Reminder, 'id' | 'isNew'>) => void;
-  updateReminderInline: (id: string, patch: Partial<Pick<Reminder, 'title' | 'description' | 'dueTime'>>) => void;
-  addLabel: (label: Omit<Label, 'id'>) => void;
-  deleteLabel: (id: string) => void;
-  updateLabelInline: (id: string, patch: Partial<Pick<Label, 'name' | 'color' | 'bgColor'>>) => void;
-  archiveReminder: (id: string) => void;
-  restoreReminder: (id: string) => void;
-  deleteReminder: (id: string) => void;
-  setPriority: (id: string, priority: Priority) => void;
-  setLabels: (id: string, labels: string[]) => void;
+  addReminder: (reminder: ReminderDraft) => Promise<void>;
+  updateReminderInline: (id: string, patch: Partial<Pick<Reminder, 'title' | 'description' | 'dueTime'>>) => Promise<void>;
+  addLabel: (label: LabelDraft) => Promise<void>;
+  deleteLabel: (id: string) => Promise<void>;
+  updateLabelInline: (id: string, patch: Partial<Pick<Label, 'name' | 'color' | 'bgColor'>>) => Promise<void>;
+  archiveReminder: (id: string) => Promise<void>;
+  restoreReminder: (id: string) => Promise<void>;
+  deleteReminder: (id: string) => Promise<void>;
+  setPriority: (id: string, priority: Priority) => Promise<void>;
+  setLabels: (id: string, labels: string[]) => Promise<void>;
   setFilter: (filter: Partial<FilterState>) => void;
   clearFilter: () => void;
   setBoardWindow: (show: boolean) => void;
@@ -38,8 +50,8 @@ interface AppState {
   reset: () => void;
 }
 
+const api = createActioApiClient();
 const initialFilter: FilterState = { priority: null, label: null, search: '' };
-
 const defaultProfile: Profile = { name: '', initials: 'JD' };
 const defaultPreferences: Preferences = { theme: 'system', launchAtLogin: false, notifications: true };
 
@@ -77,8 +89,9 @@ function filterReminders(reminders: Reminder[], filter: FilterState) {
     if (filter.label && !r.labels.includes(filter.label)) return false;
     if (filter.search) {
       const q = filter.search.toLowerCase();
-      if (!r.title.toLowerCase().includes(q) && !r.description.toLowerCase().includes(q))
+      if (!r.title.toLowerCase().includes(q) && !r.description.toLowerCase().includes(q)) {
         return false;
+      }
     }
     return true;
   });
@@ -100,82 +113,161 @@ function pushFeedback(
   }, 2200);
 }
 
+function upsertReminder(reminders: Reminder[], next: Reminder) {
+  const existingIndex = reminders.findIndex((item) => item.id === next.id);
+  if (existingIndex === -1) {
+    return [next, ...reminders];
+  }
+
+  return reminders.map((item) => (item.id === next.id ? next : item));
+}
+
+function replaceLabel(labels: Label[], next: Label) {
+  const existingIndex = labels.findIndex((item) => item.id === next.id);
+  if (existingIndex === -1) {
+    return [...labels, next].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  return labels
+    .map((item) => (item.id === next.id ? next : item))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function asReminderPatch(patch: Partial<Pick<Reminder, 'title' | 'description' | 'dueTime'>>): ReminderPatch {
+  return {
+    title: patch.title,
+    description: patch.description,
+    dueTime: patch.dueTime,
+  };
+}
+
 export const useStore = create<AppState>((set) => ({
   reminders: [],
-  labels: [...BUILTIN_LABELS],
+  labels: [],
   filter: initialFilter,
   ui: initialUI,
   profile: loadProfile(),
   preferences: loadPreferences(),
 
+  loadBoard: async () => {
+    try {
+      const [labels, reminders] = await Promise.all([api.listLabels(), api.listReminders()]);
+      set({ labels, reminders });
+    } catch {
+      set({ labels: [], reminders: [] });
+      pushFeedback(set, 'Unable to load reminders from the backend');
+    }
+  },
+
   setReminders: (reminders) => set({ reminders }),
 
-  addReminder: (reminder) => {
-    set((state) => ({
-      reminders: [...state.reminders, { ...reminder, id: crypto.randomUUID(), isNew: true }],
-    }));
-    pushFeedback(set, 'Reminder added to the board', 'success');
+  addReminder: async (reminder) => {
+    try {
+      const created = await api.createReminder(reminder);
+      set((state) => ({ reminders: upsertReminder(state.reminders, { ...created, isNew: true }) }));
+      pushFeedback(set, 'Reminder added to the board', 'success');
+    } catch {
+      pushFeedback(set, 'Unable to save reminder right now');
+    }
   },
 
-  updateReminderInline: (id, patch) => {
-    set((state) => ({
-      reminders: state.reminders.map((r) => (r.id === id ? { ...r, ...patch } : r)),
-    }));
+  updateReminderInline: async (id, patch) => {
+    try {
+      const updated = await api.updateReminder(id, asReminderPatch(patch));
+      set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
+    } catch {
+      pushFeedback(set, 'Unable to update reminder right now');
+    }
   },
 
-  addLabel: (label) => {
-    set((state) => ({ labels: [...state.labels, { ...label, id: crypto.randomUUID() }] }));
-    pushFeedback(set, 'Label created', 'success');
+  addLabel: async (label) => {
+    try {
+      const created = await api.createLabel(label);
+      set((state) => ({ labels: replaceLabel(state.labels, created) }));
+      pushFeedback(set, 'Label created', 'success');
+    } catch {
+      pushFeedback(set, 'Unable to create label right now');
+    }
   },
 
-  deleteLabel: (id) => {
-    set((state) => ({
-      labels: state.labels.filter((l) => l.id !== id),
-      reminders: state.reminders.map((r) => ({ ...r, labels: r.labels.filter((lId) => lId !== id) })),
-      filter: state.filter.label === id ? { ...state.filter, label: null } : state.filter,
-    }));
-    pushFeedback(set, 'Label deleted', 'neutral');
+  deleteLabel: async (id) => {
+    try {
+      await api.deleteLabel(id);
+      set((state) => ({
+        labels: state.labels.filter((label) => label.id !== id),
+        reminders: state.reminders.map((reminder) => ({
+          ...reminder,
+          labels: reminder.labels.filter((labelId) => labelId !== id),
+        })),
+        filter: state.filter.label === id ? { ...state.filter, label: null } : state.filter,
+      }));
+      pushFeedback(set, 'Label deleted', 'neutral');
+    } catch {
+      pushFeedback(set, 'Unable to delete label right now');
+    }
   },
 
-  updateLabelInline: (id, patch) => {
-    set((state) => ({
-      labels: state.labels.map((l) => (l.id === id ? { ...l, ...patch } : l)),
-    }));
+  updateLabelInline: async (id, patch) => {
+    try {
+      const updated = await api.updateLabel(id, {
+        name: patch.name,
+        color: patch.color,
+        bgColor: patch.bgColor,
+      });
+      set((state) => ({ labels: replaceLabel(state.labels, updated) }));
+    } catch {
+      pushFeedback(set, 'Unable to update label right now');
+    }
   },
 
-  archiveReminder: (id) => {
-    set((state) => ({
-      reminders: state.reminders.map((r) =>
-        r.id === id ? { ...r, archivedAt: new Date().toISOString() } : r,
-      ),
-    }));
-    pushFeedback(set, 'Reminder archived', 'neutral');
+  archiveReminder: async (id) => {
+    try {
+      const updated = await api.updateReminder(id, { status: 'archived' });
+      set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
+      pushFeedback(set, 'Reminder archived', 'neutral');
+    } catch {
+      pushFeedback(set, 'Unable to archive reminder right now');
+    }
   },
 
-  restoreReminder: (id) => {
-    set((state) => ({
-      reminders: state.reminders.map((r) => (r.id === id ? { ...r, archivedAt: null } : r)),
-    }));
-    pushFeedback(set, 'Restored to board', 'success');
+  restoreReminder: async (id) => {
+    try {
+      const updated = await api.updateReminder(id, { status: 'open' });
+      set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
+      pushFeedback(set, 'Restored to board', 'success');
+    } catch {
+      pushFeedback(set, 'Unable to restore reminder right now');
+    }
   },
 
-  deleteReminder: (id) => {
-    set((state) => ({ reminders: state.reminders.filter((r) => r.id !== id) }));
-    pushFeedback(set, 'Deleted permanently', 'neutral');
+  deleteReminder: async (id) => {
+    try {
+      await api.deleteReminder(id);
+      set((state) => ({ reminders: state.reminders.filter((reminder) => reminder.id !== id) }));
+      pushFeedback(set, 'Deleted permanently', 'neutral');
+    } catch {
+      pushFeedback(set, 'Unable to delete reminder right now');
+    }
   },
 
-  setPriority: (id, priority) => {
-    set((state) => ({
-      reminders: state.reminders.map((r) => (r.id === id ? { ...r, priority } : r)),
-    }));
-    pushFeedback(set, `Priority set to ${priority}`, 'success');
+  setPriority: async (id, priority) => {
+    try {
+      const updated = await api.updateReminder(id, { priority });
+      set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
+      pushFeedback(set, `Priority set to ${priority}`, 'success');
+    } catch {
+      pushFeedback(set, 'Unable to update priority right now');
+    }
   },
 
-  setLabels: (id, labels) => {
-    set((state) => ({
-      reminders: state.reminders.map((r) => (r.id === id ? { ...r, labels } : r)),
-    }));
-    pushFeedback(set, 'Labels updated', 'success');
+  setLabels: async (id, labels) => {
+    try {
+      const updated = await api.updateReminder(id, { labels });
+      set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
+      pushFeedback(set, 'Labels updated', 'success');
+    } catch {
+      pushFeedback(set, 'Unable to update labels right now');
+    }
   },
 
   setFilter: (filter) => set((state) => ({ filter: { ...state.filter, ...filter } })),
@@ -210,7 +302,10 @@ export const useStore = create<AppState>((set) => ({
   setExpandedCard: (id) => set((state) => ({ ui: { ...state.ui, expandedCardId: id } })),
 
   highlightCard: (id) => {
-    if (highlightTimer) { window.clearTimeout(highlightTimer); highlightTimer = null; }
+    if (highlightTimer) {
+      window.clearTimeout(highlightTimer);
+      highlightTimer = null;
+    }
     set((state) => ({ ui: { ...state.ui, highlightedCardId: id } }));
     if (id) {
       highlightTimer = window.setTimeout(() => {
@@ -227,16 +322,23 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({ ui: { ...state.ui, hasSeenOnboarding: seen } }));
   },
 
-  setFeedback: (message, tone = 'neutral') => { pushFeedback(set, message, tone); },
+  setFeedback: (message, tone = 'neutral') => {
+    pushFeedback(set, message, tone);
+  },
 
   clearFeedback: () => {
-    if (feedbackTimer) { window.clearTimeout(feedbackTimer); feedbackTimer = null; }
+    if (feedbackTimer) {
+      window.clearTimeout(feedbackTimer);
+      feedbackTimer = null;
+    }
     set((state) => ({ ui: { ...state.ui, feedback: null } }));
   },
 
   clearNewFlag: (id) =>
     set((state) => ({
-      reminders: state.reminders.map((r) => (r.id === id ? { ...r, isNew: false } : r)),
+      reminders: state.reminders.map((reminder) =>
+        reminder.id === id ? { ...reminder, isNew: false } : reminder,
+      ),
     })),
 
   setProfile: (patch) => {
@@ -255,12 +357,11 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  reset: () => set({ reminders: [], labels: [...BUILTIN_LABELS], filter: initialFilter, ui: initialUI }),
+  reset: () => set({ reminders: [], labels: [], filter: initialFilter, ui: initialUI, profile: loadProfile(), preferences: loadPreferences() }),
 }));
 
-// Convenience selector — call inside component, not in selector callback
 export function useFilteredReminders() {
-  const reminders = useStore((s) => s.reminders);
-  const filter = useStore((s) => s.filter);
+  const reminders = useStore((state) => state.reminders);
+  const filter = useStore((state) => state.filter);
   return filterReminders(reminders, filter);
 }

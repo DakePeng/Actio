@@ -9,8 +9,10 @@ mod repository;
 use std::sync::Arc;
 
 use anyhow;
+use axum::http::{HeaderName, Method};
 use sqlx::PgPool;
 use tokio::sync::Mutex;
+use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 
 use crate::config::{Config, LlmConfig};
@@ -89,7 +91,18 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Build and start HTTP server
-    let app = api::router(state);
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "http://localhost:1420".parse().unwrap(),
+            "http://127.0.0.1:1420".parse().unwrap(),
+        ])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_headers([
+            HeaderName::from_static("content-type"),
+            HeaderName::from_static("x-tenant-id"),
+        ]);
+
+    let app = api::router(state).layer(cors);
     let addr = format!("0.0.0.0:{}", config.http_port);
     info!(%addr, "Starting HTTP server");
 

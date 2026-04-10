@@ -4,43 +4,18 @@ import { BoardWindow } from './components/BoardWindow';
 import { FeedbackToast } from './components/FeedbackToast';
 import { StandbyTray } from './components/StandbyTray';
 import { OnboardingCard } from './components/OnboardingCard';
-import { MOCK_REMINDERS } from './tauri/mock-data';
-import type { Reminder } from './types';
 
 export default function App() {
   const hasSeenOnboarding = useStore((s) => s.ui.hasSeenOnboarding);
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
   const trayExpanded = useStore((s) => s.ui.trayExpanded);
   const reminders = useStore((s) => s.reminders);
-  const setReminders = useStore((s) => s.setReminders);
+  const loadBoard = useStore((s) => s.loadBoard);
   const theme = useStore((s) => s.preferences.theme);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadReminders = async () => {
-      try {
-        const response = await fetch('http://localhost:3001/reminders');
-        if (!response.ok) {
-          throw new Error(`Mock API returned ${response.status}`);
-        }
-        const reminders = (await response.json()) as Reminder[];
-        if (!cancelled) {
-          setReminders(reminders);
-        }
-      } catch {
-        if (!cancelled) {
-          setReminders(MOCK_REMINDERS);
-        }
-      }
-    };
-
-    void loadReminders();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [setReminders]);
+    void loadBoard();
+  }, [loadBoard]);
 
   useEffect(() => {
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

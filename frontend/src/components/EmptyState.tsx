@@ -1,4 +1,14 @@
-export function EmptyState({ hasFilters }: { hasFilters?: boolean }) {
+import React from 'react';
+
+type EmptyStateProps = {
+  hasFilters?: boolean;
+  title?: string;
+  description?: string;
+  eyebrow?: string;
+  icon?: React.ReactNode;
+};
+
+export function EmptyState({ hasFilters, title, description, eyebrow, icon }: EmptyStateProps) {
   if (hasFilters) {
     return (
       <div className="empty-shell">
@@ -16,12 +26,12 @@ export function EmptyState({ hasFilters }: { hasFilters?: boolean }) {
     <div className="empty-shell">
       <div className="empty-shell__inner">
         <div className="empty-shell__mark" aria-hidden="true">
-          <div className="empty-pulse" />
+          {icon || <div className="empty-pulse" />}
         </div>
-        <div className="empty-shell__eyebrow">All caught up</div>
-        <h2 className="empty-shell__title">The board is clear for now.</h2>
+        <div className="empty-shell__eyebrow">{eyebrow || 'All caught up'}</div>
+        <h2 className="empty-shell__title">{title || 'The board is clear for now.'}</h2>
         <p className="empty-shell__copy">
-          Capture a new task to refill the board.
+          {description || 'Capture a new task to refill the board.'}
         </p>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useStore } from '../store/use-store';
+import { EmptyState } from './EmptyState';
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -24,35 +25,46 @@ export function ArchiveView() {
     .sort((a, b) => new Date(b.archivedAt!).getTime() - new Date(a.archivedAt!).getTime());
 
   if (archived.length === 0) {
-    return <div className="archive-empty"><p>Nothing archived yet.</p></div>;
+    return (
+      <EmptyState
+        title="Archive is empty"
+        description="Deleted or archived notes will appear here."
+        eyebrow="Clean Slate"
+        icon={
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+            <path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
+          </svg>
+        }
+      />
+    );
   }
 
   return (
     <div className="archive-list">
-      {archived.map((r) => {
-        const colors = PRIORITY_COLORS[r.priority ?? 'medium'];
+      {archived.map((reminder) => {
+        const colors = PRIORITY_COLORS[reminder.priority ?? 'medium'];
         return (
-          <div key={r.id} className="archive-row">
+          <div key={reminder.id} className="archive-row">
             <span
               className="card-badge"
               style={{ background: colors.bg, color: colors.text, flexShrink: 0 }}
             >
               {colors.label}
             </span>
-            <span className="archive-row__title">{r.title}</span>
-            <span className="archive-row__date">{formatDate(r.archivedAt!)}</span>
+            <span className="archive-row__title">{reminder.title}</span>
+            <span className="archive-row__date">{formatDate(reminder.archivedAt!)}</span>
             <div className="archive-row__actions">
               <button
                 type="button"
                 className="ghost-button"
-                onClick={() => restoreReminder(r.id)}
+                onClick={() => void restoreReminder(reminder.id)}
               >
                 Restore
               </button>
               <button
                 type="button"
                 className="ghost-button archive-row__delete"
-                onClick={() => deleteReminder(r.id)}
+                onClick={() => void deleteReminder(reminder.id)}
               >
                 Delete
               </button>

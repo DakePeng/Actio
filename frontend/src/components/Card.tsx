@@ -42,11 +42,11 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
   useEffect(() => { setEditDescription(description); }, [description]);
 
   // Commit edits on blur / on collapse
-  const commitEdits = () => {
+  const commitEdits = async () => {
     const t = editTitle.trim();
     const d = editDescription.trim();
     if (t !== title || d !== description) {
-      updateReminderInline(reminder.id, {
+      await updateReminderInline(reminder.id, {
         title: t || title,
         description: d,
       });
@@ -54,7 +54,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
   };
 
   useEffect(() => {
-    if (!isExpanded) commitEdits();
+    if (!isExpanded) void commitEdits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isExpanded]);
 
@@ -112,7 +112,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
       dragConstraints={{ left: 0, right: 0 }}
       onDragEnd={(_e, { offset, velocity }) => {
         if (Math.abs(offset.x) > 120 || Math.abs(velocity.x) > 400) {
-          archiveReminder(reminder.id);
+          void archiveReminder(reminder.id);
           setFeedback(`Archived: ${title}`);
         }
       }}
@@ -158,7 +158,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
               className="card-title card-editable"
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
-              onBlur={commitEdits}
+              onBlur={() => void commitEdits()}
               onPointerDown={stopDrag}
               onClick={(e) => e.stopPropagation()}
               placeholder="Reminder title"
@@ -174,7 +174,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
               className="card-description card-editable"
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
-              onBlur={commitEdits}
+              onBlur={() => void commitEdits()}
               onPointerDown={stopDrag}
               onClick={(e) => e.stopPropagation()}
               rows={3}
@@ -276,7 +276,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
                           type="button"
                           className={`priority-btn${isActive ? ' is-active' : ''}`}
                           style={isActive ? { background: colors.bg, color: colors.text } : undefined}
-                          onClick={() => setPriority(reminder.id, opt.value)}
+                          onClick={() => void setPriority(reminder.id, opt.value)}
                         >
                           {opt.label}
                         </button>
@@ -302,7 +302,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
                           <button
                             type="button"
                             aria-label={`Remove ${label.name}`}
-                            onClick={() => setLabels(reminder.id, labels.filter((id) => id !== labelId))}
+                            onClick={() => void setLabels(reminder.id, labels.filter((id) => id !== labelId))}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1, color: 'inherit', opacity: 0.7 }}
                           >
                             ×
@@ -332,7 +332,7 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
                             role="option"
                             className="label-add-dropdown__item"
                             onClick={() => {
-                              setLabels(reminder.id, [...labels, label.id]);
+                              void setLabels(reminder.id, [...labels, label.id]);
                               setLabelDropdownOpen(false);
                             }}
                           >
