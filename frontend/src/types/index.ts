@@ -1,6 +1,23 @@
 export type Priority = 'high' | 'medium' | 'low';
 export type ReminderStatus = 'open' | 'completed' | 'archived';
 
+export type Tab = 'board' | 'archive' | 'settings' | 'recording' | 'clips' | 'people';
+
+export interface Segment {
+  id: string;
+  sessionId: string;
+  text: string;
+  createdAt: string; // ISO 8601
+  starred: boolean;
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  color: string; // hex, from preset swatches
+  createdAt: string; // ISO 8601
+}
+
 export interface Reminder {
   id: string;
   title: string;
@@ -110,7 +127,7 @@ export interface UIState {
   highlightedCardId: string | null;
   showNewReminderBar: boolean;
   hasSeenOnboarding: boolean;
-  activeTab: 'board' | 'archive' | 'settings';
+  activeTab: Tab;
   feedback: {
     message: string;
     tone: 'neutral' | 'success';
