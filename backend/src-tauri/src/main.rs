@@ -136,24 +136,34 @@ fn apply_window_mode(
     clear_window_compositor_effects(window)?;
     set_window_background_transparent(window)?;
 
+    // Ensure native fullscreen is OFF — we emulate fullscreen manually to avoid Windows decoration flash
+    if window.is_fullscreen().unwrap_or(false) {
+        window.set_fullscreen(false)?;
+        window.set_decorations(false)?;
+    }
+
     if show_board {
-        window.set_fullscreen(true)?;
-        window.set_min_size(None::<LogicalSize<f64>>)?;
-        window.set_max_size(None::<LogicalSize<f64>>)?;
+        // Manually size window to full work area instead of native fullscreen
+        if let Some(monitor) = &monitor {
+            let work_area = monitor.work_area();
+            let scale_factor = monitor.scale_factor();
+            let work_x = work_area.position.x as f64 / scale_factor;
+            let work_y = work_area.position.y as f64 / scale_factor;
+            let work_width = work_area.size.width as f64 / scale_factor;
+            let work_height = work_area.size.height as f64 / scale_factor;
+
+            window.set_min_size(None::<LogicalSize<f64>>)?;
+            window.set_max_size(None::<LogicalSize<f64>>)?;
+            window.set_size(LogicalSize::new(work_width, work_height))?;
+            window.set_position(LogicalPosition::new(work_x, work_y))?;
+        }
         window.set_focus()?;
         return Ok(());
     }
 
-    // Capture the pre-fullscreen-exit size/position so we can animate from it
-    let was_fullscreen = window.is_fullscreen().unwrap_or(false);
+    // Read current state BEFORE unlocking min/max
     let pre_exit_size = window.inner_size().ok();
     let pre_exit_position = window.outer_position().ok();
-
-    window.set_fullscreen(false)?;
-    // Re-apply decorations-off AFTER exiting fullscreen — Windows briefly restores native chrome otherwise
-    window.set_decorations(false)?;
-    clear_window_compositor_effects(window)?;
-    set_window_background_transparent(window)?;
 
     if let Some(monitor) = monitor {
         let work_area = monitor.work_area();
@@ -167,21 +177,7 @@ fn apply_window_mode(
         window.set_min_size(None::<LogicalSize<f64>>)?;
         window.set_max_size(None::<LogicalSize<f64>>)?;
 
-        // When coming from fullscreen board, animate from full work area; otherwise from current tray state
-        let (current_size, current_position) = if was_fullscreen {
-            (
-                Some(tauri::PhysicalSize {
-                    width: (work_width * scale_factor) as u32,
-                    height: (work_height * scale_factor) as u32,
-                }),
-                Some(tauri::PhysicalPosition {
-                    x: (work_x * scale_factor) as i32,
-                    y: (work_y * scale_factor) as i32,
-                }),
-            )
-        } else {
-            (pre_exit_size, pre_exit_position)
-        };
+        let (current_size, current_position) = (pre_exit_size, pre_exit_position);
 
         let (standby_x, standby_y) = if let Some(pos) = saved_position {
             // Validate against COLLAPSED dimensions (that's what was saved)
