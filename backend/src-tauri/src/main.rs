@@ -10,7 +10,7 @@ use std::io::Write as _;
 
 const STANDBY_TRAY_WIDTH: f64 = 320.0;
 const STANDBY_TRAY_EXPANDED_WIDTH: f64 = 440.0;
-const STANDBY_TRAY_HEIGHT: f64 = 72.0;
+const STANDBY_TRAY_HEIGHT: f64 = 78.0;
 const STANDBY_TRAY_ROW_HEIGHT: f64 = 45.0;
 const STANDBY_TRAY_CTA_HEIGHT: f64 = 56.0;
 const WINDOW_MARGIN_X: f64 = 16.0;
@@ -104,6 +104,7 @@ fn apply_window_mode(
     show_board: bool,
     tray_expanded: bool,
     reminder_count: usize,
+    saved_position: Option<&TrayPosition>,
 ) -> tauri::Result<()> {
     let monitor = window
         .current_monitor()?
@@ -161,10 +162,29 @@ fn apply_window_mode(
         window.set_min_size(Some(LogicalSize::new(next_width, next_height)))?;
         window.set_max_size(Some(LogicalSize::new(next_width, next_height)))?;
 
-        let default_x = work_x + work_width - next_width - WINDOW_MARGIN_X;
-        let default_y = work_y + work_height - next_height - WINDOW_MARGIN_Y;
-        let standby_x = default_x;
-        let standby_y = default_y;
+        let (standby_x, standby_y) = if let Some(pos) = saved_position {
+            // Validate saved position is within current monitor bounds
+            let valid_x = pos.x >= work_x && pos.x + next_width <= work_x + work_width;
+            let valid_y = pos.y >= work_y && pos.y + next_height <= work_y + work_height;
+            if valid_x && valid_y {
+                // Adjust y for expansion direction based on edge
+                let y = match pos.edge.as_str() {
+                    "bottom" => pos.y - (next_height - STANDBY_TRAY_HEIGHT),
+                    _ => pos.y, // top, left, right: expand downward from saved y
+                };
+                let clamped_y = y.clamp(work_y, work_y + work_height - next_height);
+                (pos.x, clamped_y)
+            } else {
+                // Saved position is off-screen, use default
+                let default_x = work_x + work_width - next_width - WINDOW_MARGIN_X;
+                let default_y = work_y + work_height - next_height - WINDOW_MARGIN_Y;
+                (default_x, default_y)
+            }
+        } else {
+            let default_x = work_x + work_width - next_width - WINDOW_MARGIN_X;
+            let default_y = work_y + work_height - next_height - WINDOW_MARGIN_Y;
+            (default_x, default_y)
+        };
 
         if let (Some(current_size), Some(current_position)) = (current_size, current_position) {
             let start_width = current_size.width as f64 / scale_factor;
@@ -201,8 +221,9 @@ fn configure_startup_window(app: &tauri::App) -> tauri::Result<()> {
         return Ok(());
     };
 
+    let saved_position = read_saved_position(&app.handle());
     set_window_background_transparent(&window)?;
-    apply_window_mode(&window, false, false, 0)
+    apply_window_mode(&window, false, false, 0, saved_position.as_ref())
 }
 
 #[tauri::command]
@@ -268,11 +289,13 @@ fn snap_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<()
 #[tauri::command]
 fn sync_window_mode(
     window: WebviewWindow,
+    app_handle: AppHandle,
     show_board: bool,
     tray_expanded: bool,
     reminder_count: usize,
 ) -> Result<(), String> {
-    apply_window_mode(&window, show_board, tray_expanded, reminder_count)
+    let saved_position = read_saved_position(&app_handle);
+    apply_window_mode(&window, show_board, tray_expanded, reminder_count, saved_position.as_ref())
         .map_err(|error| error.to_string())
 }
 
