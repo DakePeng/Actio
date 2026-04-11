@@ -2,7 +2,6 @@ import { createContext, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { LogicalPosition } from '@tauri-apps/api/dpi';
 import { useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
 import { formatTimeShort } from '../utils/time';
@@ -35,64 +34,29 @@ export function StandbyTray() {
     setTrayExpanded(expanded);
   }, [expanded, setTrayExpanded]);
 
-  function handleDragStart(e: React.PointerEvent) {
+  function handleDragStart() {
     if (!isTauri) return;
 
     const appWindow = getCurrentWindow();
-    const startScreenX = e.screenX;
-    const startScreenY = e.screenY;
-    const handle = e.currentTarget as HTMLElement;
-    handle.setPointerCapture(e.pointerId);
 
-    let startWinPos: { x: number; y: number } | null = null;
-    let bounds: { x: number; y: number; w: number; h: number } | null = null;
-    let winSize: { w: number; h: number } | null = null;
+    // Native OS drag — must be called synchronously during mousedown
+    appWindow.startDragging();
 
-    // Fetch initial state in parallel — drag starts responding once resolved
-    Promise.all([
-      appWindow.outerPosition(),
-      appWindow.innerSize(),
-      appWindow.currentMonitor(),
-    ]).then(([pos, size, monitor]) => {
-      const scale = monitor?.scaleFactor ?? 1;
-      startWinPos = { x: pos.x / scale, y: pos.y / scale };
-      winSize = { w: size.width / scale, h: size.height / scale };
-      if (monitor) {
-        bounds = {
-          x: monitor.position.x / scale,
-          y: monitor.position.y / scale,
-          w: monitor.size.width / scale,
-          h: monitor.size.height / scale,
-        };
-      }
-    });
+    // Clamp + snap after drag via onMoved
+    let debounceTimer: number | null = null;
+    let unlistenFn: (() => void) | null = null;
 
-    function onPointerMove(ev: PointerEvent) {
-      if (!startWinPos || !winSize) return;
+    appWindow.onMoved(() => {
+      // Clamp position on every move — keeps window on screen during drag
+      invoke('clamp_tray_position');
 
-      const dx = ev.screenX - startScreenX;
-      const dy = ev.screenY - startScreenY;
-
-      let newX = startWinPos.x + dx;
-      let newY = startWinPos.y + dy;
-
-      // Clamp to monitor bounds — window cannot leave the screen
-      if (bounds) {
-        newX = Math.max(bounds.x, Math.min(newX, bounds.x + bounds.w - winSize.w));
-        newY = Math.max(bounds.y, Math.min(newY, bounds.y + bounds.h - winSize.h));
-      }
-
-      appWindow.setPosition(new LogicalPosition(newX, newY));
-    }
-
-    function onPointerUp() {
-      handle.removeEventListener('pointermove', onPointerMove);
-      handle.removeEventListener('pointerup', onPointerUp);
-      invoke('snap_tray_position');
-    }
-
-    handle.addEventListener('pointermove', onPointerMove);
-    handle.addEventListener('pointerup', onPointerUp);
+      // Debounced snap — fires after drag stops
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        invoke('snap_tray_position');
+        if (unlistenFn) unlistenFn();
+      }, 200);
+    }).then((fn) => { unlistenFn = fn; });
   }
 
   if (showBoardWindow) return null;
@@ -119,7 +83,7 @@ export function StandbyTray() {
         {/* Drag handle */}
         <div
           className="tray-drag-handle"
-          onPointerDown={handleDragStart}
+          onMouseDown={handleDragStart}
           role="separator"
           aria-label="Drag to reposition"
         >

@@ -227,6 +227,42 @@ fn configure_startup_window(app: &tauri::App) -> tauri::Result<()> {
 }
 
 #[tauri::command]
+fn clamp_tray_position(window: WebviewWindow) -> Result<(), String> {
+    let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;
+    let outer_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let inner_size = window.inner_size().map_err(|e| e.to_string())?;
+
+    let win_x = outer_pos.x as f64 / scale_factor;
+    let win_y = outer_pos.y as f64 / scale_factor;
+    let win_w = inner_size.width as f64 / scale_factor;
+    let win_h = inner_size.height as f64 / scale_factor;
+
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .ok_or("no monitor found")?;
+
+    let work_area = monitor.work_area();
+    let mon_scale = monitor.scale_factor();
+    let work_x = work_area.position.x as f64 / mon_scale;
+    let work_y = work_area.position.y as f64 / mon_scale;
+    let work_w = work_area.size.width as f64 / mon_scale;
+    let work_h = work_area.size.height as f64 / mon_scale;
+
+    let clamped_x = win_x.clamp(work_x, work_x + work_w - win_w);
+    let clamped_y = win_y.clamp(work_y, work_y + work_h - win_h);
+
+    if (clamped_x - win_x).abs() > 0.5 || (clamped_y - win_y).abs() > 0.5 {
+        window
+            .set_position(LogicalPosition::new(clamped_x, clamped_y))
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn snap_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<(), String> {
     let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;
     let outer_pos = window.outer_position().map_err(|e| e.to_string())?;
@@ -331,7 +367,7 @@ fn sync_window_mode(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![sync_window_mode, snap_tray_position])
+        .invoke_handler(tauri::generate_handler![sync_window_mode, clamp_tray_position, snap_tray_position])
         .setup(|app| {
             configure_startup_window(app)?;
             Ok(())
