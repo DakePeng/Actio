@@ -2506,35 +2506,41 @@ body.body--native-board .desktop-window {
 
 .archive-view__section-tabs {
   display: flex;
-  gap: 4px;
-  padding: 16px 36px 0;
+  gap: 8px;
+  padding: 16px 36px 12px;
   background: transparent;
 }
 
 .archive-section-btn {
+  position: relative;
   padding: 8px 20px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  font-size: 0.85rem;
+  border: none;
+  border-radius: 0;
+  font-size: 0.88rem;
   font-weight: 600;
   font-family: var(--font-sans);
-  background: var(--color-bg);
-  color: var(--color-text-secondary);
+  background: transparent;
+  color: var(--color-text-tertiary);
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: color 0.15s ease;
 }
 
 .archive-section-btn:hover {
-  background: var(--color-surface);
-  color: var(--color-text);
-  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
 }
 
 .archive-section-btn.is-active {
-  background: var(--color-accent);
-  color: #fff;
-  border-color: var(--color-accent);
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.18);
+  color: var(--color-accent-strong);
+}
+
+.archive-section-btn__indicator {
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-accent-strong);
+  border-radius: 2px;
 }
 
 /* ─── Clips ──────────────────────────────────────────────────────── */
@@ -2635,23 +2641,23 @@ body.body--native-board .desktop-window {
   border: none;
   border-radius: 10px;
   background: transparent;
-  font-size: 1rem;
+  color: var(--color-text-tertiary);
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .clip-star-btn:hover {
   background: var(--color-accent-wash);
-  transform: scale(1.1);
+  color: var(--color-accent);
 }
 
 .clip-star-btn.is-starred {
   color: #f59e0b;
-  opacity: 1;
 }
 
 .clip-delete-btn:hover {
   background: var(--color-priority-high-bg);
+  color: var(--color-priority-high-text);
 }
 
 .clip-card__text {
@@ -2697,13 +2703,28 @@ body.body--native-board .desktop-window {
   padding: 48px 36px;
   flex: 1;
   overflow-y: auto;
+  gap: 0;
 }
 
 .recording-tab__controls {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
+}
+
+.recording-tab__btn-wrap {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recording-tab__ring {
+  position: absolute;
+  inset: 0;
 }
 
 .recording-btn {
@@ -2716,15 +2737,10 @@ body.body--native-board .desktop-window {
   border-radius: 50%;
   background: var(--color-accent);
   color: #fff;
-  font-size: 2rem;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(79, 70, 229, 0.25);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
-}
-
-.recording-btn:hover {
-  transform: scale(1.06);
-  box-shadow: 0 12px 32px rgba(79, 70, 229, 0.35);
+  transition: box-shadow 0.18s ease, background 0.3s ease;
+  z-index: 1;
 }
 
 .recording-btn.is-recording {
@@ -2733,13 +2749,9 @@ body.body--native-board .desktop-window {
   animation: recording-pulse 1.8s ease-in-out infinite;
 }
 
-.recording-btn.is-recording:hover {
-  box-shadow: 0 12px 32px rgba(239, 68, 68, 0.4);
-}
-
 @keyframes recording-pulse {
   0%, 100% { box-shadow: 0 8px 24px rgba(239, 68, 68, 0.3); }
-  50% { box-shadow: 0 8px 32px rgba(239, 68, 68, 0.5), 0 0 0 12px rgba(239, 68, 68, 0.08); }
+  50% { box-shadow: 0 8px 32px rgba(239, 68, 68, 0.5), 0 0 0 14px rgba(239, 68, 68, 0.06); }
 }
 
 .recording-tab__hint {
@@ -2749,11 +2761,17 @@ body.body--native-board .desktop-window {
 }
 
 .recording-tab__timer {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--color-text);
   letter-spacing: 0.02em;
+}
+
+.recording-tab__timer-divider {
+  margin: 0 4px;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
 }
 
 .recording-tab__transcript {
@@ -2790,6 +2808,9 @@ body.body--native-board .desktop-window {
 
 .people-tab__add-btn {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .people-tab__empty {
@@ -2865,17 +2886,19 @@ body.body--native-board .desktop-window {
   border: none;
   border-radius: 10px;
   background: transparent;
-  font-size: 0.88rem;
+  color: var(--color-text-tertiary);
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .person-edit-btn:hover {
   background: var(--color-accent-wash);
+  color: var(--color-accent);
 }
 
 .person-delete-btn:hover {
   background: var(--color-priority-high-bg);
+  color: var(--color-priority-high-text);
 }
 
 /* Person form */
