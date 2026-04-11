@@ -15,8 +15,6 @@ const STANDBY_TRAY_ROW_HEIGHT: f64 = 45.0;
 const STANDBY_TRAY_CTA_HEIGHT: f64 = 56.0;
 const WINDOW_MARGIN_X: f64 = 16.0;
 const WINDOW_MARGIN_Y: f64 = 42.0;
-const SNAP_MARGIN: f64 = 0.0;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TrayPosition {
     x: f64,
@@ -269,7 +267,7 @@ fn clamp_tray_position(window: WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn snap_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<(), String> {
+fn save_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<(), String> {
     let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;
     let outer_pos = window.outer_position().map_err(|e| e.to_string())?;
     let inner_size = window.inner_size().map_err(|e| e.to_string())?;
@@ -292,64 +290,26 @@ fn snap_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<()
     let work_w = work_area.size.width as f64 / mon_scale;
     let work_h = work_area.size.height as f64 / mon_scale;
 
-    // Distance from each window edge to the corresponding screen edge
+    // Determine nearest edge (for expansion direction only)
     let dist_left = (win_x - work_x).abs();
     let dist_right = ((work_x + work_w) - (win_x + win_w)).abs();
     let dist_top = (win_y - work_y).abs();
     let dist_bottom = ((work_y + work_h) - (win_y + win_h)).abs();
-
     let min_dist = dist_left.min(dist_right).min(dist_top).min(dist_bottom);
 
-    let (edge, snapped_x, snapped_y) = if min_dist == dist_left {
-        let y = win_y.clamp(work_y + SNAP_MARGIN, work_y + work_h - win_h - SNAP_MARGIN);
-        ("left", work_x + SNAP_MARGIN, y)
+    let edge = if min_dist == dist_left {
+        "left"
     } else if min_dist == dist_right {
-        let y = win_y.clamp(work_y + SNAP_MARGIN, work_y + work_h - win_h - SNAP_MARGIN);
-        ("right", work_x + work_w - win_w - SNAP_MARGIN, y)
+        "right"
     } else if min_dist == dist_top {
-        let x = win_x.clamp(work_x + SNAP_MARGIN, work_x + work_w - win_w - SNAP_MARGIN);
-        ("top", x, work_y + SNAP_MARGIN)
+        "top"
     } else {
-        let x = win_x.clamp(work_x + SNAP_MARGIN, work_x + work_w - win_w - SNAP_MARGIN);
-        ("bottom", x, work_y + work_h - win_h - SNAP_MARGIN)
+        "bottom"
     };
 
-    // Animate snap with bounce overshoot
-    const SNAP_STEPS: u32 = 16;
-    const SNAP_FRAME_MS: u64 = 12;
-    const OVERSHOOT: f64 = 1.15; // 15% overshoot for bounce feel
-
-    for step in 1..=SNAP_STEPS {
-        let t = step as f64 / SNAP_STEPS as f64;
-        // Overshoot ease: goes past target then settles back
-        let eased = if t < 0.6 {
-            // First 60%: accelerate toward target with overshoot
-            let p = t / 0.6;
-            let cubic = 1.0 - (1.0 - p).powi(3);
-            cubic * OVERSHOOT
-        } else {
-            // Last 40%: settle back from overshoot to target
-            let p = (t - 0.6) / 0.4;
-            OVERSHOOT + (1.0 - OVERSHOOT) * (1.0 - (1.0 - p).powi(2))
-        };
-
-        let x = lerp(win_x, snapped_x, eased);
-        let y = lerp(win_y, snapped_y, eased);
-        let _ = window.set_position(LogicalPosition::new(x, y));
-
-        if step < SNAP_STEPS {
-            thread::sleep(Duration::from_millis(SNAP_FRAME_MS));
-        }
-    }
-
-    // Ensure final position is exact
-    window
-        .set_position(LogicalPosition::new(snapped_x, snapped_y))
-        .map_err(|e| e.to_string())?;
-
     let pos = TrayPosition {
-        x: snapped_x,
-        y: snapped_y,
+        x: win_x,
+        y: win_y,
         edge: edge.to_string(),
     };
     write_saved_position(&app_handle, &pos);
@@ -373,7 +333,7 @@ fn sync_window_mode(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![sync_window_mode, clamp_tray_position, snap_tray_position])
+        .invoke_handler(tauri::generate_handler![sync_window_mode, clamp_tray_position, save_tray_position])
         .setup(|app| {
             configure_startup_window(app)?;
             Ok(())

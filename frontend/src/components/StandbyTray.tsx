@@ -53,7 +53,7 @@ export function StandbyTray() {
       // Debounced snap — fires after drag stops
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
-        invoke('snap_tray_position');
+        invoke('save_tray_position');
         if (unlistenFn) unlistenFn();
       }, 200);
     }).then((fn) => { unlistenFn = fn; });
