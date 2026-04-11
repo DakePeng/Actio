@@ -145,6 +145,10 @@ fn apply_window_mode(
     }
 
     window.set_fullscreen(false)?;
+    // Re-apply decorations-off AFTER exiting fullscreen — Windows briefly restores native chrome otherwise
+    window.set_decorations(false)?;
+    clear_window_compositor_effects(window)?;
+    set_window_background_transparent(window)?;
 
     if let Some(monitor) = monitor {
         let work_area = monitor.work_area();
