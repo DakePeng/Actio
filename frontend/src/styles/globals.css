@@ -1233,7 +1233,7 @@ body.body--standby .app-shell--standby .tray {
   bottom: 0 !important;
   width: auto !important;
   height: auto !important;
-  animation: tray-fade-in 200ms ease-out;
+  animation: tray-fade-in 100ms ease-out;
 }
 
 @keyframes tray-fade-in {
