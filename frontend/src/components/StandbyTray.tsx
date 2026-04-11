@@ -34,21 +34,22 @@ export function StandbyTray() {
     setTrayExpanded(expanded);
   }, [expanded, setTrayExpanded]);
 
-  async function handleDragStart() {
+  function handleDragStart() {
     if (!isTauri) return;
 
     const appWindow = getCurrentWindow();
-    let debounceTimer: number | null = null;
 
-    const unlisten = await appWindow.onMoved(() => {
+    // Must call startDragging synchronously during mousedown — any await before this loses the event context
+    appWindow.startDragging();
+
+    // Set up snap listener after drag starts
+    let debounceTimer: number | null = null;
+    appWindow.onMoved(async () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(async () => {
         await invoke('snap_tray_position');
-        unlisten();
       }, 150);
     });
-
-    await appWindow.startDragging();
   }
 
   if (showBoardWindow) return null;
@@ -75,7 +76,7 @@ export function StandbyTray() {
         {/* Drag handle */}
         <div
           className="tray-drag-handle"
-          onMouseDown={() => void handleDragStart()}
+          onMouseDown={handleDragStart}
           role="separator"
           aria-label="Drag to reposition"
         >
