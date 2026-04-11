@@ -206,6 +206,66 @@ fn configure_startup_window(app: &tauri::App) -> tauri::Result<()> {
 }
 
 #[tauri::command]
+fn snap_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<(), String> {
+    let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;
+    let outer_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let inner_size = window.inner_size().map_err(|e| e.to_string())?;
+
+    let win_x = outer_pos.x as f64 / scale_factor;
+    let win_y = outer_pos.y as f64 / scale_factor;
+    let win_w = inner_size.width as f64 / scale_factor;
+    let win_h = inner_size.height as f64 / scale_factor;
+
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .ok_or("no monitor found")?;
+
+    let work_area = monitor.work_area();
+    let mon_scale = monitor.scale_factor();
+    let work_x = work_area.position.x as f64 / mon_scale;
+    let work_y = work_area.position.y as f64 / mon_scale;
+    let work_w = work_area.size.width as f64 / mon_scale;
+    let work_h = work_area.size.height as f64 / mon_scale;
+
+    // Distance from each window edge to the corresponding screen edge
+    let dist_left = (win_x - work_x).abs();
+    let dist_right = ((work_x + work_w) - (win_x + win_w)).abs();
+    let dist_top = (win_y - work_y).abs();
+    let dist_bottom = ((work_y + work_h) - (win_y + win_h)).abs();
+
+    let min_dist = dist_left.min(dist_right).min(dist_top).min(dist_bottom);
+
+    let (edge, snapped_x, snapped_y) = if min_dist == dist_left {
+        let y = win_y.clamp(work_y + SNAP_MARGIN, work_y + work_h - win_h - SNAP_MARGIN);
+        ("left", work_x + SNAP_MARGIN, y)
+    } else if min_dist == dist_right {
+        let y = win_y.clamp(work_y + SNAP_MARGIN, work_y + work_h - win_h - SNAP_MARGIN);
+        ("right", work_x + work_w - win_w - SNAP_MARGIN, y)
+    } else if min_dist == dist_top {
+        let x = win_x.clamp(work_x + SNAP_MARGIN, work_x + work_w - win_w - SNAP_MARGIN);
+        ("top", x, work_y + SNAP_MARGIN)
+    } else {
+        let x = win_x.clamp(work_x + SNAP_MARGIN, work_x + work_w - win_w - SNAP_MARGIN);
+        ("bottom", x, work_y + work_h - win_h - SNAP_MARGIN)
+    };
+
+    window
+        .set_position(LogicalPosition::new(snapped_x, snapped_y))
+        .map_err(|e| e.to_string())?;
+
+    let pos = TrayPosition {
+        x: snapped_x,
+        y: snapped_y,
+        edge: edge.to_string(),
+    };
+    write_saved_position(&app_handle, &pos);
+
+    Ok(())
+}
+
+#[tauri::command]
 fn sync_window_mode(
     window: WebviewWindow,
     show_board: bool,
@@ -219,7 +279,7 @@ fn sync_window_mode(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![sync_window_mode])
+        .invoke_handler(tauri::generate_handler![sync_window_mode, snap_tray_position])
         .setup(|app| {
             configure_startup_window(app)?;
             Ok(())
