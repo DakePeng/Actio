@@ -1217,6 +1217,18 @@ body.body--standby .desktop-window-shell {
   display: none !important;
 }
 
+/* In native Tauri standby mode, the tray always fills the window — window chrome is the tray */
+body.body--standby .tray,
+body.body--standby .app-shell--standby .tray {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: auto !important;
+  height: auto !important;
+}
+
 .desktop-window {
   position: fixed;
   inset: 32px 32px 112px;
