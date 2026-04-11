@@ -1,5 +1,7 @@
 import { createContext, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
 import { formatTimeShort } from '../utils/time';
@@ -32,6 +34,23 @@ export function StandbyTray() {
     setTrayExpanded(expanded);
   }, [expanded, setTrayExpanded]);
 
+  async function handleDragStart() {
+    if (!isTauri) return;
+
+    const appWindow = getCurrentWindow();
+    let debounceTimer: number | null = null;
+
+    const unlisten = await appWindow.onMoved(() => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(async () => {
+        await invoke('snap_tray_position');
+        unlisten();
+      }, 150);
+    });
+
+    await appWindow.startDragging();
+  }
+
   if (showBoardWindow) return null;
 
   const priorityDotColor = (p: string) =>
@@ -53,6 +72,15 @@ export function StandbyTray() {
           boxShadow: { duration: 0.24, ease: 'easeOut' },
         }}
       >
+        {/* Drag handle */}
+        <div
+          className="tray-drag-handle"
+          onMouseDown={() => void handleDragStart()}
+          role="separator"
+          aria-label="Drag to reposition"
+        >
+          <div className="tray-drag-pill" />
+        </div>
         {newCount > 0 && <span className="tray-badge">{newCount > 9 ? '9+' : newCount}</span>}
         <div className="tray-toggle">
           <button type="button" className="tray-brand-trigger" onClick={() => setExpanded((prev) => !prev)}>
