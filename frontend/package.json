@@ -10,8 +10,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "cd ../backend && ../frontend/node_modules/.bin/tauri dev",
-    "tauri:build": "cd ../backend && ../frontend/node_modules/.bin/tauri build",
+    "tauri:dev": "cd ../backend && tauri dev",
+    "tauri:build": "cd ../backend && tauri build",
     "test": "vitest run"
   },
   "dependencies": {

@@ -28,5 +28,9 @@ skills-lock.json
 **/models/*.onnx
 **/models/*.tar.bz2
 
+# Bundled assets — the VAD is shipped inside the binary via include_bytes!
+# so it must be tracked. Negate the broader **/models/*.onnx rule above.
+!backend/actio-core/assets/*.onnx
+
 # Spike directory (throwaway, scratch Rust workspace)
 spike/

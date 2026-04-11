@@ -1,4 +1,4 @@
-import { createContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -33,6 +33,50 @@ export function StandbyTray() {
   useEffect(() => {
     setTrayExpanded(expanded);
   }, [expanded, setTrayExpanded]);
+
+  // Resize the Tauri window to match the tray state. The framer-motion
+  // width animation on the tray element grows the DOM to 440px when
+  // expanded, but the Tauri window stays at 320px unless we explicitly
+  // sync it — without this, expansion is clipped by the window edge.
+  //
+  // Also fires when the reminder count changes while the tray is
+  // expanded, so the window grows/shrinks to fit the visible list.
+  //
+  // CRITICAL skips:
+  //   - Board mode (showBoardWindow=true): React hooks run regardless of
+  //     the `if (showBoardWindow) return null` render guard, so without
+  //     this check, adding a reminder in board mode would trigger
+  //     sync_window_mode(showBoard=false) and shrink the window mid-board.
+  //   - Board → tray transition (the frame where showBoardWindow flips
+  //     from true to false): BoardWindow.triggerClose owns this exit and
+  //     coordinates a 280ms-delayed sync with the framer-motion shrink
+  //     animation. Firing our own sync early breaks the exit animation
+  //     and races on the saved_position read, sometimes landing the tray
+  //     in the upper-left of the screen.
+  //
+  // The mount-time run uses skipAnimation:true so the window is at the
+  // correct size immediately (matching the initial framer-motion state
+  // and avoiding a jump). Subsequent user toggles animate.
+  const mountedRef = useRef(false);
+  const prevShowBoardRef = useRef(showBoardWindow);
+  useEffect(() => {
+    const wasBoardMode = prevShowBoardRef.current;
+    prevShowBoardRef.current = showBoardWindow;
+
+    if (!isTauri) return;
+    if (showBoardWindow) return; // board mode owns the window
+    if (wasBoardMode) return; // just transitioned from board — triggerClose owns the exit
+
+    const isMount = !mountedRef.current;
+    mountedRef.current = true;
+
+    invoke('sync_window_mode', {
+      showBoard: false,
+      trayExpanded: expanded,
+      reminderCount: topReminders.length,
+      skipAnimation: isMount,
+    }).catch((e) => console.warn('[Actio] tray sync_window_mode failed', e));
+  }, [expanded, topReminders.length, isTauri, showBoardWindow]);
 
   function handleDragStart() {
     if (!isTauri) return;

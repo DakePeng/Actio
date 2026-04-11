@@ -3,11 +3,11 @@ import { motion } from 'framer-motion';
 import type { Tab } from '../types';
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'people', label: 'People' },
+  { id: 'recording', label: 'Transcribe' },
   { id: 'board', label: 'Board' },
   { id: 'archive', label: 'Archive' },
   { id: 'settings', label: 'Settings' },
-  { id: 'recording', label: 'Transcribe' },
-  { id: 'people', label: 'People' },
 ];
 
 export function TabBar() {
@@ -18,13 +18,14 @@ export function TabBar() {
     <div className="tab-bar" role="tablist" aria-label="Board navigation">
       {TABS.map(({ id, label }) => {
         const isActive = activeTab === id;
+        const isPrimary = id === 'board';
         return (
           <button
             key={id}
             type="button"
             role="tab"
             aria-selected={isActive}
-            className={`tab-bar__tab${isActive ? ' is-active' : ''}`}
+            className={`tab-bar__tab${isPrimary ? ' tab-bar__tab--primary' : ''}${isActive ? ' is-active' : ''}`}
             onClick={() => setActiveTab(id)}
           >
             {label}

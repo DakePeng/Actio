@@ -140,14 +140,13 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     }
   };
 
-  const sharedReady = status.state === 'ready' || status.state === 'downloading';
   const isDownloading = status.state === 'downloading';
 
   // Describe the current download in the progress bar.
   const downloadLabel = (() => {
     const t = status.target;
     if (!t) return 'Preparing...';
-    if (t.type === 'shared') return 'Shared files (VAD)';
+    if (t.type === 'shared') return 'Shared files (VAD)'; // unreachable in UI, kept for type safety
     const m = models.find((x) => x.id === t.id);
     return m?.name ?? t.id;
   })();
@@ -177,26 +176,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
         </div>
       )}
 
-      {!sharedReady && (
-        <div className="settings-field" style={{ marginBottom: 12 }}>
-          <div className="settings-row__sublabel">
-            Download the shared VAD component first. Individual ASR models can
-            then be downloaded separately below.
-          </div>
-          <button
-            type="button"
-            className="model-tier-card"
-            onClick={() => handleDownload({ type: 'shared' })}
-            style={{ marginTop: 8 }}
-          >
-            <div className="model-tier-card__name">Download Shared Files</div>
-            <div className="model-tier-card__desc">Silero VAD (voice activity detection)</div>
-            <div className="model-tier-card__size">~2 MB</div>
-          </button>
-        </div>
-      )}
-
-      {sharedReady && models.length > 0 && (
+      {models.length > 0 && (
         <div className="settings-field">
           <div className="settings-field__label">ASR Models</div>
           <div className="model-list">
@@ -267,25 +247,6 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
               );
             })}
           </div>
-
-          {/* Shared VAD tier — only show delete once any model is downloaded
-              so users can reclaim the few MB if they want a clean slate. */}
-          {sharedReady && (
-            <div className="model-list__shared-row">
-              <span className="model-list__shared-label">
-                Shared VAD files (Silero) — required by offline models
-              </span>
-              <button
-                type="button"
-                className="model-list__delete-btn"
-                onClick={() => handleDelete('shared', 'the shared VAD files')}
-                disabled={isDownloading}
-                title="Delete Silero VAD files"
-              >
-                Delete
-              </button>
-            </div>
-          )}
         </div>
       )}
     </section>

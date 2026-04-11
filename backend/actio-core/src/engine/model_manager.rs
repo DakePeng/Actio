@@ -143,6 +143,12 @@ const SHARED_FILES: &[ModelFile] = &[
     },
 ];
 
+/// Silero VAD model — bundled inside the binary via `include_bytes!`.
+/// Written out to `{model_dir}/silero_vad.onnx` on first startup so every
+/// offline ASR pipeline has VAD available without a network download.
+/// ~644 KB, negligible binary bloat.
+const SILERO_VAD_BYTES: &[u8] = include_bytes!("../../assets/silero_vad.onnx");
+
 /// Chinese Zipformer streaming transducer 14M.
 const ZH_ZIPFORMER_14M_FILES: &[ModelFile] = &[
     ModelFile {
@@ -350,9 +356,17 @@ pub struct ModelManager {
 }
 
 impl ModelManager {
-    /// Create a new ModelManager. Checks for existing model files and sets
-    /// status to Ready if shared files are present, otherwise NotDownloaded.
+    /// Create a new ModelManager. Extracts the bundled Silero VAD into the
+    /// model directory on first startup so the shared tier is always ready.
     pub fn new(model_dir: PathBuf) -> Self {
+        // Ensure model_dir exists before writing the bundled VAD.
+        if let Err(e) = std::fs::create_dir_all(&model_dir) {
+            warn!(error = %e, path = %model_dir.display(), "Failed to create model_dir");
+        }
+        if let Err(e) = ensure_bundled_vad(&model_dir) {
+            warn!(error = %e, "Failed to extract bundled Silero VAD");
+        }
+
         let status = detect_existing_status(&model_dir);
         info!(?status, model_dir = %model_dir.display(), "ModelManager initialised");
         Self {
@@ -648,7 +662,27 @@ impl ModelManager {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Detect whether the shared files are already downloaded.
+/// Extract the bundled Silero VAD into `model_dir/silero_vad.onnx` if the
+/// file is missing or has zero size. Overwrites nothing — a user-deleted VAD
+/// can be restored simply by relaunching the app.
+fn ensure_bundled_vad(model_dir: &PathBuf) -> Result<()> {
+    let dest = model_dir.join("silero_vad.onnx");
+    let needs_write = match std::fs::metadata(&dest) {
+        Ok(meta) => meta.len() == 0,
+        Err(_) => true,
+    };
+    if !needs_write {
+        return Ok(());
+    }
+    std::fs::write(&dest, SILERO_VAD_BYTES)
+        .with_context(|| format!("writing bundled Silero VAD to {}", dest.display()))?;
+    info!(bytes = SILERO_VAD_BYTES.len(), path = %dest.display(), "Extracted bundled Silero VAD");
+    Ok(())
+}
+
+/// Detect whether the shared files are already downloaded. With the VAD now
+/// bundled via `include_bytes!`, this should always be Ready after
+/// `ModelManager::new` runs. Kept for robustness in case extraction failed.
 fn detect_existing_status(model_dir: &PathBuf) -> ModelStatus {
     let shared_ok = SHARED_FILES
         .iter()

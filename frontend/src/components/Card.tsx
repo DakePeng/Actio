@@ -5,6 +5,24 @@ import { getLabelById } from '../utils/labels';
 import { formatTimeShort } from '../utils/time';
 import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion';
 
+/** Convert an ISO 8601 timestamp to the `YYYY-MM-DDTHH:MM` format that
+ *  `<input type="datetime-local">` expects, in the browser's local tz. */
+function toDatetimeLocalValue(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Parse a `datetime-local` input string back into an ISO 8601 UTC string.
+ *  Empty string → undefined (clears the due time). */
+function fromDatetimeLocalValue(local: string): string | undefined {
+  if (!local) return undefined;
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
 interface CardProps {
   reminder: Reminder;
   isExpanded: boolean;
@@ -36,20 +54,29 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
   // Inline editing state
   const [editTitle, setEditTitle] = useState(title);
   const [editDescription, setEditDescription] = useState(description);
+  const [editDueTime, setEditDueTime] = useState(toDatetimeLocalValue(dueTime));
 
   // Sync when reminder changes externally
   useEffect(() => { setEditTitle(title); }, [title]);
   useEffect(() => { setEditDescription(description); }, [description]);
+  useEffect(() => { setEditDueTime(toDatetimeLocalValue(dueTime)); }, [dueTime]);
 
   // Commit edits on blur / on collapse
   const commitEdits = async () => {
     const t = editTitle.trim();
     const d = editDescription.trim();
-    if (t !== title || d !== description) {
-      await updateReminderInline(reminder.id, {
-        title: t || title,
-        description: d,
-      });
+    const currentDueLocal = toDatetimeLocalValue(dueTime);
+    const nextDueLocal = editDueTime.trim();
+
+    const patch: Partial<Pick<Reminder, 'title' | 'description' | 'dueTime'>> = {};
+    if (t !== title) patch.title = t || title;
+    if (d !== description) patch.description = d;
+    if (nextDueLocal !== currentDueLocal) {
+      patch.dueTime = fromDatetimeLocalValue(nextDueLocal);
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await updateReminderInline(reminder.id, patch);
     }
   };
 
@@ -209,7 +236,20 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" />
               </svg>
-              <span>{timeDisplay}</span>
+              {isExpanded ? (
+                <input
+                  type="datetime-local"
+                  className="card-editable card-due-input"
+                  value={editDueTime}
+                  onChange={(e) => setEditDueTime(e.target.value)}
+                  onBlur={() => void commitEdits()}
+                  onPointerDown={stopDrag}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Edit due time"
+                />
+              ) : (
+                <span>{timeDisplay}</span>
+              )}
             </div>
             <span className="card-meta__count">{labels.length} labels</span>
           </div>

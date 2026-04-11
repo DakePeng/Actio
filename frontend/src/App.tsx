@@ -47,6 +47,38 @@ export default function App() {
     };
   }, [showBoardWindow, trayExpanded, reminders.length]);
 
+  // On initial mount in Tauri: if we're starting in tray mode (the default),
+  // ensure body--standby is applied so the tray's `position: fixed; inset: 0`
+  // rule takes effect — otherwise the tray sizes to content and can clip
+  // against the 320 logical-px window on the right edge. Also re-sync the
+  // Tauri window size once the webview has rendered, which corrects any
+  // initial DPI rounding on the Rust side. Fires exactly once per mount.
+  useEffect(() => {
+    const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (!isTauri) return;
+    if (showBoardWindow) return; // the board-mode effect above handles this case
+
+    document.body.classList.add('body--standby');
+    document.body.classList.remove('body--native-board');
+
+    let cancelled = false;
+    void (async () => {
+      const { invoke } = await import('@tauri-apps/api/core');
+      if (cancelled) return;
+      await invoke('sync_window_mode', {
+        showBoard: false,
+        trayExpanded: useStore.getState().ui.trayExpanded,
+        reminderCount: useStore.getState().reminders.length,
+        skipAnimation: true,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount only
+
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'system') {
