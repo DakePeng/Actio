@@ -21,29 +21,29 @@ export default function App() {
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!isTauri) return;
 
-    document.body.classList.toggle('body--standby', !showBoardWindow);
-    document.body.classList.toggle('body--native-board', showBoardWindow);
-
+    // When opening board, swap body class and resize window immediately.
+    // When closing, BoardWindow handles the class swap + window resize in its onExitComplete
+    // after its exit animation plays.
     let cancelled = false;
 
-    const syncWindow = async () => {
-      const [{ invoke }] = await Promise.all([import('@tauri-apps/api/core')]);
+    if (showBoardWindow) {
+      document.body.classList.add('body--native-board');
+      document.body.classList.remove('body--standby');
 
-      if (cancelled) return;
-
-      await invoke('sync_window_mode', {
-        showBoard: showBoardWindow,
-        trayExpanded,
-        reminderCount: reminders.length,
-      });
-    };
-
-    void syncWindow();
+      const syncWindow = async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        if (cancelled) return;
+        await invoke('sync_window_mode', {
+          showBoard: true,
+          trayExpanded,
+          reminderCount: reminders.length,
+        });
+      };
+      void syncWindow();
+    }
 
     return () => {
       cancelled = true;
-      document.body.classList.remove('body--standby');
-      document.body.classList.remove('body--native-board');
     };
   }, [showBoardWindow, trayExpanded, reminders.length]);
 

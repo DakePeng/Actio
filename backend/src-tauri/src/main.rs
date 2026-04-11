@@ -103,6 +103,7 @@ fn apply_window_mode(
     tray_expanded: bool,
     reminder_count: usize,
     saved_position: Option<&TrayPosition>,
+    skip_animation: bool,
 ) -> tauri::Result<()> {
     let monitor = window
         .current_monitor()?
@@ -242,7 +243,10 @@ fn apply_window_mode(
             (default_x, default_y)
         };
 
-        if let (Some(current_size), Some(current_position)) = (current_size, current_position) {
+        if skip_animation {
+            window.set_size(LogicalSize::new(next_width, next_height))?;
+            window.set_position(LogicalPosition::new(standby_x, standby_y))?;
+        } else if let (Some(current_size), Some(current_position)) = (current_size, current_position) {
             let start_width = current_size.width as f64 / scale_factor;
             let start_height = current_size.height as f64 / scale_factor;
             let start_x = current_position.x as f64 / scale_factor;
@@ -283,7 +287,7 @@ fn configure_startup_window(app: &tauri::App) -> tauri::Result<()> {
 
     let saved_position = read_saved_position(&app.handle());
     set_window_background_transparent(&window)?;
-    apply_window_mode(&window, false, false, 0, saved_position.as_ref())
+    apply_window_mode(&window, false, false, 0, saved_position.as_ref(), true)
 }
 
 #[tauri::command]
@@ -298,8 +302,60 @@ fn reset_tray_position(
     let _ = std::fs::remove_file(&path);
 
     // Re-apply window mode with no saved position — reverts to default bottom-right
-    apply_window_mode(&window, false, tray_expanded, reminder_count, None)
+    apply_window_mode(&window, false, tray_expanded, reminder_count, None, false)
         .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct TrayBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+/// Returns where the collapsed tray will be placed in screen logical coordinates.
+/// Used by the frontend to compute exit-animation transforms.
+#[tauri::command]
+fn get_tray_bounds(window: WebviewWindow, app_handle: AppHandle) -> Result<TrayBounds, String> {
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .ok_or("no monitor found")?;
+
+    let work_area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let work_x = work_area.position.x as f64 / scale;
+    let work_y = work_area.position.y as f64 / scale;
+    let work_width = work_area.size.width as f64 / scale;
+    let work_height = work_area.size.height as f64 / scale;
+
+    let saved = read_saved_position(&app_handle);
+    let (x, y) = if let Some(pos) = &saved {
+        let valid_x = pos.x >= work_x && pos.x + STANDBY_TRAY_WIDTH <= work_x + work_width;
+        let valid_y = pos.y >= work_y && pos.y + STANDBY_TRAY_HEIGHT <= work_y + work_height;
+        if valid_x && valid_y {
+            (pos.x, pos.y)
+        } else {
+            (
+                work_x + work_width - STANDBY_TRAY_WIDTH - WINDOW_MARGIN_X,
+                work_y + work_height - STANDBY_TRAY_HEIGHT - WINDOW_MARGIN_Y,
+            )
+        }
+    } else {
+        (
+            work_x + work_width - STANDBY_TRAY_WIDTH - WINDOW_MARGIN_X,
+            work_y + work_height - STANDBY_TRAY_HEIGHT - WINDOW_MARGIN_Y,
+        )
+    };
+
+    Ok(TrayBounds {
+        x,
+        y,
+        width: STANDBY_TRAY_WIDTH,
+        height: STANDBY_TRAY_HEIGHT,
+    })
 }
 
 #[tauri::command]
@@ -360,16 +416,24 @@ fn sync_window_mode(
     show_board: bool,
     tray_expanded: bool,
     reminder_count: usize,
+    skip_animation: Option<bool>,
 ) -> Result<(), String> {
     let saved_position = read_saved_position(&app_handle);
-    apply_window_mode(&window, show_board, tray_expanded, reminder_count, saved_position.as_ref())
-        .map_err(|error| error.to_string())
+    apply_window_mode(
+        &window,
+        show_board,
+        tray_expanded,
+        reminder_count,
+        saved_position.as_ref(),
+        skip_animation.unwrap_or(false),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position])
+        .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds])
         .setup(|app| {
             configure_startup_window(app)?;
             Ok(())

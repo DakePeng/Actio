@@ -1217,6 +1217,12 @@ body.body--standby .desktop-window-shell {
   display: none !important;
 }
 
+/* During board exit animation (showBoardWindow=false but body still has native-board),
+   keep the tray hidden so the shrinking board is the only thing visible */
+body.body--native-board .tray {
+  display: none !important;
+}
+
 /* In native Tauri standby mode, the tray always fills the window — window chrome is the tray */
 body.body--standby .tray,
 body.body--standby .app-shell--standby .tray {
