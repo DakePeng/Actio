@@ -15,7 +15,7 @@ const STANDBY_TRAY_ROW_HEIGHT: f64 = 45.0;
 const STANDBY_TRAY_CTA_HEIGHT: f64 = 56.0;
 const WINDOW_MARGIN_X: f64 = 16.0;
 const WINDOW_MARGIN_Y: f64 = 42.0;
-const SNAP_MARGIN: f64 = 16.0;
+const SNAP_MARGIN: f64 = 0.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TrayPosition {
