@@ -68,8 +68,9 @@ export function BoardWindow() {
 
     setBoardWindow(false);
 
-    // Kick off the window snap partway through the exit animation so it's ready
-    // by the time the exit completes — eliminates the post-unmount blink.
+    // Kick off the window snap + tray fade-in partway through the exit animation.
+    // At 280ms the board is ~93% shrunk (cubic ease-out) — close enough that snapping
+    // the window and revealing the tray doesn't produce visual tearing.
     if (isTauri) {
       setTimeout(async () => {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -81,7 +82,10 @@ export function BoardWindow() {
           reminderCount,
           skipAnimation: true,
         });
-      }, 380); // exit animation is 500ms; at 380ms board is ~98% shrunk
+        // Swap body class immediately after snap — tray starts fading in now
+        document.body.classList.add('body--standby');
+        document.body.classList.remove('body--native-board');
+      }, 280);
     }
   }
 
@@ -103,9 +107,9 @@ export function BoardWindow() {
   }, [showBoardWindow]);
 
   function handleExitComplete() {
+    // Window snap + body class swap are already handled in triggerClose's setTimeout.
+    // This is a safety net in case the timeout hasn't fired (e.g., fast close).
     if (!isTauri) return;
-    // Window is already snapped (kicked off early from triggerClose).
-    // Swap the body class — tray becomes visible and fades in.
     document.body.classList.add('body--standby');
     document.body.classList.remove('body--native-board');
   }
