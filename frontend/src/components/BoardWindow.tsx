@@ -88,19 +88,22 @@ export function BoardWindow() {
 
   async function handleExitComplete() {
     if (!isTauri) return;
-    // Swap body class now that exit animation is done
-    document.body.classList.add('body--standby');
-    document.body.classList.remove('body--native-board');
 
     const { invoke } = await import('@tauri-apps/api/core');
     const trayExpanded = useStore.getState().ui.trayExpanded;
     const reminderCount = useStore.getState().reminders.length;
+
+    // Snap the Tauri window to tray size FIRST (while tray is still hidden by CSS)
     await invoke('sync_window_mode', {
       showBoard: false,
       trayExpanded,
       reminderCount,
       skipAnimation: true,
     });
+
+    // Now swap the body class — tray becomes visible and CSS fade-in animation plays
+    document.body.classList.add('body--standby');
+    document.body.classList.remove('body--native-board');
   }
 
   const exitAnim = exitTarget
