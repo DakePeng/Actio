@@ -991,12 +991,12 @@ body.body--standby .tray--launcher:hover {
   width: 36px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.15);
   transition: background 0.2s ease;
 }
 
 .tray-drag-handle:hover .tray-drag-pill {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .tray-toggle {
