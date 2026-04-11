@@ -15,7 +15,7 @@
         "title": "Actio",
         "label": "main",
         "width": 320,
-        "height": 72,
+        "height": 78,
         "resizable": false,
         "fullscreen": false,
         "decorations": false,
