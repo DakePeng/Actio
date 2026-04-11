@@ -60,8 +60,8 @@ fn animate_standby_window(
     end_x: f64,
     end_y: f64,
 ) -> tauri::Result<()> {
-    const STEPS: u32 = 12;
-    const FRAME_MS: u64 = 18;
+    const STEPS: u32 = 30;
+    const FRAME_MS: u64 = 16;
 
     for step in 1..=STEPS {
         let progress = step as f64 / STEPS as f64;
