@@ -955,7 +955,7 @@ body.body--standby .tray--launcher:hover {
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   box-shadow: var(--shadow-card-md);
-  
+  user-select: none;
   overflow: hidden;
 }
 
