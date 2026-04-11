@@ -272,6 +272,35 @@ fn snap_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<()
         ("bottom", x, work_y + work_h - win_h - SNAP_MARGIN)
     };
 
+    // Animate snap with bounce overshoot
+    const SNAP_STEPS: u32 = 16;
+    const SNAP_FRAME_MS: u64 = 12;
+    const OVERSHOOT: f64 = 1.15; // 15% overshoot for bounce feel
+
+    for step in 1..=SNAP_STEPS {
+        let t = step as f64 / SNAP_STEPS as f64;
+        // Overshoot ease: goes past target then settles back
+        let eased = if t < 0.6 {
+            // First 60%: accelerate toward target with overshoot
+            let p = t / 0.6;
+            let cubic = 1.0 - (1.0 - p).powi(3);
+            cubic * OVERSHOOT
+        } else {
+            // Last 40%: settle back from overshoot to target
+            let p = (t - 0.6) / 0.4;
+            OVERSHOOT + (1.0 - OVERSHOOT) * (1.0 - (1.0 - p).powi(2))
+        };
+
+        let x = lerp(win_x, snapped_x, eased);
+        let y = lerp(win_y, snapped_y, eased);
+        let _ = window.set_position(LogicalPosition::new(x, y));
+
+        if step < SNAP_STEPS {
+            thread::sleep(Duration::from_millis(SNAP_FRAME_MS));
+        }
+    }
+
+    // Ensure final position is exact
     window
         .set_position(LogicalPosition::new(snapped_x, snapped_y))
         .map_err(|e| e.to_string())?;
