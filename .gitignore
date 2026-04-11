@@ -28,6 +28,5 @@ skills-lock.json
 **/models/*.onnx
 **/models/*.tar.bz2
 
-# Spike directory (throwaway)
-spike/target/
-spike/models/
+# Spike directory (throwaway, scratch Rust workspace)
+spike/
