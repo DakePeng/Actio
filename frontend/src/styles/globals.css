@@ -975,6 +975,30 @@ body.body--standby .tray--launcher:hover {
   border-color: rgba(255, 255, 255, 0.24);
 }
 
+.tray-drag-handle {
+  display: flex;
+  justify-content: center;
+  padding: 5px 0 2px;
+  cursor: grab;
+  -webkit-app-region: no-drag;
+}
+
+.tray-drag-handle:active {
+  cursor: grabbing;
+}
+
+.tray-drag-pill {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 0.2s ease;
+}
+
+.tray-drag-handle:hover .tray-drag-pill {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 .tray-toggle {
   width: 100%;
   padding: 10px 14px;
