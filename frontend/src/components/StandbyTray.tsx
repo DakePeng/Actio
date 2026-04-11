@@ -42,15 +42,11 @@ export function StandbyTray() {
     // Native OS drag — must be called synchronously during mousedown
     appWindow.startDragging();
 
-    // Clamp + snap after drag via onMoved
+    // Save position after drag stops (debounced via onMoved)
     let debounceTimer: number | null = null;
     let unlistenFn: (() => void) | null = null;
 
     appWindow.onMoved(() => {
-      // Clamp position on every move — keeps window on screen during drag
-      invoke('clamp_tray_position');
-
-      // Debounced snap — fires after drag stops
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
         invoke('save_tray_position');

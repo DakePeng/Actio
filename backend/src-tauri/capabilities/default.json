@@ -7,7 +7,6 @@
     "core:default",
     "notification:default",
     "core:window:allow-start-dragging",
-    "core:window:allow-set-position",
     "core:event:default"
   ]
 }
