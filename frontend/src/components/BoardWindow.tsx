@@ -67,6 +67,22 @@ export function BoardWindow() {
     }
 
     setBoardWindow(false);
+
+    // Kick off the window snap partway through the exit animation so it's ready
+    // by the time the exit completes — eliminates the post-unmount blink.
+    if (isTauri) {
+      setTimeout(async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const trayExpanded = useStore.getState().ui.trayExpanded;
+        const reminderCount = useStore.getState().reminders.length;
+        await invoke('sync_window_mode', {
+          showBoard: false,
+          trayExpanded,
+          reminderCount,
+          skipAnimation: true,
+        });
+      }, 380); // exit animation is 500ms; at 380ms board is ~98% shrunk
+    }
   }
 
   useEffect(() => {
@@ -86,22 +102,10 @@ export function BoardWindow() {
     if (showBoardWindow) setExitTarget(null);
   }, [showBoardWindow]);
 
-  async function handleExitComplete() {
+  function handleExitComplete() {
     if (!isTauri) return;
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    const trayExpanded = useStore.getState().ui.trayExpanded;
-    const reminderCount = useStore.getState().reminders.length;
-
-    // Snap the Tauri window to tray size FIRST (while tray is still hidden by CSS)
-    await invoke('sync_window_mode', {
-      showBoard: false,
-      trayExpanded,
-      reminderCount,
-      skipAnimation: true,
-    });
-
-    // Now swap the body class — tray becomes visible and CSS fade-in animation plays
+    // Window is already snapped (kicked off early from triggerClose).
+    // Swap the body class — tray becomes visible and fades in.
     document.body.classList.add('body--standby');
     document.body.classList.remove('body--native-board');
   }
