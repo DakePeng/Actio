@@ -2,9 +2,11 @@
 
 use std::{thread, time::Duration};
 use tauri::{
-    LogicalPosition, LogicalSize, Manager, WebviewWindow, utils::config::WindowEffectsConfig,
-    window::Color,
+    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewWindow,
+    utils::config::WindowEffectsConfig, window::Color,
 };
+use serde::{Deserialize, Serialize};
+use std::io::Write as _;
 
 const STANDBY_TRAY_WIDTH: f64 = 320.0;
 const STANDBY_TRAY_EXPANDED_WIDTH: f64 = 440.0;
@@ -13,6 +15,38 @@ const STANDBY_TRAY_ROW_HEIGHT: f64 = 45.0;
 const STANDBY_TRAY_CTA_HEIGHT: f64 = 56.0;
 const WINDOW_MARGIN_X: f64 = 16.0;
 const WINDOW_MARGIN_Y: f64 = 42.0;
+const SNAP_MARGIN: f64 = 16.0;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TrayPosition {
+    x: f64,
+    y: f64,
+    edge: String,
+}
+
+fn position_file_path(app_handle: &AppHandle) -> std::path::PathBuf {
+    app_handle
+        .path()
+        .app_data_dir()
+        .expect("failed to resolve app_data_dir")
+        .join("tray-position.json")
+}
+
+fn read_saved_position(app_handle: &AppHandle) -> Option<TrayPosition> {
+    let path = position_file_path(app_handle);
+    let data = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+fn write_saved_position(app_handle: &AppHandle, pos: &TrayPosition) {
+    let path = position_file_path(app_handle);
+    if let Ok(json) = serde_json::to_string_pretty(pos) {
+        if let Ok(mut file) = std::fs::File::create(&path) {
+            let _ = file.write_all(json.as_bytes());
+        }
+    }
+}
+
 fn lerp(start: f64, end: f64, progress: f64) -> f64 {
     start + (end - start) * progress
 }
