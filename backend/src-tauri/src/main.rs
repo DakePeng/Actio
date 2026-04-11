@@ -144,6 +144,11 @@ fn apply_window_mode(
         return Ok(());
     }
 
+    // Capture the pre-fullscreen-exit size/position so we can animate from it
+    let was_fullscreen = window.is_fullscreen().unwrap_or(false);
+    let pre_exit_size = window.inner_size().ok();
+    let pre_exit_position = window.outer_position().ok();
+
     window.set_fullscreen(false)?;
     // Re-apply decorations-off AFTER exiting fullscreen — Windows briefly restores native chrome otherwise
     window.set_decorations(false)?;
@@ -158,11 +163,25 @@ fn apply_window_mode(
         let work_width = work_area.size.width as f64 / scale_factor;
         let work_height = work_area.size.height as f64 / scale_factor;
 
-        let current_size = window.inner_size().ok();
-        let current_position = window.outer_position().ok();
+        // Unlock min/max so animation can interpolate freely (Windows clamps set_size otherwise)
+        window.set_min_size(None::<LogicalSize<f64>>)?;
+        window.set_max_size(None::<LogicalSize<f64>>)?;
 
-        window.set_min_size(Some(LogicalSize::new(next_width, next_height)))?;
-        window.set_max_size(Some(LogicalSize::new(next_width, next_height)))?;
+        // When coming from fullscreen board, animate from full work area; otherwise from current tray state
+        let (current_size, current_position) = if was_fullscreen {
+            (
+                Some(tauri::PhysicalSize {
+                    width: (work_width * scale_factor) as u32,
+                    height: (work_height * scale_factor) as u32,
+                }),
+                Some(tauri::PhysicalPosition {
+                    x: (work_x * scale_factor) as i32,
+                    y: (work_y * scale_factor) as i32,
+                }),
+            )
+        } else {
+            (pre_exit_size, pre_exit_position)
+        };
 
         let (standby_x, standby_y) = if let Some(pos) = saved_position {
             // Validate against COLLAPSED dimensions (that's what was saved)
@@ -215,6 +234,10 @@ fn apply_window_mode(
             window.set_size(LogicalSize::new(next_width, next_height))?;
             window.set_position(LogicalPosition::new(standby_x, standby_y))?;
         }
+
+        // Lock min/max to tray dimensions AFTER animation completes
+        window.set_min_size(Some(LogicalSize::new(next_width, next_height)))?;
+        window.set_max_size(Some(LogicalSize::new(next_width, next_height)))?;
     } else {
         window.set_size(LogicalSize::new(next_width, next_height))?;
     }
