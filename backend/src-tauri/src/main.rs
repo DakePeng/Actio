@@ -163,17 +163,23 @@ fn apply_window_mode(
         window.set_max_size(Some(LogicalSize::new(next_width, next_height)))?;
 
         let (standby_x, standby_y) = if let Some(pos) = saved_position {
-            // Validate saved position is within current monitor bounds
-            let valid_x = pos.x >= work_x && pos.x + next_width <= work_x + work_width;
-            let valid_y = pos.y >= work_y && pos.y + next_height <= work_y + work_height;
+            // Validate against COLLAPSED dimensions (that's what was saved)
+            let valid_x = pos.x >= work_x && pos.x + STANDBY_TRAY_WIDTH <= work_x + work_width;
+            let valid_y = pos.y >= work_y && pos.y + STANDBY_TRAY_HEIGHT <= work_y + work_height;
             if valid_x && valid_y {
-                // Adjust y for expansion direction based on edge
+                // Adjust x for expanded width based on edge
+                let x = match pos.edge.as_str() {
+                    "right" => pos.x - (next_width - STANDBY_TRAY_WIDTH),
+                    _ => pos.x,
+                };
+                // Adjust y for expanded height based on edge
                 let y = match pos.edge.as_str() {
                     "bottom" => pos.y - (next_height - STANDBY_TRAY_HEIGHT),
-                    _ => pos.y, // top, left, right: expand downward from saved y
+                    _ => pos.y,
                 };
+                let clamped_x = x.clamp(work_x, work_x + work_width - next_width);
                 let clamped_y = y.clamp(work_y, work_y + work_height - next_height);
-                (pos.x, clamped_y)
+                (clamped_x, clamped_y)
             } else {
                 // Saved position is off-screen, use default
                 let default_x = work_x + work_width - next_width - WINDOW_MARGIN_X;
