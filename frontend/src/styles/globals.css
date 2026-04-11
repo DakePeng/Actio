@@ -1208,8 +1208,13 @@ body.body--standby .tray--launcher:hover {
   position: fixed;
   inset: 0;
   background: rgba(10, 10, 18, 0.32);
-  
+
   z-index: 180;
+}
+
+body.body--standby .desktop-window-backdrop,
+body.body--standby .desktop-window-shell {
+  display: none !important;
 }
 
 .desktop-window {
