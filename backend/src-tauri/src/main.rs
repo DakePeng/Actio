@@ -161,9 +161,18 @@ fn apply_window_mode(
         return Ok(());
     }
 
-    // Read current state BEFORE unlocking min/max
+    // Detect if we're coming from board mode (window was covering full work area)
     let pre_exit_size = window.inner_size().ok();
     let pre_exit_position = window.outer_position().ok();
+    let was_board_mode = if let (Some(size), Some(monitor)) = (pre_exit_size, &monitor) {
+        let scale = monitor.scale_factor();
+        let work_w = monitor.work_area().size.width as f64 / scale;
+        // Consider it board mode if the window is significantly larger than the expanded tray
+        (size.width as f64 / scale) > STANDBY_TRAY_EXPANDED_WIDTH + 50.0
+            && (size.width as f64 / scale) >= work_w - 2.0
+    } else {
+        false
+    };
 
     if let Some(monitor) = monitor {
         let work_area = monitor.work_area();
@@ -177,7 +186,31 @@ fn apply_window_mode(
         window.set_min_size(None::<LogicalSize<f64>>)?;
         window.set_max_size(None::<LogicalSize<f64>>)?;
 
-        let (current_size, current_position) = (pre_exit_size, pre_exit_position);
+        // When coming from board mode, start the animation from the visible board bounds
+        // (matching CSS: width = min(100vw - 32px, 75vw), centered)
+        let (current_size, current_position) = if was_board_mode {
+            let board_w = (work_width - 32.0).min(work_width * 0.75);
+            let board_h = (work_height - 32.0).min(work_height * 0.75);
+            let board_x = work_x + (work_width - board_w) / 2.0;
+            let board_y = work_y + (work_height - board_h) / 2.0;
+
+            // Pre-shrink the window to the board bounds so the animation starts from there
+            window.set_size(LogicalSize::new(board_w, board_h))?;
+            window.set_position(LogicalPosition::new(board_x, board_y))?;
+
+            (
+                Some(tauri::PhysicalSize {
+                    width: (board_w * scale_factor) as u32,
+                    height: (board_h * scale_factor) as u32,
+                }),
+                Some(tauri::PhysicalPosition {
+                    x: (board_x * scale_factor) as i32,
+                    y: (board_y * scale_factor) as i32,
+                }),
+            )
+        } else {
+            (pre_exit_size, pre_exit_position)
+        };
 
         let (standby_x, standby_y) = if let Some(pos) = saved_position {
             // Validate against COLLAPSED dimensions (that's what was saved)
