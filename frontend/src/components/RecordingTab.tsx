@@ -2,147 +2,226 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
 
-const MOCK_SENTENCES = [
-  'The meeting was productive and all agenda items were covered.',
-  'Action items were assigned to each team member.',
-  'The deadline has been moved to next Friday.',
-  'We need to follow up with the client by end of week.',
-  'The new feature request will be added to the backlog.',
-  'Budget approval is still pending from finance.',
-  'The demo went well and the client was satisfied.',
-  'We agreed to reconvene next Tuesday at 10 AM.',
-  'The design review is scheduled for Thursday afternoon.',
-  'Engineering estimates are due by end of sprint.',
-];
+const API_BASE = 'http://127.0.0.1:3000';
 
-function MicIcon() {
+type WarmupState = 'idle' | 'warming' | 'ready' | 'error';
+
+/** Five vertical bars. When `animated` is true, each bar oscillates in height
+ *  with a staggered delay — looks like a live audio meter. */
+function WaveformIcon({ animated }: { animated?: boolean }) {
+  // Base (resting) y1/y2 per bar — a peaked shape rising to the middle.
+  const bars = [
+    { x: 4, y1: 10, y2: 14, amp: 2 },
+    { x: 8, y1: 7, y2: 17, amp: 3 },
+    { x: 12, y1: 4, y2: 20, amp: 4 },
+    { x: 16, y1: 7, y2: 17, amp: 3 },
+    { x: 20, y1: 10, y2: 14, amp: 2 },
+  ];
+
   return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" x2="12" y1="19" y2="22" />
+    <svg
+      width="30"
+      height="30"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {bars.map((b, i) =>
+        animated ? (
+          <motion.line
+            key={i}
+            x1={b.x}
+            x2={b.x}
+            initial={{ y1: b.y1, y2: b.y2 }}
+            animate={{
+              y1: [b.y1, Math.max(2, b.y1 - b.amp), b.y1 + b.amp, b.y1],
+              y2: [b.y2, Math.min(22, b.y2 + b.amp), b.y2 - b.amp, b.y2],
+            }}
+            transition={{
+              duration: 1.1,
+              repeat: Infinity,
+              ease: 'easeInOut',
+              delay: i * 0.12,
+            }}
+          />
+        ) : (
+          <line key={i} x1={b.x} x2={b.x} y1={b.y1} y2={b.y2} />
+        ),
+      )}
     </svg>
   );
 }
 
 function StopIcon() {
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <rect x="6" y="6" width="12" height="12" rx="2" />
     </svg>
   );
 }
 
+/** Three dots that pulse with staggered delays — used next to "Loading model". */
+function AnimatedDots() {
+  return (
+    <span className="loading-dots" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="loading-dots__dot"
+          animate={{ opacity: [0.2, 1, 0.2] }}
+          transition={{
+            duration: 1.1,
+            repeat: Infinity,
+            ease: 'easeInOut',
+            delay: i * 0.18,
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+function formatElapsed(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
 export function RecordingTab() {
   const isRecording = useVoiceStore((s) => s.isRecording);
   const currentSession = useVoiceStore((s) => s.currentSession);
-  const clipInterval = useVoiceStore((s) => s.clipInterval);
   const startRecording = useVoiceStore((s) => s.startRecording);
   const stopRecording = useVoiceStore((s) => s.stopRecording);
-  const appendLiveTranscript = useVoiceStore((s) => s.appendLiveTranscript);
-  const flushInterval = useVoiceStore((s) => s.flushInterval);
 
   const [elapsed, setElapsed] = useState(0);
+  const [warmupState, setWarmupState] = useState<WarmupState>('idle');
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const mockTimerRef = useRef<number | null>(null);
-  const clipTimerRef = useRef<number | null>(null);
   const elapsedTimerRef = useRef<number | null>(null);
-  const sentenceIndexRef = useRef(0);
 
+  // True once the backend has confirmed the file-cache warmup finished.
+  // Independent of whether the user has pressed record yet.
+  const warming = warmupState === 'warming';
+
+  // True while the user has pressed record but the pipeline hasn't yet
+  // produced any transcript output. Separate from warmup.
+  const pipelineStarting = isRecording && currentSession !== null && !currentSession.pipelineReady;
+
+  // Preload the ASR model when the Transcribe tab mounts so the next
+  // start-recording click doesn't pay the cold-read penalty on model files.
+  // The backend warmup endpoint now blocks until files are resident in the
+  // OS page cache, so `ready` corresponds to real readiness.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setWarmupState('warming');
+        const settingsRes = await fetch(`${API_BASE}/settings`);
+        if (!settingsRes.ok) throw new Error(`settings HTTP ${settingsRes.status}`);
+        const settings = await settingsRes.json();
+        const asrModel: string | undefined = settings.audio?.asr_model;
+        if (!asrModel) {
+          if (!cancelled) setWarmupState('ready');
+          return;
+        }
+        const warmRes = await fetch(`${API_BASE}/settings/models/warmup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asr_model: asrModel }),
+        });
+        if (!warmRes.ok) throw new Error(`warmup HTTP ${warmRes.status}`);
+        if (!cancelled) setWarmupState('ready');
+      } catch (e) {
+        console.warn('[Actio] Warmup failed', e);
+        if (!cancelled) setWarmupState('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Elapsed-time ticker — no clip interval, no upper bound.
   useEffect(() => {
     if (!isRecording) {
-      clearAllTimers();
+      if (elapsedTimerRef.current) window.clearInterval(elapsedTimerRef.current);
+      elapsedTimerRef.current = null;
       setElapsed(0);
       return;
     }
-
-    sentenceIndexRef.current = Math.floor(Math.random() * MOCK_SENTENCES.length);
-
-    mockTimerRef.current = window.setInterval(() => {
-      const sentence = MOCK_SENTENCES[sentenceIndexRef.current % MOCK_SENTENCES.length];
-      sentenceIndexRef.current++;
-      appendLiveTranscript(sentence);
-    }, 2000);
-
-    clipTimerRef.current = window.setInterval(() => {
-      flushInterval();
-    }, clipInterval * 60 * 1000);
 
     elapsedTimerRef.current = window.setInterval(() => {
       setElapsed((prev) => prev + 1);
     }, 1000);
 
-    return clearAllTimers;
-  }, [isRecording]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      if (elapsedTimerRef.current) window.clearInterval(elapsedTimerRef.current);
+      elapsedTimerRef.current = null;
+    };
+  }, [isRecording]);
 
   useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
-  }, [currentSession?.liveTranscript]);
+  }, [currentSession?.liveTranscript, currentSession?.pendingPartial]);
 
-  function clearAllTimers() {
-    if (mockTimerRef.current) window.clearInterval(mockTimerRef.current);
-    if (clipTimerRef.current) window.clearInterval(clipTimerRef.current);
-    if (elapsedTimerRef.current) window.clearInterval(elapsedTimerRef.current);
-    mockTimerRef.current = null;
-    clipTimerRef.current = null;
-    elapsedTimerRef.current = null;
-  }
-
-  const intervalSeconds = clipInterval * 60;
-  const secondsIntoInterval = elapsed % intervalSeconds;
-  const elapsedMinutes = Math.floor(secondsIntoInterval / 60);
-  const elapsedSeconds = secondsIntoInterval % 60;
-  const totalMinutes = clipInterval;
-  const progress = secondsIntoInterval / intervalSeconds;
-
-  // SVG progress ring
-  const RADIUS = 52;
-  const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-  const strokeDashoffset = CIRCUMFERENCE * (1 - progress);
+  const hintContent = (() => {
+    if (warming) {
+      return (
+        <>
+          Loading model<AnimatedDots />
+        </>
+      );
+    }
+    if (warmupState === 'error') return 'Model load failed — tap to try anyway';
+    return 'Tap to transcribe';
+  })();
 
   return (
     <div className="recording-tab">
       <div className="recording-tab__controls">
         <div className="recording-tab__btn-wrap">
-          {/* Progress ring behind the button */}
+          {/* Pulsing halo ring during warmup */}
           <AnimatePresence>
-            {isRecording && (
-              <motion.svg
-                className="recording-tab__ring"
-                width="120"
-                height="120"
-                viewBox="0 0 120 120"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-              >
-                {/* Track */}
-                <circle cx="60" cy="60" r={RADIUS} fill="none" stroke="var(--color-border)" strokeWidth="3" />
-                {/* Progress */}
-                <circle
-                  cx="60"
-                  cy="60"
-                  r={RADIUS}
-                  fill="none"
-                  stroke="#ef4444"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeDasharray={CIRCUMFERENCE}
-                  strokeDashoffset={strokeDashoffset}
-                  style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 1s linear' }}
+            {warming && (
+              <>
+                <motion.span
+                  key="halo-1"
+                  className="recording-btn__halo"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: [0, 0.55, 0], scale: [0.9, 1.45, 1.55] }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
                 />
-              </motion.svg>
+                <motion.span
+                  key="halo-2"
+                  className="recording-btn__halo"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: [0, 0.35, 0], scale: [0.9, 1.25, 1.35] }}
+                  exit={{ opacity: 0 }}
+                  transition={{
+                    duration: 1.8,
+                    repeat: Infinity,
+                    ease: 'easeOut',
+                    delay: 0.6,
+                  }}
+                />
+              </>
             )}
           </AnimatePresence>
 
           <motion.button
             type="button"
-            className={`recording-btn${isRecording ? ' is-recording' : ''}`}
+            className={`recording-btn${isRecording ? ' is-recording' : ''}${warming ? ' is-warming' : ''}`}
             onClick={isRecording ? stopRecording : startRecording}
-            aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+            aria-label={isRecording ? 'Stop transcribing' : 'Start transcribing'}
+            aria-busy={warming || pipelineStarting}
             whileHover={{ scale: 1.06 }}
             whileTap={{ scale: 0.95 }}
             layout
@@ -161,14 +240,14 @@ export function RecordingTab() {
                 </motion.span>
               ) : (
                 <motion.span
-                  key="mic"
+                  key="wave"
                   initial={{ opacity: 0, scale: 0.5 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.5 }}
                   transition={{ duration: 0.15 }}
                   style={{ display: 'flex' }}
                 >
-                  <MicIcon />
+                  <WaveformIcon animated={warming} />
                 </motion.span>
               )}
             </AnimatePresence>
@@ -185,7 +264,7 @@ export function RecordingTab() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
             >
-              Tap to record
+              {hintContent}
             </motion.p>
           ) : (
             <motion.p
@@ -197,9 +276,7 @@ export function RecordingTab() {
               transition={{ duration: 0.2 }}
               aria-live="polite"
             >
-              {String(elapsedMinutes).padStart(2, '0')}:{String(elapsedSeconds).padStart(2, '0')}
-              <span className="recording-tab__timer-divider">/</span>
-              {String(totalMinutes).padStart(2, '0')}:00
+              {formatElapsed(elapsed)}
             </motion.p>
           )}
         </AnimatePresence>
@@ -216,8 +293,19 @@ export function RecordingTab() {
             transition={{ type: 'spring', stiffness: 200, damping: 22 }}
             aria-live="polite"
           >
-            {currentSession.liveTranscript || (
-              <span className="recording-tab__transcript-placeholder">Listening...</span>
+            {pipelineStarting && !currentSession.liveTranscript && !currentSession.pendingPartial ? (
+              <span className="recording-tab__starting">
+                Starting up<AnimatedDots />
+              </span>
+            ) : currentSession.liveTranscript || currentSession.pendingPartial ? (
+              <>
+                {currentSession.liveTranscript}
+                {currentSession.pendingPartial && (
+                  <span className="recording-tab__partial"> {currentSession.pendingPartial}</span>
+                )}
+              </>
+            ) : (
+              <span className="recording-tab__transcript-placeholder">Listening…</span>
             )}
           </motion.div>
         )}

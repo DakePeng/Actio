@@ -1,19 +1,68 @@
-# Repository Guidelines
+<!-- Parent: ../AGENTS.md -->
+<!-- Generated: 2026-04-10 | Updated: 2026-04-10 -->
 
-## Project Structure & Module Organization
-`src/` contains the Rust backend: `api/` for HTTP and WebSocket routes, `engine/` for orchestration and inference flow, `repository/` for database access, `domain/` for core types, and `grpc/` for generated service bindings. `python-worker/` hosts the gRPC inference worker and model-loading code. Database schema changes live in `migrations/`, protocol definitions in `proto/`, integration and unit tests in `tests/`, and the desktop shell in `src-tauri/`. Treat `target/` and `__pycache__/` as build artifacts, not source.
+# backend
 
-## Build, Test, and Development Commands
-Use `docker compose up -d postgres` to start the local PostgreSQL instance on `localhost:5433`. Run `cargo run --bin actio-asr` to start the Rust API; it loads `.env`, applies migrations, and starts the Python worker. Use `cargo test` for the Rust test suite and `cargo fmt` to format Rust code before review. For the worker, install dependencies with `pip install -r python-worker/requirements.txt` or your preferred Python 3.12 environment, then run `python python-worker/main.py` when working on the worker in isolation. Build the desktop shell from `src-tauri/` with `cargo run`.
+## Purpose
+The Rust backend is the core server for Actio. It exposes a REST + WebSocket API on port 3000, manages PostgreSQL persistence via SQLx, orchestrates the Python gRPC inference worker, and optionally generates todos/reminders using an LLM at session end.
 
-## Coding Style & Naming Conventions
-Follow Rust defaults: 4-space indentation, `snake_case` for functions/modules, `PascalCase` for structs and enums, and small modules with explicit ownership. Keep SQLx, Axum, and Tokio code async-first and avoid blocking calls in request paths. Python code should also use 4-space indentation, `snake_case`, and focused services under `python-worker/services/`. Prefer `cargo fmt` for Rust formatting; keep Python formatting consistent with existing files.
+## Key Files
 
-## Testing Guidelines
-Rust tests live in `tests/` and use descriptive names such as `test_circuit_breaker.rs` and `test_full_cycle`. Add tests next to the behavior you change, especially around engine state transitions, repository logic, and API contracts. Run `cargo test` before submitting changes. If you change migrations or worker startup behavior, verify the app boots cleanly against the local Postgres container.
+| File | Description |
+|------|-------------|
+| `Cargo.toml` | Rust workspace/crate manifest; main binary is `actio-asr` |
+| `Cargo.lock` | Pinned dependency versions |
+| `build.rs` | Build script (proto compilation) |
+| `docker-compose.yml` | Starts local PostgreSQL on port 5433 |
+| `.env.example` | Template for required environment variables |
+| `.env` | Local secrets — never commit real values |
+| `design.md` | Architecture and design notes |
+| `README.md` | Backend-specific quick-start |
 
-## Commit & Pull Request Guidelines
-This workspace no longer includes Git history, so there is no local commit convention to inspect. Use short, imperative commit messages such as `Add transcript aggregation retry`. Pull requests should include a concise summary, any required environment or migration notes, linked issues, and screenshots or logs when a UI or startup flow changes.
+## Subdirectories
 
-## Security & Configuration Tips
-Configuration is loaded from `.env`. Do not commit real secrets, especially `LLM_API_KEY`. Keep local defaults aligned with the checked-in example values (`HTTP_PORT=3000`, `WORKER_PORT=50051`, Postgres on `5433`) unless the change is intentional and documented.
+| Directory | Purpose |
+|-----------|---------|
+| `src/` | Main Rust crate: API, engine, repository, domain, gRPC (see `src/AGENTS.md`) |
+| `src-tauri/` | Tauri desktop shell crate (see `src-tauri/AGENTS.md`) |
+| `proto/` | gRPC protobuf definitions for the inference worker (see `proto/AGENTS.md`) |
+| `migrations/` | Ordered SQL schema migrations applied at startup (see `migrations/AGENTS.md`) |
+| `python-worker/` | Python gRPC ML inference worker: ASR, VAD, speaker embedding (see `python-worker/AGENTS.md`) |
+| `tests/` | Rust integration tests (see `tests/AGENTS.md`) |
+| `docs/` | Planning documents and design specs |
+
+## For AI Agents
+
+### Working In This Directory
+- Run all `cargo` commands from `backend/`, not the repo root.
+- Start Postgres before running tests: `docker compose up -d postgres`
+- Environment is loaded from `.env` via `dotenvy`; copy `.env.example` if missing.
+- The binary entry point is `src/main.rs`; `AppState` wires together all engine components.
+- `LLM_BASE_URL` / `LLM_API_KEY` are optional — omitting them disables todo generation silently.
+
+### Testing Requirements
+- `cargo test` — runs unit + integration tests
+- `cargo fmt` — format before review
+- Verify migrations apply cleanly: `cargo run --bin actio-asr` against a fresh DB
+
+### Common Patterns
+- Axum handlers receive `State<AppState>` — never pass mutable state via function arguments.
+- All DB operations go through `repository/` using the `PgPool` stored in `AppState`.
+- Circuit breaker (`engine/circuit_breaker.rs`) guards gRPC calls to the Python worker.
+- `inference_router` in `AppState` is `Option<Arc<InferenceRouter>>` — always check for `None` (worker may be unavailable).
+
+## Dependencies
+
+### Internal
+- `src/` depends on all other subdirectories
+- `src-tauri/` depends on the HTTP API exposed by `src/`
+
+### External
+- `axum` — HTTP framework
+- `sqlx` — async PostgreSQL driver with compile-time query checks
+- `tokio` — async runtime
+- `tonic` — gRPC client
+- `utoipa` + `utoipa-swagger-ui` — OpenAPI docs at `/docs`
+- `tracing` / `tracing-subscriber` — structured logging
+
+<!-- MANUAL: -->

@@ -435,6 +435,26 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds])
         .setup(|app| {
+            // Resolve app data directory for database and models
+            let data_dir = app.path().app_data_dir()
+                .expect("failed to resolve app_data_dir");
+            std::fs::create_dir_all(&data_dir)
+                .expect("failed to create app_data_dir");
+
+            let config = actio_core::CoreConfig {
+                data_dir: data_dir.clone(),
+                db_path: data_dir.join("actio.db"),
+                model_dir: data_dir.join("models"),
+                http_port: 3000,
+            };
+
+            // Spawn Axum HTTP server as a background task
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = actio_core::start_server(config).await {
+                    eprintln!("Actio HTTP server error: {e}");
+                }
+            });
+
             configure_startup_window(app)?;
             Ok(())
         })

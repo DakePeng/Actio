@@ -8,3 +8,26 @@ __pycache__/
 *.py[cod]
 .superpowers
 .omx
+.omc
+
+# Agent-generated files
+.agents/
+AGENTS.md
+**/AGENTS.md
+skills-lock.json
+
+# Crash dumps
+*.stackdump
+
+# SQLite database
+*.db
+*.db-wal
+*.db-shm
+
+# ML models (downloaded at runtime)
+**/models/*.onnx
+**/models/*.tar.bz2
+
+# Spike directory (throwaway)
+spike/target/
+spike/models/
