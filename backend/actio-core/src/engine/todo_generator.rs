@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 use tracing::{info, warn, error};
 use uuid::Uuid;
 
-use crate::engine::remote_llm_client::RemoteLlmClient;
+use crate::engine::llm_router::LlmRouter;
 use crate::repository::{speaker as speaker_repo, reminder as reminder_repo, transcript};
 use crate::domain::types::{NewReminder, Transcript};
 
@@ -12,7 +12,7 @@ pub const MAX_TRANSCRIPT_CHARS: usize = 50000; // ~12-15K tokens
 
 pub async fn generate_session_todos(
     pool: &SqlitePool,
-    llm_client: &RemoteLlmClient,
+    router: &LlmRouter,
     session_id: Uuid,
     tenant_id: Uuid,
 ) -> Result<(), anyhow::Error> {
@@ -33,10 +33,10 @@ pub async fn generate_session_todos(
     info!(chars = transcript_text.len(), "Built transcript string");
     let transcript_text = truncate_transcript(&transcript_text);
 
-    let llm_items = match llm_client.generate_todos(transcript_text).await {
+    let llm_items = match router.generate_todos(transcript_text).await {
         Ok(items) => items,
         Err(e) => {
-            error!(error = %e, "LLM failed for reminder generation");
+            error!(error = %e, "LLM router failed for reminder generation");
             return Err(e.into());
         }
     };

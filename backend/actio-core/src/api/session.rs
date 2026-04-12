@@ -122,16 +122,18 @@ pub async fn end_session(
     state.inference_pipeline.lock().await.stop();
 
     // Fire-and-forget todo generation (90s timeout)
-    if let Some(llm_client) = state.llm_client.clone() {
+    {
+        let router = state.router.clone();
         let pool = state.pool.clone();
         let tenant_id = session::get_session(&state.pool, id)
             .await
             .map(|session| session.tenant_id.parse::<Uuid>().unwrap_or_default())
             .map_err(|e| AppApiError(e.to_string()))?;
         tokio::spawn(async move {
+            let router_guard = router.read().await;
             let result = tokio::time::timeout(
                 std::time::Duration::from_secs(90),
-                todo_generator::generate_session_todos(&pool, &llm_client, id, tenant_id),
+                todo_generator::generate_session_todos(&pool, &*router_guard, id, tenant_id),
             )
             .await;
             match result {
@@ -140,8 +142,6 @@ pub async fn end_session(
                 Err(_) => warn!(session_id = %id, "Todo generation timed out after 90s"),
             }
         });
-    } else {
-        info!(session_id = %id, "Skipping todo generation because LLM is not configured");
     }
 
     Ok(StatusCode::NO_CONTENT)

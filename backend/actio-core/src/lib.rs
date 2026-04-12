@@ -16,9 +16,12 @@ use tracing::{info, warn};
 use crate::config::LlmConfig;
 use crate::engine::app_settings::SettingsManager;
 use crate::engine::inference_pipeline::InferencePipeline;
-use crate::engine::remote_llm_client::RemoteLlmClient;
+use crate::engine::llm_downloader::LlmDownloader;
+use crate::engine::llm_router::{LlmRouter, LlmSelection};
+use crate::engine::local_llm_engine::EngineSlot;
 use crate::engine::metrics::Metrics;
 use crate::engine::model_manager::ModelManager;
+use crate::engine::remote_llm_client::RemoteLlmClient;
 use crate::engine::transcript_aggregator::TranscriptAggregator;
 
 /// Configuration passed from the Tauri shell to actio-core.
@@ -35,13 +38,20 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub aggregator: Arc<TranscriptAggregator>,
     pub metrics: Arc<Metrics>,
-    pub llm_client: Option<Arc<RemoteLlmClient>>,
     pub model_manager: Arc<ModelManager>,
     pub inference_pipeline: Arc<tokio::sync::Mutex<InferencePipeline>>,
     pub settings_manager: Arc<SettingsManager>,
     /// Signalled by the settings handler when `audio.asr_model` changes.
     /// The pipeline supervisor listens for this and hot-swaps the recognizer.
     pub pipeline_restart: Arc<tokio::sync::Notify>,
+    /// Local LLM engine slot (lazy-loaded).
+    pub engine_slot: Arc<EngineSlot>,
+    /// Downloader for local LLM GGUF files.
+    pub llm_downloader: Arc<LlmDownloader>,
+    /// Optional fallback remote client constructed from env vars on first launch.
+    pub remote_client_envseed: Option<Arc<RemoteLlmClient>>,
+    /// Active LLM router. Rebuilt whenever LlmSettings.selection changes.
+    pub router: Arc<tokio::sync::RwLock<LlmRouter>>,
 }
 
 /// Start the Axum HTTP server. Called from Tauri's setup hook.
@@ -72,21 +82,46 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
 
     let aggregator = Arc::new(TranscriptAggregator::new(pool.clone()));
     let metrics = Arc::new(Metrics::new());
-    let llm_client = LlmConfig::from_env_optional().map(RemoteLlmClient::new).map(Arc::new);
+
+    // Shared download mutex enforces "one download at a time" across both
+    // ASR (ModelManager) and LLM (LlmDownloader).
+    let download_lock = Arc::new(tokio::sync::Mutex::new(()));
+
     let model_manager = Arc::new(ModelManager::new(config.model_dir.clone()));
+    let llm_downloader = Arc::new(LlmDownloader::new(
+        config.model_dir.clone(),
+        download_lock.clone(),
+    ));
+    let engine_slot = Arc::new(EngineSlot::new(config.model_dir.clone()));
+
+    let remote_client_envseed = LlmConfig::from_env_optional()
+        .map(RemoteLlmClient::new)
+        .map(Arc::new);
 
     let inference_pipeline = Arc::new(tokio::sync::Mutex::new(InferencePipeline::new()));
     let settings_manager = Arc::new(SettingsManager::new(&config.data_dir));
+
+    // Build the initial router from current settings.
+    let initial_settings = settings_manager.get().await;
+    let initial_router = build_router_from_settings(
+        &initial_settings.llm,
+        &engine_slot,
+        remote_client_envseed.as_ref().cloned(),
+    );
+    let router = Arc::new(tokio::sync::RwLock::new(initial_router));
 
     let state = AppState {
         pool,
         aggregator,
         metrics,
-        llm_client,
         model_manager,
         inference_pipeline,
         settings_manager,
         pipeline_restart: Arc::new(tokio::sync::Notify::new()),
+        engine_slot,
+        llm_downloader,
+        remote_client_envseed,
+        router,
     };
 
     // Spawn the always-on inference pipeline. The design intent is that the
@@ -128,7 +163,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     // Try ports 3000-3009
     let mut bound_port = None;
     for port in config.http_port..config.http_port + 10 {
-        let addr = format!("0.0.0.0:{}", port);
+        let addr = format!("127.0.0.1:{}", port);
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
                 info!(%addr, "Actio HTTP server started");
@@ -147,6 +182,38 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Construct a fresh `LlmRouter` from the current `LlmSettings`.
+pub fn build_router_from_settings(
+    llm: &crate::engine::app_settings::LlmSettings,
+    engine_slot: &Arc<EngineSlot>,
+    remote_envseed: Option<Arc<RemoteLlmClient>>,
+) -> LlmRouter {
+    match &llm.selection {
+        LlmSelection::Disabled => LlmRouter::Disabled,
+        LlmSelection::Local { id } => LlmRouter::Local {
+            slot: Arc::clone(engine_slot),
+            model_id: id.clone(),
+        },
+        LlmSelection::Remote => {
+            if let (Some(base_url), Some(api_key)) = (
+                llm.remote.base_url.as_deref(),
+                llm.remote.api_key.as_deref(),
+            ) {
+                let cfg = crate::config::LlmConfig {
+                    base_url: base_url.into(),
+                    api_key: api_key.into(),
+                    model: llm.remote.model.clone().unwrap_or_else(|| "gpt-4o-mini".into()),
+                };
+                LlmRouter::Remote(Arc::new(RemoteLlmClient::new(cfg)))
+            } else if let Some(env_client) = remote_envseed {
+                LlmRouter::Remote(env_client)
+            } else {
+                LlmRouter::Disabled
+            }
+        }
+    }
 }
 
 /// How long to wait with zero broadcast subscribers before hibernating
