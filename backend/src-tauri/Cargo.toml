@@ -12,7 +12,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 tauri-plugin-notification = "2"
-actio-core = { path = "../actio-core" }
+actio-core = { path = "../actio-core", default-features = false }
+
+[features]
+default = ["local-llm"]
+local-llm = ["actio-core/local-llm"]
+local-llm-metal = ["actio-core/local-llm-metal"]
 
 [[bin]]
 name = "actio-desktop"
