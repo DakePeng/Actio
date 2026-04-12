@@ -301,22 +301,38 @@ export function LlmSettings() {
                 {m.description}
               </div>
               <div style={{ marginLeft: 24, marginTop: 4 }}>
-                {!m.downloaded && downloadStatus.state !== 'downloading' && (
+                {!m.downloaded && !(downloadStatus.state === 'downloading' && downloadStatus.llm_id === m.id) && (
                   <button
                     type="button"
                     className="model-list__download-btn"
                     onClick={() => handleDownload(m.id)}
+                    disabled={downloadStatus.state === 'downloading'}
                   >
-                    Download {m.size_mb} MB
+                    {downloadStatus.state === 'downloading'
+                      ? 'Another download in progress…'
+                      : `Download ${m.size_mb} MB`}
                   </button>
                 )}
                 {downloadStatus.state === 'downloading' && downloadStatus.llm_id === m.id && (
-                  <div className="model-progress">
-                    <div
-                      className="model-progress__bar"
-                      style={{ width: `${(downloadStatus.progress ?? 0) * 100}%` }}
-                    />
-                    <span>{Math.round((downloadStatus.progress ?? 0) * 100)}%</span>
+                  <div className="model-progress" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{
+                      flex: 1,
+                      height: 8,
+                      background: 'var(--color-bg-hover, #e0e0e0)',
+                      borderRadius: 4,
+                      overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        height: '100%',
+                        width: `${(downloadStatus.progress ?? 0) * 100}%`,
+                        background: 'var(--color-accent, #3b82f6)',
+                        borderRadius: 4,
+                        transition: 'width 0.3s ease',
+                      }} />
+                    </div>
+                    <span style={{ fontSize: 12, minWidth: 40 }}>
+                      {Math.round((downloadStatus.progress ?? 0) * 100)}%
+                    </span>
                   </div>
                 )}
                 {m.downloaded && (
