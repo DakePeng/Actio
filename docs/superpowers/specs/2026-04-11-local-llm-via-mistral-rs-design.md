@@ -1,12 +1,12 @@
 # Local LLM via mistral.rs — Design
 
 **Date:** 2026-04-11
-**Status:** Approved (pending user review of written spec)
+**Status:** Approved (rev 2 — addressed Codex review findings)
 **Authors:** Brainstormed with Claude (superpowers:brainstorming)
 
 ## Summary
 
-Add a one-click local LLM deployment feature to Actio's settings. Users can download a small Qwen3.5 GGUF model and run it in-process via the [`mistral.rs`](https://github.com/EricLBuehler/mistral.rs) Rust crate, with the engine also exposed as an OpenAI-compatible HTTP endpoint that other local tools (Cursor, Zed, scripts) can hit. The local LLM coexists with the existing remote OpenAI-compatible LLM path, and the user picks which backend `todo_generator` uses via a settings radio.
+Add a one-click local LLM deployment feature to Actio's settings. Users can download a small Qwen3.5 GGUF model and run it in-process via the [`mistral.rs`](https://github.com/EricLBuehler/mistral.rs) Rust crate, with the engine also exposed as a **basic** OpenAI-compatible HTTP endpoint (`/v1/chat/completions`, `/v1/models`) that local tools and scripts can hit. **Compatibility scope:** tested with `curl`, Python `openai` client library, and basic REST calls. Advanced features (function calling, logprobs, embeddings) are not supported — tools requiring those should use a full inference server. The local LLM coexists with the existing remote OpenAI-compatible LLM path, and the user picks which backend `todo_generator` uses via a settings radio.
 
 ## Motivation
 
@@ -27,8 +27,9 @@ A local LLM solves all three: zero-config after one click, no data leaves the ma
 | Quantization | Q4_K_M GGUF, fixed (no user-facing knob) |
 | Backends | CPU + Metal only (no CUDA / Vulkan / ROCm in v1) |
 | Local vs remote | Coexist, user picks via radio in settings |
-| HTTP endpoint | OpenAI-compatible `/v1/chat/completions` + `/v1/models`, localhost-only, no auth |
-| Endpoint port | User-configurable, default 3000 (separate axum listener when port differs from actio backend) |
+| HTTP endpoint | OpenAI-compatible `/v1/chat/completions` + `/v1/models`, `127.0.0.1`-only, no auth |
+| Endpoint port | User-configurable, default 3000 (separate `127.0.0.1` listener when port differs from actio backend) |
+| Binding address | **All listeners bind `127.0.0.1`, not `0.0.0.0`.** The main backend listener is also changed to `127.0.0.1` — this is a desktop app with no LAN access need. (Fixes the security gap where the current `0.0.0.0` binding would expose unauthenticated `/v1` routes to the LAN.) |
 | Lifecycle | Lazy + sticky (load on first call, stay until app exit or model swap) |
 | UI placement | New "Language Models" section in settings, distinct from existing "Speech Models" |
 | Remote LLM config | Settings UI fields (base URL, API key, model name); env vars become bootstrap fallback for first launch only |
@@ -77,7 +78,7 @@ A local LLM solves all three: zero-config after one click, no data leaves the ma
 
 2. **`LlmRouter` is a thin enum dispatcher**, not a trait object: `enum LlmBackend { Local { slot, model_id }, Remote(RemoteLlmClient), Disabled }`. `todo_generator` calls `router.generate_todos(transcript)`; the router picks the right path based on the active selection.
 
-3. **The `/v1/chat/completions` HTTP handler also goes through `LocalLlmEngine` directly** — it does **not** round-trip through `LlmRouter` and cannot be used to reach the user's configured remote LLM. External clients hitting `/v1` always use the local engine. If the local engine isn't loaded, `/v1` returns `503 Service Unavailable` with a clear message.
+3. **The `/v1/chat/completions` HTTP handler also goes through `LocalLlmEngine` directly** — it does **not** round-trip through `LlmRouter` and cannot be used to reach the user's configured remote LLM. External clients hitting `/v1` always use the local engine. **If the local engine isn't loaded but a local model is selected, `/v1` triggers a lazy cold-start via `EngineSlot::get_or_load`** — the first request pays the 1–3 s load cost, subsequent requests are instant. If no local model is selected or no model is downloaded, `/v1` returns `503 Service Unavailable` with `{ "error": { "message": "no local model selected — configure one in Actio Settings → Language Models" } }`.
 
 4. **`mistralrs` is gated behind a `local-llm` Cargo feature**, on by default. When the feature is off, `LocalLlmEngine` is a stub that always returns `LocalLlmError::FeatureDisabled` and the settings UI hides the local rows.
 
@@ -158,8 +159,12 @@ pub struct RemoteLlmSettings {
 
 ### Defaults and migration
 
-- `selection: Disabled` — no silent downloads, no mystery RAM use until the user explicitly picks a backend.
-- `remote.{base_url,api_key,model}`: read from `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` env vars **once at first launch** (when the LLM section of settings.json is empty) and seeded into settings. After that, `settings.json` is the source of truth and env vars are ignored.
+- **New installs (no `settings.json` or LLM section absent):** `selection: Disabled`. No silent downloads, no mystery RAM use until the user explicitly picks a backend.
+- **Existing installs with flat `llm.{base_url, api_key, model}` in `settings.json`:** Custom serde deserializer detects the legacy flat shape (no `selection` key present) and migrates:
+  - If `base_url` and `api_key` are both non-empty → `selection: Remote`, fields move into `remote: { base_url, api_key, model }`.
+  - If only `base_url` is set (no key) → `selection: Disabled`, fields still move into `remote` for easy re-enable.
+  - On next `SettingsManager::update()`, the nested shape is written back, completing the one-time migration.
+- **Env var bootstrap (`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`):** Read **once at first launch** when the LLM section of `settings.json` is absent. If both `LLM_BASE_URL` and `LLM_API_KEY` are set, seed `selection: Remote` (not Disabled) so existing env-var users keep working without manual intervention. After seeding, `settings.json` is the source of truth and env vars are ignored.
 - `local_endpoint_port: 3000` — matches the actio HTTP server port; no separate listener is created until the user picks a different port (see "HTTP endpoint" below).
 
 ### Disk layout
@@ -222,7 +227,7 @@ GET    /settings/llm                     → LlmSettings
 PATCH  /settings/llm                     → update LlmSettings (selection / remote / port)
 GET    /settings/llm/models              → Vec<LocalLlmInfo> with downloaded flags
 POST   /settings/llm/models/download     → body: { llm_id }   starts download
-DELETE /settings/llm/models/{id}         → deletes GGUF + dir, clears active selection if needed
+DELETE /settings/llm/models/{id}         → atomic: unloads engine if loaded, clears selection if active, deletes GGUF + dir
 GET    /settings/llm/download-status     → LlmDownloadStatus
 POST   /settings/llm/test                → tests current selection (see "Test connection")
 ```
@@ -295,9 +300,11 @@ impl EngineSlot {
 
 **Two non-obvious choices:**
 
-1. **Inner `Mutex<mistralrs::Model>` serializes generation calls.** If two requests arrive simultaneously (e.g. `todo_generator` and an external `/v1` client), the second waits. This is correct — mistral.rs's KV cache is per-instance and interleaving would corrupt state. For v1, single-flight is fine. If concurrent generation becomes a real need, the answer is multiple `LocalLlmEngine` instances, **not** multiplexing one.
+1. **Inner `Mutex<mistralrs::Model>` serializes generation calls.** If two requests arrive simultaneously (e.g. `todo_generator` and an external `/v1` client), the second waits. This is correct — mistral.rs's KV cache is per-instance and interleaving would corrupt state. **To prevent external `/v1` traffic from starving internal todo generation, the engine uses a priority queue:** internal callers (`todo_generator`) pass `Priority::Internal` and external callers (`/v1` handler) pass `Priority::External`. The `Mutex` acquisition wrapper checks for waiting internal callers before admitting an external one. Implementation: a simple `AtomicUsize` counter of waiting internal callers — if > 0, external callers yield (tokio::task::yield_now + retry loop with backoff, max 5 retries) before acquiring the mutex. This is lightweight, avoids a full priority queue crate, and ensures internal work isn't blocked for more than one external generation cycle. If concurrent generation becomes a real need in v2, the answer is multiple `LocalLlmEngine` instances, **not** multiplexing one.
 
 2. **Drop-old-before-load-new on model swap.** When the user switches from 0.8B to 2B, `EngineSlot::get_or_load` sets `current = None` (releasing ~700 MB) *before* loading the new model (allocating ~2.5 GB). The alternative — load new, then drop old — would briefly require ~3.2 GB peak. On an 8 GB laptop that could OOM. The cost of drop-first is 1–3 s during which the engine is unavailable, which is invisible because nothing is calling it during a settings change.
+
+3. **Swap/delete while inference is in flight.** `EngineSlot::unload()` and `get_or_load()` (when swapping) **wait for any in-flight generation to complete** before proceeding. The outer `Mutex<Option<Arc<LocalLlmEngine>>>` serializes lifecycle operations (load/swap/unload), and the inner `Mutex<Model>` naturally drains — `unload()` acquires the inner mutex (blocking until the current generation finishes), then drops the engine. Timeout: 120 s. If the timeout fires, force-drop and log a warning. DELETE and model-swap API handlers return only after the unload completes. The UI shows a brief spinner ("Unloading model…") during this wait. **No `409` for in-flight inference** — the operation always succeeds, it just waits.
 
 ### Loading runs on `tokio::task::spawn_blocking`
 
@@ -342,6 +349,26 @@ impl LlmRouter {
 
 `LlmRouter` is constructed once at app startup from the current `LlmSettings.selection` and rebuilt whenever settings change. **When the rebuild transitions away from `Local` (i.e. to `Remote` or `Disabled`), the settings-change handler also calls `EngineSlot::unload()` to release the loaded model from RAM** — otherwise a 2.5 GB engine would sit warm forever after the user opted out.
 
+### Hot reconfiguration design
+
+The current codebase stores `Option<Arc<LlmClient>>` as an immutable field built once at startup. This must change to support live settings changes.
+
+**State owner:** `AppState` holds `router: Arc<RwLock<LlmRouter>>` instead of `llm_client: Option<Arc<LlmClient>>`. Consumers (`todo_generator`, `/v1` handlers) acquire a read lock, clone the `LlmRouter` (cheap — it's an enum of `Arc`s), release the lock, then use the clone. This means generation in flight is not blocked by a concurrent settings change.
+
+**Rebuild sequence** (triggered by `PATCH /settings/llm`):
+
+1. Validate the new settings (port range, model exists, etc). If invalid, return `400` — no state touched.
+2. Persist the new settings to `settings.json`. If disk write fails, return `500` — no state touched.
+3. If transitioning away from `Local`, call `EngineSlot::unload()`. **This waits for any in-flight generation to finish** (the inner `Mutex<Model>` drains naturally) before dropping the engine. Timeout: 120 s (2× the 90 s todo timeout). If the timeout fires, force-drop and log a warning.
+4. Build the new `LlmRouter` from the updated settings.
+5. Acquire write lock on `AppState.router`, swap in the new router, release.
+6. If `local_endpoint_port` changed, rebind the second listener (see "Port rebinding" below).
+7. Return `200` with the updated `LlmSettings`.
+
+**Port rebinding:** The second listener is managed by `LlmEndpoint` which holds `shutdown_tx: Option<tokio::sync::watch::Sender<bool>>`. On port change: signal shutdown on the old channel → await graceful drain → bind new listener → store new shutdown channel. If the new bind fails, restore the old listener and return `400 { "error": "port N is already in use" }`.
+
+**Why `RwLock<LlmRouter>` and not `watch::channel`?** The router holds `Arc` references to stateful objects (`EngineSlot`, `RemoteLlmClient`). A watch channel would require cloning the full router on every receive, which is the same cost as the `RwLock` read + clone pattern but adds channel complexity. The `RwLock` write is held only during the swap (microseconds).
+
 ### Lifecycle event sequence (happy path)
 
 1. App starts. `EngineSlot::current = None`. No mistral.rs in RAM.
@@ -358,11 +385,13 @@ impl LlmRouter {
 
 ### Two listeners, two ports (when port differs)
 
-The actio HTTP server stays on a fixed port (3000) for `/settings/...` and other internal routes. A **second** axum listener is bound to `127.0.0.1:{local_endpoint_port}` and serves only `/v1/chat/completions` and `/v1/models`, sharing the same `EngineSlot`. The user-configurable port is the second listener.
+The actio HTTP server stays on its configured port (currently 3000, with fallback probe to 3009) for `/settings/...` and other internal routes. **Note:** the current backend probes ports 3000–3009 at startup (`lib.rs:126`), so the actual backend port is not guaranteed to be 3000. This feature stores the **actual bound backend port** in `AppState.backend_port: u16` after the probe succeeds, and the frontend reads it via `GET /health` or environment variable. (The frontend's hardcoded `127.0.0.1:3000` is a pre-existing issue independent of this feature — tracked separately.)
+
+A **second** axum listener is bound to `127.0.0.1:{local_endpoint_port}` and serves only `/v1/chat/completions` and `/v1/models`, sharing the same `EngineSlot`. The user-configurable port is the second listener. Both listeners bind `127.0.0.1` (never `0.0.0.0`).
 
 **Why not single-listener?** Collapsing "LLM port" into "actio backend port" would technically honor the configurable-port request but defeat the actual use case (pointing tools like Cursor at a port like `11434` for Ollama-compat detection). The extra listener is small in absolute terms.
 
-**When `local_endpoint_port == backend_port` (the default):** the second listener is **not** started. Instead, the `/v1/*` routes are mounted on the backend listener so curl on `:3000/v1/...` still works. When the ports differ, the backend listener removes its `/v1/*` routes and the second listener gets them — the contract "the LLM endpoint is at the configured port, period" is preserved.
+**When `local_endpoint_port` matches the actual backend port (the default):** the second listener is **not** started. Instead, the `/v1/*` routes are mounted on the backend listener so curl on `:{backend_port}/v1/...` still works. When the ports differ, the backend listener removes its `/v1/*` routes and the second listener gets them — the contract "the LLM endpoint is at the configured port, period" is preserved.
 
 ### Routes
 
@@ -459,7 +488,7 @@ Four state slices:
 
 1. **Backend radio is the master toggle.** Picking "Disabled" hides the local-model list and remote-config form. Selection is persisted on click via `PATCH /settings/llm` — no save button.
 2. **Local model radio is disabled when not downloaded.** Same pattern as `ModelSetup.tsx:188`. The user clicks `[Download]` first; the radio becomes selectable once `downloaded: true`.
-3. **Delete on the currently-selected model warns and clears selection.** "Delete X? It is currently selected — action item extraction will be disabled until you pick another model." On confirm: `DELETE /settings/llm/models/{id}`, then `PATCH /settings/llm { selection: { kind: 'disabled' } }`. Mirrors `ModelSetup.tsx:124-135`.
+3. **Delete on the currently-selected model warns and clears selection.** "Delete X? It is currently selected — action item extraction will be disabled until you pick another model." On confirm: `DELETE /settings/llm/models/{id}`. **The DELETE handler is atomic** — if the deleted model is the active selection, the backend automatically sets `selection: Disabled`, unloads the engine, rebuilds the router, persists the updated settings, and deletes the file, all in one request. The frontend refreshes settings after the DELETE returns to pick up the new selection state. No separate `PATCH` needed.
 4. **Port input is debounced + has an explicit Apply button.** Auto-applying on every keystroke would tear down and rebind the listener constantly. Validation: integer 1024–65535. On Apply: `PATCH /settings/llm { local_endpoint_port: N }`. Backend tries to bind; success returns 200, failure returns `400 { error: "port N is already in use by another process" }` and the input goes red.
 5. **The endpoint URL string updates live based on the port input** (not waiting for Apply). Pure display, no requests fired.
 6. **The "currently sharing the actio backend port" hint is conditional.** Shown only when `local_endpoint_port == 3000`. When the ports differ, replaced with: "✓ LLM endpoint is on a separate port. The actio backend remains on port 3000."
@@ -554,13 +583,23 @@ pub enum LlmDownloadError {
 1. **Cold load fails because GGUF is corrupt.** → `CorruptModelFile`. **Downloader auto-deletes the corrupt file** so the user can re-download without manually clicking Delete first. Settings UI red banner: *"Qwen3.5 0.8B failed to load — file appears corrupt and was deleted. Click Download to re-download."* Selection stays as-is.
 2. **Cold load OOM.** → `OutOfMemory`. UI banner: *"Not enough memory to load Qwen3.5 2B (needed ~2500 MB). Try Qwen3.5 0.8B or close other applications."* No auto-switch.
 3. **Cold load — unsupported CPU.** → `UnsupportedCpu`. UI banner: *"Your CPU lacks instructions required by the local LLM (AVX2). Use the Remote option instead."* Permanent failure.
-4. **Inference fails mid-generation.** → `InferenceFailed`. Router propagates up to `todo_generator`, which logs and returns empty `Vec<LlmTodoItem>`. **Transcript is preserved.** Toast in meeting view: *"Action item extraction failed for this meeting. Check Settings → Language Models."* Same semantics as the existing remote LLM failure path.
-5. **Inference returns invalid JSON.** **First-line defense:** mistral.rs supports constrained generation against a JSON schema — pass the `LlmTodoResponse` schema as a constraint so output is forced parseable. **Second-line defense (fallback if constrained generation isn't available for the loaded model):** one retry with a stricter prompt suffix ("Respond with valid JSON only. No prose."). If retry also fails, return empty todos and log the raw response. Same toast as #4.
+4. **Inference fails mid-generation.** → `InferenceFailed`. Router propagates up to `todo_generator`, which logs and returns empty `Vec<LlmTodoItem>`. **Transcript is preserved.** The failure is logged via `tracing::warn!`. **No toast in v1** — current todo generation is fire-and-forget background work (`session.rs:131`) with log-only outcomes, and there is no event/status channel to the frontend for background task results. Adding a WebSocket-based notification channel for background task failures is a v2 candidate. Same semantics as the existing remote LLM failure path.
+5. **Inference returns invalid JSON.** **First-line defense:** mistral.rs supports constrained generation against a JSON schema — pass the `LlmTodoResponse` schema as a constraint so output is forced parseable. **Second-line defense (fallback if constrained generation isn't available for the loaded model):** one retry with a stricter prompt suffix ("Respond with valid JSON only. No prose."). If retry also fails, return empty todos and **log only metadata** (response length, first 50 chars truncated with `…`, model id) — **not** the full raw response, which may contain transcript-derived content and would undermine the privacy motivation of running locally. Same failure semantics as #4.
 6. **Download fails partway.** Network drop, server 5xx, disk full. Downloader deletes the `.partial`, surfaces error in UI status area. User clicks Download again.
 7. **Download succeeds but hash mismatches.** Auto-delete file, set `HashMismatch`, surface in UI: *"Downloaded file failed integrity check. Try again."* Two consecutive mismatches → likely stale catalog SHA256, file a bug.
 8. **User changes endpoint port to one in use.** PATCH fails at the bind step. Settings keep their old value (bind happens **before** persisting). UI shows `400 { error: "port N is already in use by another process" }` and input goes red.
 9. **User changes endpoint port from 3000 to something else.** Tear down second listener if it exists, bind a new one, mount `/v1/*` routes on it. The actio backend listener removes its `/v1/*` routes since they now live on the new listener. **If teardown or rebind fails halfway, restore the previous state** — never end up with neither listener serving `/v1`.
 10. **User deletes a model that's currently loaded in RAM.** DELETE handler calls `EngineSlot::unload()` first (drops mmap'd file handles), then removes the file. Without the explicit unload, deletion would fail on Windows (file in use) or succeed on Unix while the engine points at an orphaned inode.
+
+### Boot-time resilience
+
+On app startup, settings are loaded from `settings.json` and the `LlmRouter` is constructed. Several edge cases can occur:
+
+1. **Persisted `local_endpoint_port` is occupied.** Log a warning, skip binding the second listener. The `/v1` routes remain on the backend listener if ports matched, or are unavailable until the user changes the port. The rest of the app boots normally.
+2. **Build lacks `local-llm` feature but `selection: Local { id }` is persisted.** The `LocalLlmEngine` stub returns `FeatureDisabled`. Router construction falls back to `Disabled` with a `warn!` log. Settings file is **not** rewritten (the user may switch to a build with the feature). The UI shows the "Local" option as unavailable with an explanation.
+3. **Saved `selection: Local { id: "qwen3.5-2b-q4km" }` but the model file was deleted.** Router is constructed as `Local { ... }` — this is fine because the engine is lazy-loaded. The error surfaces on first `generate_todos` call as `NotDownloaded`, which is logged and returns empty todos. The settings UI shows the model as "not downloaded" with a Download button. No silent rewrite of the selection.
+4. **`settings.json` is corrupt (invalid JSON).** Existing behavior: `serde_json::from_str` fails, `SettingsManager::new` falls back to `AppSettings::default()`. This is unchanged. A `warn!` log is emitted. The corrupt file is overwritten on the next settings update.
+5. **Disk is full when trying to persist settings.** `SettingsManager::update()` returns the updated in-memory settings but logs a `warn!`. The PATCH handler returns `200` (the in-memory state is correct) but includes a response header `X-Settings-Persist: failed` so the frontend can optionally warn the user. This matches the current behavior of silently swallowing save failures but makes it observable.
 
 ### Logging (no new dependencies)
 
@@ -625,6 +664,8 @@ These are deliberately out of scope so the implementation plan doesn't drift int
 15. **Multiple concurrent local models loaded simultaneously.** One slot, one engine.
 16. **Model upload / sideloading custom GGUFs.** Catalog only. v2 candidate — needs UX for trust and metadata.
 17. **Streaming todo extraction in the meeting UI.** `todo_generator` calls non-streaming `chat_completion`. The streaming path exists only for `/v1/*` external clients.
+18. **Background task failure toast in the meeting view.** Current todo generation is fire-and-forget with log-only outcomes. A WebSocket notification channel for surfacing background failures to the UI is a v2 candidate.
+19. **Rich error status codes on settings routes.** Current error plumbing collapses to generic `500` via `AppApiError`. A richer status code matrix (`400`/`404`/`409`/`507`) is added for the new `/settings/llm/*` routes, but retrofitting it onto existing routes is out of scope.
 
 ## Open items the implementation plan must resolve
 
@@ -633,7 +674,29 @@ These are deliberately unanswered in the spec because they require either extern
 1. **Exact `mistralrs` crate version and API surface.** Pinning the dependency and verifying the `Model::load_gguf` / `chat_completion` shape against the latest published version.
 2. **Confirm Qwen3.5-0.8B and Qwen3.5-2B repos host Q4_K_M GGUF files** (or their `*-GGUF` siblings do), and capture exact filenames + SHA256s. WebFetch against `huggingface.co` is the first task.
 3. **Confirm mistral.rs supports constrained generation against a JSON schema for Qwen3.5 GGUF.** If not, failure-mode 5's first-line defense becomes the second-line retry-with-stricter-prompt.
-4. **Confirm `actio-core/src/lib.rs` startup wiring** — where `LlmRouter` and `EngineSlot` get constructed, and how settings-change broadcasts trigger router rebuilds. (Today's `LlmClient` instantiation point is the natural starting place.)
+4. ~~**Confirm `actio-core/src/lib.rs` startup wiring.**~~ **Resolved in rev 2:** Hot reconfiguration section now specifies `Arc<RwLock<LlmRouter>>` in `AppState`, rebuild sequence, and port rebinding lifecycle.
 5. **Confirm tokenizer handling.** Some GGUFs embed the tokenizer; some require a separate `tokenizer.json`. The catalog `gguf_filename` field assumes the former; the `llms/{id}/` directory layout supports the latter as a fallback if needed.
 
 These resolve at the start of implementation, not before.
+
+## Revision history
+
+### Rev 2 (2026-04-11) — Codex review findings
+
+Addressed 13 findings from automated Codex review:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | HIGH | `0.0.0.0` exposes `/v1` on LAN | All listeners bind `127.0.0.1`. Main backend binding also changed. |
+| 2 | HIGH | `/v1` can't cold-start itself | `/v1/chat/completions` triggers lazy `get_or_load` instead of returning `503`. |
+| 3 | HIGH | Hot reconfiguration underdesigned | Added "Hot reconfiguration design" section with `Arc<RwLock<LlmRouter>>`, rebuild sequence, port rebinding. |
+| 4 | HIGH | Migration breaks existing remote users | Legacy flat shape auto-detects `selection: Remote` when `base_url`+`api_key` present. Env var bootstrap also seeds `Remote`. |
+| 5 | HIGH | Single Mutex starves internal todo generation | Added priority mechanism: internal callers get precedence via `AtomicUsize` counter. |
+| 6 | HIGH | Swap/delete during active inference undefined | Explicit: wait for in-flight generation (120 s timeout), then proceed. No `409`. |
+| 7 | MEDIUM | Settings API contract gaps | New `/settings/llm/*` routes use proper status codes. Existing routes unchanged (out of scope). |
+| 8 | MEDIUM | Port model inconsistent | Documented 3000–3009 probe, `AppState.backend_port`, and how LLM port interacts. |
+| 9 | MEDIUM | Toast has no delivery path | Removed toast promise. Log-only for v1. Toast channel is v2 non-goal #18. |
+| 10 | MEDIUM | Raw response logging leaks content | Log metadata only (length, truncated prefix). No full response. |
+| 11 | MEDIUM | Delete flow contradictory | DELETE is atomic — backend clears selection if active. No separate PATCH. |
+| 12 | MEDIUM | OpenAI compat promise too broad | Narrowed to "tested with curl and Python openai client". |
+| 13 | MEDIUM | Boot-time edge cases missing | Added "Boot-time resilience" section with 5 explicit downgrade behaviors. |
