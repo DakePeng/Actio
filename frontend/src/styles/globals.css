@@ -8,6 +8,12 @@
   font-display: swap;
 }
 
+@property --gradient-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
 @theme {
   --color-bg: #f8fafc;
   --color-surface: #ffffff;
@@ -3828,4 +3834,69 @@ body.body--native-board .desktop-window {
 .settings-btn--secondary:hover:not(:disabled) {
   background: var(--color-bg-hover);
   filter: none;
+}
+
+/* === Actio Icon: animated gradient letter === */
+.actio-icon {
+  display: inline-block;
+  font-family: 'Grand Hotel', cursive;
+  font-weight: 400;
+  line-height: 1;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  --gradient-angle: 0deg;
+}
+
+.actio-icon--recording {
+  background-image: conic-gradient(
+    from var(--gradient-angle) at 50% 55%,
+    #8b5cf6 0deg,
+    #8b5cf6 60deg,
+    #9b8af5 90deg,
+    #b4a4fc 120deg,
+    #c4b5fd 150deg,
+    #ddd6fe 180deg,
+    #c4b5fd 210deg,
+    #b4a4fc 230deg,
+    #9b8af5 260deg,
+    #8b5cf6 300deg,
+    #8b5cf6 360deg
+  );
+  animation: actio-flow 4s linear infinite;
+}
+
+.actio-icon--processing {
+  background-image: conic-gradient(
+    from var(--gradient-angle) at 50% 55%,
+    #4f46e5 0deg,
+    #4f46e5 60deg,
+    #6366f1 90deg,
+    #06b6d4 130deg,
+    #22d3ee 170deg,
+    #67e8f9 190deg,
+    #22d3ee 220deg,
+    #06b6d4 250deg,
+    #6366f1 280deg,
+    #4f46e5 320deg,
+    #4f46e5 360deg
+  );
+  animation: actio-flow 6s linear infinite;
+}
+
+.actio-icon--paused {
+  background-image: conic-gradient(
+    from 135deg at 50% 55%,
+    #475569 0deg,
+    #475569 90deg,
+    #64748b 150deg,
+    #94a3b8 180deg,
+    #64748b 210deg,
+    #475569 270deg,
+    #475569 360deg
+  );
+}
+
+@keyframes actio-flow {
+  to { --gradient-angle: 360deg; }
 }
