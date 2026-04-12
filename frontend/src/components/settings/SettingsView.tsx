@@ -10,21 +10,22 @@ import { AudioSettings } from './AudioSettings';
 export function SettingsView() {
   return (
     <div className="settings-view">
+      {/* ── General ── */}
+      <h2 className="settings-group-title">General</h2>
       <ProfileSection />
-      <div className="settings-divider" />
-      <LabelManager />
-      <div className="settings-divider" />
       <PreferencesSection />
-      <div className="settings-divider" />
-      <RecordingSection />
-      <div className="settings-divider" />
-      <TraySection />
-      <div className="settings-divider" />
+
+      {/* ── Board ── */}
+      <h2 className="settings-group-title">Board</h2>
+      <LabelManager />
+
+      {/* ── Transcription & AI ── */}
+      <h2 className="settings-group-title">Transcription &amp; AI</h2>
       <AudioSettings />
-      <div className="settings-divider" />
+      <RecordingSection />
       <LlmSettings />
-      <div className="settings-divider" />
       <ModelSetup />
+      <TraySection />
     </div>
   );
 }

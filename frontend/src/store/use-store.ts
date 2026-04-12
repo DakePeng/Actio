@@ -53,7 +53,7 @@ interface AppState {
 
 const api = createActioApiClient();
 const initialFilter: FilterState = { priority: null, label: null, search: '' };
-const defaultProfile: Profile = { name: '', initials: 'JD' };
+const defaultProfile: Profile = { name: '' };
 const defaultPreferences: Preferences = { theme: 'system', launchAtLogin: false, notifications: true };
 
 function loadProfile(): Profile {

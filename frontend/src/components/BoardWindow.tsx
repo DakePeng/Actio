@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { Board } from './Board';
@@ -9,18 +9,52 @@ import { PeopleTab } from './PeopleTab';
 import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
 
+// Dynamic greetings — picked randomly each time the board opens.
+// Each entry has a `text` and an optional `nameStyle`:
+//   'suffix'  → "Ready to act, Dake?"
+//   'none'    → shown as-is regardless of name
+const GREETINGS: { text: string; nameStyle: 'suffix' | 'none' }[] = [
+  { text: 'Ready to act?', nameStyle: 'suffix' },
+  { text: "Let's get things done", nameStyle: 'suffix' },
+  { text: "What's on the agenda?", nameStyle: 'suffix' },
+  { text: 'Time to make moves', nameStyle: 'suffix' },
+  { text: 'Your board awaits', nameStyle: 'suffix' },
+  { text: "What's next?", nameStyle: 'suffix' },
+  { text: 'Pick up where you left off', nameStyle: 'suffix' },
+  { text: "Let's lock in", nameStyle: 'suffix' },
+];
+
+function pickGreeting(name: string): string {
+  const entry = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+  if (entry.nameStyle === 'suffix' && name) {
+    // Insert name before trailing punctuation: "Ready to act, Dake?"
+    const punct = entry.text.match(/[?!.]$/);
+    if (punct) {
+      return `${entry.text.slice(0, -1)}, ${name}${punct[0]}`;
+    }
+    return `${entry.text}, ${name}`;
+  }
+  return entry.text;
+}
+
 type ExitTarget = { x: number; y: number; scale: number } | null;
 
 export function BoardWindow() {
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
   const activeTab = useStore((s) => s.ui.activeTab);
+  const profileName = useStore((s) => s.profile.name);
   const setBoardWindow = useStore((s) => s.setBoardWindow);
   const setNewReminderBar = useStore((s) => s.setNewReminderBar);
   const clearFeedback = useStore((s) => s.clearFeedback);
 
+  // Re-pick a greeting each time the board opens
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const greeting = useMemo(() => pickGreeting(profileName), [profileName, showBoardWindow]);
+
   const windowRef = useRef<HTMLElement>(null);
   const [exitTarget, setExitTarget] = useState<ExitTarget>(null);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
 
   async function triggerClose() {
     clearFeedback();
@@ -151,7 +185,7 @@ export function BoardWindow() {
               <div className="desktop-toolbar">
                 <div className="desktop-toolbar__brand">
                   <div>
-                    <div className="desktop-toolbar__title">Actio board</div>
+                    <div className="desktop-toolbar__title">{greeting}</div>
                   </div>
                 </div>
 

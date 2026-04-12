@@ -25,7 +25,7 @@ describe('useStore settings actions', () => {
   });
 
   it('setProfile merges patch and persists to localStorage', () => {
-    useStore.getState().setProfile({ name: 'Jane Doe', initials: 'JD' });
+    useStore.getState().setProfile({ name: 'Jane Doe' });
     expect(useStore.getState().profile.name).toBe('Jane Doe');
     expect(JSON.parse(localStorage.getItem('actio-profile') ?? '{}')).toMatchObject({ name: 'Jane Doe' });
   });

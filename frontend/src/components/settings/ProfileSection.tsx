@@ -18,19 +18,6 @@ export function ProfileSection() {
           placeholder="Your name"
         />
       </div>
-      <div className="settings-field">
-        <label className="settings-field__label" htmlFor="profile-initials">Initials</label>
-        <input
-          id="profile-initials"
-          type="text"
-          className="settings-input"
-          value={profile.initials}
-          onChange={(e) => setProfile({ initials: e.target.value.slice(0, 2).toUpperCase() })}
-          placeholder="JD"
-          maxLength={2}
-          style={{ maxWidth: '80px' }}
-        />
-      </div>
     </section>
   );
 }

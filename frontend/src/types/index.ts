@@ -111,7 +111,6 @@ export interface FilterState {
 
 export interface Profile {
   name: string;
-  initials: string;
 }
 
 export interface Preferences {
