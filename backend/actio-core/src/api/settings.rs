@@ -136,9 +136,9 @@ pub async fn patch_settings(
     State(state): State<AppState>,
     Json(patch): Json<SettingsPatch>,
 ) -> Json<AppSettings> {
-    // Snapshot the current model before applying the patch so we can
-    // detect a change and hot-swap the pipeline.
+    // Snapshot before applying the patch.
     let old_model = state.settings_manager.get().await.audio.asr_model.clone();
+    let llm_changed = patch.llm.is_some();
     let new_settings = state.settings_manager.update(patch).await;
     let new_model = new_settings.audio.asr_model.clone();
 
@@ -151,6 +151,23 @@ pub async fn patch_settings(
         state.pipeline_restart.notify_one();
     }
 
+    if llm_changed {
+        // Rebuild the router. If transitioning away from Local, unload
+        // the engine to release RAM.
+        let new_router = crate::build_router_from_settings(
+            &new_settings.llm,
+            &state.engine_slot,
+            state.remote_client_envseed.clone(),
+        );
+        let was_local = state.router.read().await.is_local();
+        let now_local = new_router.is_local();
+        if was_local && !now_local {
+            state.engine_slot.unload().await;
+            tracing::info!("LLM selection changed away from Local — unloaded engine");
+        }
+        *state.router.write().await = new_router;
+    }
+
     Json(new_settings)
 }
 
@@ -160,57 +177,112 @@ pub struct LlmTestResult {
     pub message: String,
 }
 
-/// POST /settings/llm/test — test LLM connectivity with a minimal chat completion request.
+/// POST /settings/llm/test — test the active LLM backend with a tiny prompt.
 pub async fn test_llm(
     State(state): State<AppState>,
 ) -> Result<Json<LlmTestResult>, StatusCode> {
+    use crate::engine::llm_router::LlmSelection;
+    use crate::engine::llm_prompt::ChatMessage;
+    use crate::engine::local_llm_engine::{EnginePriority, GenerationParams};
+
     let settings = state.settings_manager.get().await;
+    let started = std::time::Instant::now();
 
-    let Some(base_url) = &settings.llm.remote.base_url else {
-        return Ok(Json(LlmTestResult {
+    match &settings.llm.selection {
+        LlmSelection::Disabled => Ok(Json(LlmTestResult {
             success: false,
-            message: "No LLM base URL configured".into(),
-        }));
-    };
-
-    let Some(api_key) = &settings.llm.remote.api_key else {
-        return Ok(Json(LlmTestResult {
-            success: false,
-            message: "No API key configured".into(),
-        }));
-    };
-
-    let client = reqwest::Client::new();
-    let model = settings.llm.remote.model.as_deref().unwrap_or("gpt-4o-mini");
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-
-    match client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 1
-        }))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => Ok(Json(LlmTestResult {
-            success: true,
-            message: format!("Connected to {} (model: {})", base_url, model),
+            message: "No LLM backend selected. Pick Local or Remote in Settings.".into(),
         })),
-        Ok(resp) => Ok(Json(LlmTestResult {
-            success: false,
-            message: format!(
-                "HTTP {}: {}",
-                resp.status(),
-                resp.text().await.unwrap_or_default()
-            ),
-        })),
-        Err(e) => Ok(Json(LlmTestResult {
-            success: false,
-            message: format!("Connection failed: {}", e),
-        })),
+        LlmSelection::Local { id } => {
+            let engine = match state.engine_slot.get_or_load(id).await {
+                Ok(e) => e,
+                Err(e) => {
+                    return Ok(Json(LlmTestResult {
+                        success: false,
+                        message: format!("Failed to load {id}: {e}"),
+                    }));
+                }
+            };
+            let messages = vec![
+                ChatMessage {
+                    role: "user".into(),
+                    content: "Reply with the single word 'ok' and nothing else.".into(),
+                },
+            ];
+            match engine
+                .chat_completion(messages, GenerationParams {
+                    max_tokens: 8,
+                    temperature: 0.0,
+                    json_mode: false,
+                }, EnginePriority::Internal)
+                .await
+            {
+                Ok(resp) => Ok(Json(LlmTestResult {
+                    success: true,
+                    message: format!(
+                        "{} responded in {} ms: {}",
+                        engine.metadata().name,
+                        started.elapsed().as_millis(),
+                        resp.trim(),
+                    ),
+                })),
+                Err(e) => Ok(Json(LlmTestResult {
+                    success: false,
+                    message: format!("{}: {e}", engine.metadata().name),
+                })),
+            }
+        }
+        LlmSelection::Remote => {
+            let Some(base_url) = &settings.llm.remote.base_url else {
+                return Ok(Json(LlmTestResult {
+                    success: false,
+                    message: "Remote selected but no base URL configured".into(),
+                }));
+            };
+            let Some(api_key) = &settings.llm.remote.api_key else {
+                return Ok(Json(LlmTestResult {
+                    success: false,
+                    message: "Remote selected but no API key configured".into(),
+                }));
+            };
+            let model = settings.llm.remote.model.as_deref().unwrap_or("gpt-4o-mini");
+            let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            let client = reqwest::Client::new();
+
+            match client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&serde_json::json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Reply with the single word 'ok' and nothing else."}],
+                    "max_tokens": 8
+                }))
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => Ok(Json(LlmTestResult {
+                    success: true,
+                    message: format!(
+                        "Connected to {} (model: {}) in {} ms",
+                        base_url,
+                        model,
+                        started.elapsed().as_millis()
+                    ),
+                })),
+                Ok(resp) => Ok(Json(LlmTestResult {
+                    success: false,
+                    message: format!(
+                        "HTTP {}: {}",
+                        resp.status(),
+                        resp.text().await.unwrap_or_default()
+                    ),
+                })),
+                Err(e) => Ok(Json(LlmTestResult {
+                    success: false,
+                    message: format!("Connection failed: {}", e),
+                })),
+            }
+        }
     }
 }

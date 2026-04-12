@@ -1,4 +1,5 @@
 pub mod label;
+pub mod llm;
 pub mod reminder;
 pub mod session;
 pub mod settings;
@@ -94,6 +95,14 @@ pub fn router(state: AppState) -> Router {
         .route("/settings/models/warmup", post(settings::warmup_models))
         .route("/settings/models/:id", delete(settings::delete_model))
         .route("/settings/audio-devices", get(settings::list_audio_devices))
+        // settings / local llm
+        .route("/settings/llm/models", get(llm::list_local_llms))
+        .route("/settings/llm/models/download", post(llm::start_llm_download))
+        .route("/settings/llm/models/:id", delete(llm::delete_local_llm))
+        .route("/settings/llm/download-status", get(llm::llm_download_status))
+        // OpenAI-compat
+        .route("/v1/models", get(llm::openai_list_models))
+        .route("/v1/chat/completions", post(llm::openai_chat_completions))
         .with_state(state)
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }
