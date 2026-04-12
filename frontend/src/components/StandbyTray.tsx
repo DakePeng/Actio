@@ -136,12 +136,9 @@ export function StandbyTray() {
         <div className="tray-toggle">
           <button type="button" className="tray-brand-trigger" onClick={() => setExpanded((prev) => !prev)}>
             <div className="tray-brand">
-              <ActioIcon state={iconState} size={20} />
-              <div>
-                <div className="tray-brand-name">actio</div>
-                <div className="tray-brand-subtitle">
-                  {newCount > 0 ? `${newCount} fresh captures waiting` : 'Quiet queue, board ready'}
-                </div>
+              <ActioIcon state={iconState} size={36} />
+              <div className="tray-brand-subtitle">
+                {newCount > 0 ? `${newCount} fresh captures waiting` : 'Quiet queue, board ready'}
               </div>
             </div>
           </button>
