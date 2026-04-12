@@ -254,9 +254,14 @@ export function LlmSettings() {
             checked={selection.kind === 'local'}
             onChange={() => {
               const first = models.find((m) => m.downloaded);
-              if (first) handleSelectionChange({ kind: 'local', id: first.id });
+              if (first) {
+                handleSelectionChange({ kind: 'local', id: first.id });
+              } else {
+                // Allow selecting Local even without downloads so the
+                // model list (with download buttons) becomes visible.
+                setSelection({ kind: 'local', id: '' });
+              }
             }}
-            disabled={!models.some((m) => m.downloaded)}
           />
           <span>Local</span>
           <span className="settings-row__sublabel"> — Run a model on this machine</span>
