@@ -222,12 +222,8 @@ body.body--standby .tray--launcher:hover {
 .brand-mark {
   width: 42px;
   height: 42px;
-  border-radius: 14px;
   display: grid;
   place-items: center;
-  background: var(--color-accent);
-  color: white;
-  box-shadow: 0 14px 32px rgba(79, 70, 229, 0.28);
 }
 
 .brand-copy {
@@ -1089,14 +1085,6 @@ body.body--standby .tray--launcher:hover {
   font-size: 0.9rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-}
-
-.tray-brand-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--color-accent);
-  animation: pulse 2s infinite;
 }
 
 .tray-brand-name {
@@ -2153,10 +2141,6 @@ body {
 
 .tray-brand {
   gap: 10px;
-}
-
-.tray-brand-dot {
-  animation: none;
 }
 
 .tray-brand-name {

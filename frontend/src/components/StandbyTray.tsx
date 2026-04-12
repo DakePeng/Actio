@@ -7,6 +7,8 @@ import { sortByPriority } from '../utils/priority';
 import { formatTimeShort } from '../utils/time';
 import { SwipeActionRow } from './swipe/SwipeActionRow';
 import { SwipeActionCoordinatorProvider } from './swipe/SwipeActionCoordinator';
+import { ActioIcon } from './ActioIcon';
+import { useActioIconState } from '../hooks/useActioIconState';
 
 // Context to share tray state with FAB
 export const StandbyTrayContext = createContext({ expanded: false });
@@ -25,6 +27,7 @@ export function StandbyTray() {
   const newCount = reminders.filter((r) => r.isNew && r.archivedAt === null).length;
   const [expanded, setExpanded] = useState(false);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const iconState = useActioIconState();
 
   const topReminders = useMemo(() => {
     return [...reminders].filter((r) => r.archivedAt === null).sort(sortByPriority).slice(0, 6);
@@ -133,7 +136,7 @@ export function StandbyTray() {
         <div className="tray-toggle">
           <button type="button" className="tray-brand-trigger" onClick={() => setExpanded((prev) => !prev)}>
             <div className="tray-brand">
-              <span className="tray-brand-dot" aria-hidden="true" />
+              <ActioIcon state={iconState} size={20} />
               <div>
                 <div className="tray-brand-name">actio</div>
                 <div className="tray-brand-subtitle">
