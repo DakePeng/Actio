@@ -4,6 +4,7 @@ pub mod audio_capture;
 pub mod diarization;
 pub mod inference_pipeline;
 pub mod llm_client;
+pub mod llm_prompt;
 pub mod metrics;
 pub mod model_manager;
 pub mod todo_generator;
