@@ -136,7 +136,22 @@ pub async fn patch_settings(
     State(state): State<AppState>,
     Json(patch): Json<SettingsPatch>,
 ) -> Json<AppSettings> {
-    Json(state.settings_manager.update(patch).await)
+    // Snapshot the current model before applying the patch so we can
+    // detect a change and hot-swap the pipeline.
+    let old_model = state.settings_manager.get().await.audio.asr_model.clone();
+    let new_settings = state.settings_manager.update(patch).await;
+    let new_model = new_settings.audio.asr_model.clone();
+
+    if old_model != new_model {
+        tracing::info!(
+            old = ?old_model,
+            new = ?new_model,
+            "ASR model changed in settings — signalling pipeline restart"
+        );
+        state.pipeline_restart.notify_one();
+    }
+
+    Json(new_settings)
 }
 
 #[derive(Serialize)]
@@ -151,14 +166,14 @@ pub async fn test_llm(
 ) -> Result<Json<LlmTestResult>, StatusCode> {
     let settings = state.settings_manager.get().await;
 
-    let Some(base_url) = &settings.llm.base_url else {
+    let Some(base_url) = &settings.llm.remote.base_url else {
         return Ok(Json(LlmTestResult {
             success: false,
             message: "No LLM base URL configured".into(),
         }));
     };
 
-    let Some(api_key) = &settings.llm.api_key else {
+    let Some(api_key) = &settings.llm.remote.api_key else {
         return Ok(Json(LlmTestResult {
             success: false,
             message: "No API key configured".into(),
@@ -166,7 +181,7 @@ pub async fn test_llm(
     };
 
     let client = reqwest::Client::new();
-    let model = settings.llm.model.as_deref().unwrap_or("gpt-4o-mini");
+    let model = settings.llm.remote.model.as_deref().unwrap_or("gpt-4o-mini");
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
     match client
