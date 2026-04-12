@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Grand Hotel';
+  src: url('/fonts/GrandHotel-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   --color-bg: #f8fafc;
   --color-surface: #ffffff;
@@ -3686,6 +3694,24 @@ body.body--native-board .desktop-window {
   color: #22c55e;
   font-weight: 700;
 }
+.model-list__loading-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--color-bg-hover, #e0e0e0);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.model-list__loading-bar-fill {
+  height: 100%;
+  width: 40%;
+  background: var(--color-accent, #3b82f6);
+  border-radius: 3px;
+  animation: loading-slide 1.5s ease-in-out infinite;
+}
+@keyframes loading-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
 
 .model-list__lang {
   font-size: 11px;
@@ -3723,6 +3749,12 @@ body.body--native-board .desktop-window {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+}
+.language-model-source-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 .language-model-port-row {
   display: flex;
@@ -3765,4 +3797,35 @@ body.body--native-board .desktop-window {
 .language-model-test-fail {
   color: #d33;
   font-size: 12px;
+}
+
+.settings-btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--color-accent, #3b82f6);
+  background: var(--color-accent, #3b82f6);
+  color: #fff;
+  transition: filter 0.15s, transform 0.05s;
+}
+.settings-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.settings-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.settings-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.settings-btn--secondary {
+  background: transparent;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.settings-btn--secondary:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  filter: none;
 }
