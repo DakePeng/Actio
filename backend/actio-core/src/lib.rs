@@ -17,6 +17,7 @@ use crate::config::LlmConfig;
 use crate::engine::app_settings::SettingsManager;
 use crate::engine::inference_pipeline::InferencePipeline;
 use crate::engine::llm_downloader::LlmDownloader;
+use crate::engine::llm_endpoint::LocalLlmEndpoint;
 use crate::engine::llm_router::{LlmRouter, LlmSelection};
 use crate::engine::local_llm_engine::EngineSlot;
 use crate::engine::metrics::Metrics;
@@ -52,6 +53,8 @@ pub struct AppState {
     pub remote_client_envseed: Option<Arc<RemoteLlmClient>>,
     /// Active LLM router. Rebuilt whenever LlmSettings.selection changes.
     pub router: Arc<tokio::sync::RwLock<LlmRouter>>,
+    /// Optional second listener for the /v1/* endpoint on a configurable port.
+    pub llm_endpoint: Arc<tokio::sync::Mutex<LocalLlmEndpoint>>,
 }
 
 /// Start the Axum HTTP server. Called from Tauri's setup hook.
@@ -110,6 +113,8 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     );
     let router = Arc::new(tokio::sync::RwLock::new(initial_router));
 
+    let llm_endpoint = Arc::new(tokio::sync::Mutex::new(LocalLlmEndpoint::new()));
+
     let state = AppState {
         pool,
         aggregator,
@@ -122,7 +127,20 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         llm_downloader,
         remote_client_envseed,
         router,
+        llm_endpoint,
     };
+
+    // If the configured local_endpoint_port differs from the backend port,
+    // start the second listener now.
+    let configured_port = initial_settings.llm.local_endpoint_port;
+    if configured_port != config.http_port {
+        let state_clone = state.clone();
+        let mut endpoint = state.llm_endpoint.lock().await;
+        if let Err(e) = endpoint.start_or_rebind(configured_port, state_clone).await {
+            warn!(port = configured_port, error = %e,
+                "Failed to bind local LLM endpoint listener at startup; /v1 routes may be unavailable on configured port");
+        }
+    }
 
     // Spawn the always-on inference pipeline. The design intent is that the
     // app listens continuously — UI clients (Recording tab, chat composer
