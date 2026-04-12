@@ -59,6 +59,21 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
+# Local LLM (feature-gated)
+mistralrs = { version = "0.8", default-features = false, optional = true }
+
+# Hash verification for LLM downloads
+sha2 = "0.10"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"
+
+[features]
+default = ["local-llm"]
+local-llm = ["dep:mistralrs"]
+local-llm-metal = ["local-llm", "mistralrs/metal"]
+
 [lib]
 name = "actio_core"
 path = "src/lib.rs"

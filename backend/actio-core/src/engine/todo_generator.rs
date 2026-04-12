@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 use tracing::{info, warn, error};
 use uuid::Uuid;
 
-use crate::engine::llm_client::LlmClient;
+use crate::engine::remote_llm_client::RemoteLlmClient;
 use crate::repository::{speaker as speaker_repo, reminder as reminder_repo, transcript};
 use crate::domain::types::{NewReminder, Transcript};
 
@@ -12,7 +12,7 @@ pub const MAX_TRANSCRIPT_CHARS: usize = 50000; // ~12-15K tokens
 
 pub async fn generate_session_todos(
     pool: &SqlitePool,
-    llm_client: &LlmClient,
+    llm_client: &RemoteLlmClient,
     session_id: Uuid,
     tenant_id: Uuid,
 ) -> Result<(), anyhow::Error> {

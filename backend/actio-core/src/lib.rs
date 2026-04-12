@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use crate::config::LlmConfig;
 use crate::engine::app_settings::SettingsManager;
 use crate::engine::inference_pipeline::InferencePipeline;
-use crate::engine::llm_client::LlmClient;
+use crate::engine::remote_llm_client::RemoteLlmClient;
 use crate::engine::metrics::Metrics;
 use crate::engine::model_manager::ModelManager;
 use crate::engine::transcript_aggregator::TranscriptAggregator;
@@ -35,10 +35,13 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub aggregator: Arc<TranscriptAggregator>,
     pub metrics: Arc<Metrics>,
-    pub llm_client: Option<Arc<LlmClient>>,
+    pub llm_client: Option<Arc<RemoteLlmClient>>,
     pub model_manager: Arc<ModelManager>,
     pub inference_pipeline: Arc<tokio::sync::Mutex<InferencePipeline>>,
     pub settings_manager: Arc<SettingsManager>,
+    /// Signalled by the settings handler when `audio.asr_model` changes.
+    /// The pipeline supervisor listens for this and hot-swaps the recognizer.
+    pub pipeline_restart: Arc<tokio::sync::Notify>,
 }
 
 /// Start the Axum HTTP server. Called from Tauri's setup hook.
@@ -69,7 +72,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
 
     let aggregator = Arc::new(TranscriptAggregator::new(pool.clone()));
     let metrics = Arc::new(Metrics::new());
-    let llm_client = LlmConfig::from_env_optional().map(LlmClient::new).map(Arc::new);
+    let llm_client = LlmConfig::from_env_optional().map(RemoteLlmClient::new).map(Arc::new);
     let model_manager = Arc::new(ModelManager::new(config.model_dir.clone()));
 
     let inference_pipeline = Arc::new(tokio::sync::Mutex::new(InferencePipeline::new()));
@@ -83,7 +86,29 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         model_manager,
         inference_pipeline,
         settings_manager,
+        pipeline_restart: Arc::new(tokio::sync::Notify::new()),
     };
+
+    // Spawn the always-on inference pipeline. The design intent is that the
+    // app listens continuously — UI clients (Recording tab, chat composer
+    // dictation) just open a WebSocket subscription to receive the live
+    // transcript stream as it's produced. They never start or stop the
+    // pipeline themselves.
+    //
+    // To avoid burning RAM when no UI is listening, a supervisor task watches
+    // the broadcast receiver count and hibernates the recognizer (frees the
+    // model RAM) after `IDLE_GRACE_PERIOD` of no subscribers, then wakes it
+    // back up on the next WebSocket connect.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            // Warm start at boot so the first user click is fast.
+            if let Err(e) = start_always_on_pipeline(&state).await {
+                warn!(error = %e, "Could not warm-start always-on inference pipeline");
+            }
+            pipeline_supervisor(state).await;
+        });
+    }
 
     let cors = CorsLayer::new()
         .allow_origin([
@@ -122,4 +147,160 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// How long to wait with zero broadcast subscribers before hibernating
+/// the always-on inference pipeline. Brief pauses (changing tabs, finishing
+/// a sentence) shouldn't trigger hibernation; sustained idleness should.
+const IDLE_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Start the inference pipeline. Idempotent: if a pipeline is already
+/// running, this is a no-op. Creates a fresh "always_on" session row in the
+/// DB on each call so transcripts produced after a hibernation cycle are
+/// grouped under their own session.
+///
+/// Fails gracefully if no ASR model is downloaded or no audio device is
+/// available — the rest of the API still works, WS subscribers just see no
+/// transcripts until the user fixes the underlying issue and relaunches.
+async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
+    // Cheap pre-check so we don't even create a session row if we'd just
+    // bail. The proper check happens under the lock below.
+    {
+        let pipeline = state.inference_pipeline.lock().await;
+        if pipeline.is_running() {
+            return Ok(());
+        }
+    }
+
+    let model_paths = state
+        .model_manager
+        .model_paths()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("models not ready — skipping always-on pipeline"))?;
+
+    let settings = state.settings_manager.get().await;
+    let asr_model = settings.audio.asr_model.clone();
+
+    // Tenant must match the dev tenant the frontend filters by, same as
+    // the label seeding logic in this file.
+    let tenant_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+        .expect("hardcoded uuid must parse");
+
+    let session = repository::session::create_session(
+        &state.pool,
+        tenant_id,
+        "microphone",
+        "always_on",
+    )
+    .await?;
+    let session_id = session.id.parse::<uuid::Uuid>()?;
+
+    {
+        let mut pipeline = state.inference_pipeline.lock().await;
+        // Re-check inside the lock to avoid a race where two callers both
+        // pass the pre-check, then both create sessions and one's
+        // start_session fails because the other already started the pipeline.
+        if pipeline.is_running() {
+            return Ok(());
+        }
+        pipeline.start_session(
+            session_id,
+            &model_paths,
+            state.aggregator.clone(),
+            None,
+            asr_model.as_deref(),
+        )?;
+    }
+
+    info!(%session_id, model = ?asr_model, "Always-on inference pipeline started");
+    Ok(())
+}
+
+/// Watches the aggregator's broadcast receiver count and hibernates /
+/// resumes the inference pipeline accordingly. Also listens for explicit
+/// restart signals from the settings handler (model hot-swap). Runs
+/// forever as a tokio task.
+///
+/// State machine:
+///   - **Active**: pipeline running, ≥1 subscriber. No timer.
+///   - **Grace**: pipeline running, 0 subscribers since `idle_since`.
+///     If `idle_since.elapsed() ≥ IDLE_GRACE_PERIOD`, transition to
+///     Hibernated. If a subscriber attaches, transition back to Active.
+///   - **Hibernated**: pipeline stopped, model RAM freed. On next
+///     subscriber, transition back to Active by calling
+///     `start_always_on_pipeline`.
+///   - **Hot-swap**: on `pipeline_restart` signal, stop current pipeline
+///     immediately and restart with freshly-read settings (new model).
+async fn pipeline_supervisor(state: AppState) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    let mut idle_since: Option<std::time::Instant> = None;
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                // ── Periodic hibernation / wake check ──
+                let count = state.aggregator.receiver_count();
+                let running = state.inference_pipeline.lock().await.is_running();
+
+                if count > 0 {
+                    if idle_since.is_some() {
+                        info!("Pipeline subscribers reattached — cancelling hibernation timer");
+                        idle_since = None;
+                    }
+                    if !running {
+                        info!("Subscriber connected — waking pipeline from hibernation");
+                        if let Err(e) = start_always_on_pipeline(&state).await {
+                            warn!(error = %e, "Failed to wake pipeline from hibernation");
+                        }
+                    }
+                    continue;
+                }
+
+                // No subscribers.
+                if !running {
+                    continue;
+                }
+
+                match idle_since {
+                    None => {
+                        idle_since = Some(std::time::Instant::now());
+                        info!(
+                            grace_secs = IDLE_GRACE_PERIOD.as_secs(),
+                            "No subscribers — pipeline will hibernate after grace period"
+                        );
+                    }
+                    Some(since) if since.elapsed() >= IDLE_GRACE_PERIOD => {
+                        info!(
+                            idle_secs = since.elapsed().as_secs(),
+                            "Hibernating inference pipeline to free RAM"
+                        );
+                        let mut pipeline = state.inference_pipeline.lock().await;
+                        pipeline.stop();
+                        idle_since = None;
+                    }
+                    Some(_) => {}
+                }
+            }
+
+            _ = state.pipeline_restart.notified() => {
+                // ── Hot-swap: model changed in settings ──
+                info!("Model hot-swap requested — restarting pipeline");
+                {
+                    let mut pipeline = state.inference_pipeline.lock().await;
+                    if pipeline.is_running() {
+                        pipeline.stop();
+                    }
+                }
+                // Brief pause so the old spawn_blocking thread can exit and
+                // release the audio device before we reopen it.
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                idle_since = None;
+                if let Err(e) = start_always_on_pipeline(&state).await {
+                    warn!(error = %e, "Failed to restart pipeline after model change");
+                }
+            }
+        }
+    }
 }
