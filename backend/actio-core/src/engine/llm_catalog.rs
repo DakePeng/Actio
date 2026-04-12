@@ -75,6 +75,17 @@ mod tests {
     }
 
     #[test]
+    fn all_v1_entries_are_runtime_supported() {
+        for m in available_local_llms() {
+            assert!(
+                m.runtime_supported,
+                "{} is in the catalog but not runtime_supported",
+                m.id
+            );
+        }
+    }
+
+    #[test]
     fn catalog_sha256s_are_hex() {
         for m in available_local_llms() {
             assert_eq!(m.sha256.len(), 64, "sha256 for {} is not 64 hex chars", m.id);
