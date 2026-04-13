@@ -4,7 +4,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
+
+use crate::engine::llm_catalog::DownloadSource;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -77,6 +80,14 @@ pub struct SenseVoiceFiles {
     pub tokens: PathBuf,
 }
 
+/// Zipformer CTC offline model files — model + tokens + optional BPE vocab.
+#[derive(Debug, Clone)]
+pub struct ZipformerCtcFiles {
+    pub model: PathBuf,
+    pub tokens: PathBuf,
+    pub bpe_vocab: Option<PathBuf>,
+}
+
 /// Paraformer offline model files — used by the small Chinese+English
 /// Paraformer, an order-of-magnitude smaller alternative to FunASR Nano.
 #[derive(Debug, Clone)]
@@ -105,19 +116,27 @@ pub struct FunAsrNanoFiles {
     pub tokenizer_dir: PathBuf,
 }
 
+/// Whisper model files (encoder + decoder + tokens).
+#[derive(Debug, Clone)]
+pub struct WhisperFiles {
+    pub encoder: PathBuf,
+    pub decoder: PathBuf,
+    pub tokens: PathBuf,
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelPaths {
     pub silero_vad: PathBuf,
-    pub zh: Option<TransducerFiles>,
-    pub en: Option<TransducerFiles>,
-    pub ko: Option<TransducerFiles>,
+    /// All streaming transducer models keyed by their catalog id.
+    pub transducers: std::collections::HashMap<String, TransducerFiles>,
     pub sense_voice: Option<SenseVoiceFiles>,
     pub moonshine_en: Option<MoonshineFiles>,
     pub paraformer_zh_small: Option<ParaformerFiles>,
+    pub zipformer_ctc_zh_small: Option<ZipformerCtcFiles>,
     pub funasr_nano: Option<FunAsrNanoFiles>,
-    /// Reserved for future speaker-diarization download target.
+    pub whisper_base: Option<WhisperFiles>,
+    pub whisper_turbo: Option<WhisperFiles>,
     pub pyannote_segmentation: Option<PathBuf>,
-    /// Reserved for future speaker-embedding download target.
     pub speaker_embedding: Option<PathBuf>,
 }
 
@@ -125,12 +144,10 @@ pub struct ModelPaths {
 // Internal model file descriptors
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 struct ModelFile {
-    /// URL to download from
     url: &'static str,
-    /// Filename to store as inside model_dir
     dest_name: &'static str,
-    /// Whether this is a tar.bz2 archive that needs extraction
     extract_inner: Option<&'static str>,
 }
 
@@ -143,81 +160,266 @@ const SHARED_FILES: &[ModelFile] = &[
     },
 ];
 
-/// Silero VAD model — bundled inside the binary via `include_bytes!`.
-/// Written out to `{model_dir}/silero_vad.onnx` on first startup so every
-/// offline ASR pipeline has VAD available without a network download.
-/// ~644 KB, negligible binary bloat.
 const SILERO_VAD_BYTES: &[u8] = include_bytes!("../../assets/silero_vad.onnx");
 
-/// Chinese Zipformer streaming transducer 14M.
-const ZH_ZIPFORMER_14M_FILES: &[ModelFile] = &[
+// ---------------------------------------------------------------------------
+// Streaming transducer table — every streaming model is defined here.
+// Adding a new one is just a new row. The download, catalog, build, and
+// pipeline routing code all iterate this table automatically.
+// ---------------------------------------------------------------------------
+
+struct StreamingTransducerDef {
+    id: &'static str,
+    name: &'static str,
+    languages: &'static str,
+    multilingual: bool,
+    size_mb: u32,
+    ram_mb: u32,
+    cpu: &'static str,
+    description: &'static str,
+    /// Dest-name prefix. Files are stored as {prefix}_encoder.int8.onnx, etc.
+    prefix: &'static str,
+    encoder_url: &'static str,
+    decoder_url: &'static str,
+    joiner_url: &'static str,
+    tokens_url: &'static str,
+}
+
+const STREAMING_TRANSDUCERS: &[StreamingTransducerDef] = &[
+    // ── Single-language: Chinese ─────────────────────────────────────
+    StreamingTransducerDef {
+        id: "zh_zipformer_14m",
+        name: "Zipformer 14M (Chinese)",
+        languages: "Chinese",
+        multilingual: false,
+        size_mb: 25, ram_mb: 200,
+        cpu: "Any modern CPU",
+        description: "Real-time streaming Chinese ASR. 14M params, int8. Very low latency.",
+        prefix: "zh",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/tokens.txt",
+    },
+    StreamingTransducerDef {
+        id: "zh_conformer",
+        name: "Conformer (Chinese)",
+        languages: "Chinese",
+        multilingual: false,
+        size_mb: 183, ram_mb: 600,
+        cpu: "CPU with AVX2",
+        description: "Streaming Chinese ASR using Conformer architecture. Higher accuracy than Zipformer 14M but larger.",
+        prefix: "zh_conf",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/tokens.txt",
+    },
+    StreamingTransducerDef {
+        id: "zh_lstm",
+        name: "LSTM (Chinese)",
+        languages: "Chinese",
+        multilingual: false,
+        size_mb: 99, ram_mb: 400,
+        cpu: "Any modern CPU",
+        description: "Streaming Chinese ASR using LSTM-transducer. Lighter than Conformer, good balance of size and accuracy.",
+        prefix: "zh_lstm",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/encoder-epoch-11-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/decoder-epoch-11-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/joiner-epoch-11-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/tokens.txt",
+    },
+    // ── Single-language: English ─────────────────────────────────────
+    StreamingTransducerDef {
+        id: "en_zipformer_20m",
+        name: "Zipformer 20M (English)",
+        languages: "English",
+        multilingual: false,
+        size_mb: 44, ram_mb: 250,
+        cpu: "Any modern CPU",
+        description: "Real-time streaming English ASR. 20M params, int8. Very low latency.",
+        prefix: "en",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/tokens.txt",
+    },
+    StreamingTransducerDef {
+        id: "en_zipformer",
+        name: "Zipformer (English)",
+        languages: "English",
+        multilingual: false,
+        size_mb: 73, ram_mb: 350,
+        cpu: "Any modern CPU",
+        description: "Streaming English Zipformer transducer. Higher accuracy than the 20M variant.",
+        prefix: "en_zip",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/tokens.txt",
+    },
+    StreamingTransducerDef {
+        id: "en_zipformer_large",
+        name: "Zipformer Large (English)",
+        languages: "English",
+        multilingual: false,
+        size_mb: 189, ram_mb: 600,
+        cpu: "CPU with AVX2",
+        description: "Large streaming English Zipformer. Best streaming English accuracy but heavy.",
+        prefix: "en_lg",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/tokens.txt",
+    },
+    StreamingTransducerDef {
+        id: "en_zipformer_medium",
+        name: "Zipformer Medium (English)",
+        languages: "English",
+        multilingual: false,
+        size_mb: 128, ram_mb: 450,
+        cpu: "Any modern CPU",
+        description: "Medium-sized streaming English Zipformer. Good accuracy/size balance.",
+        prefix: "en_md",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/tokens.txt",
+    },
+    StreamingTransducerDef {
+        id: "en_lstm",
+        name: "LSTM (English)",
+        languages: "English",
+        multilingual: false,
+        size_mb: 86, ram_mb: 350,
+        cpu: "Any modern CPU",
+        description: "Streaming English LSTM-transducer. Compact and efficient.",
+        prefix: "en_lstm",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/tokens.txt",
+    },
+    // ── Single-language: Korean ──────────────────────────────────────
+    StreamingTransducerDef {
+        id: "ko_zipformer",
+        name: "Zipformer (Korean)",
+        languages: "Korean",
+        multilingual: false,
+        size_mb: 133, ram_mb: 500,
+        cpu: "CPU with AVX2",
+        description: "Real-time streaming Korean ASR. int8 Zipformer transducer.",
+        prefix: "ko",
+        encoder_url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/tokens.txt",
+    },
+    // ── Single-language: French ──────────────────────────────────────
+    StreamingTransducerDef {
+        id: "fr_zipformer",
+        name: "Zipformer (French)",
+        languages: "French",
+        multilingual: false,
+        size_mb: 129, ram_mb: 450,
+        cpu: "CPU with AVX2",
+        description: "Streaming French ASR. int8 Zipformer transducer.",
+        prefix: "fr",
+        encoder_url: "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/encoder-epoch-29-avg-9-with-averaged-model.int8.onnx",
+        decoder_url: "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/decoder-epoch-29-avg-9-with-averaged-model.int8.onnx",
+        joiner_url:  "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/joiner-epoch-29-avg-9-with-averaged-model.int8.onnx",
+        tokens_url:  "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/tokens.txt",
+    },
+    // ── Multi-language ───────────────────────────────────────────────
+    StreamingTransducerDef {
+        id: "zhen_zipformer_bilingual",
+        name: "Zipformer Bilingual (Chinese + English)",
+        languages: "Chinese, English",
+        multilingual: true,
+        size_mb: 198, ram_mb: 650,
+        cpu: "CPU with AVX2",
+        description: "Streaming bilingual Chinese+English ASR in a single model. No language switching needed.",
+        prefix: "zhen",
+        encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+        decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
+        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/tokens.txt",
+    },
+];
+
+/// Build the 4 download ModelFile descriptors for a streaming transducer.
+fn transducer_model_files(def: &StreamingTransducerDef) -> Vec<ModelFile> {
+    vec![
+        ModelFile { url: def.encoder_url, dest_name: Box::leak(format!("{}_encoder.int8.onnx", def.prefix).into_boxed_str()), extract_inner: None },
+        ModelFile { url: def.decoder_url, dest_name: Box::leak(format!("{}_decoder.int8.onnx", def.prefix).into_boxed_str()), extract_inner: None },
+        ModelFile { url: def.joiner_url,  dest_name: Box::leak(format!("{}_joiner.int8.onnx", def.prefix).into_boxed_str()), extract_inner: None },
+        ModelFile { url: def.tokens_url,  dest_name: Box::leak(format!("{}_tokens.txt", def.prefix).into_boxed_str()), extract_inner: None },
+    ]
+}
+
+/// Look up a streaming transducer definition by model id.
+fn find_transducer(id: &str) -> Option<&'static StreamingTransducerDef> {
+    STREAMING_TRANSDUCERS.iter().find(|d| d.id == id)
+}
+
+// ---------------------------------------------------------------------------
+// Whisper base (offline, multilingual — 99 languages)
+// ---------------------------------------------------------------------------
+
+const WHISPER_BASE_FILES: &[ModelFile] = &[
     ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
-        dest_name: "zh_encoder.int8.onnx",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/base-encoder.int8.onnx",
+        dest_name: "whisper_base_encoder.int8.onnx",
         extract_inner: None,
     },
     ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        dest_name: "zh_decoder.int8.onnx",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/base-decoder.int8.onnx",
+        dest_name: "whisper_base_decoder.int8.onnx",
         extract_inner: None,
     },
     ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        dest_name: "zh_joiner.int8.onnx",
-        extract_inner: None,
-    },
-    ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/tokens.txt",
-        dest_name: "zh_tokens.txt",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/base-tokens.txt",
+        dest_name: "whisper_base_tokens.txt",
         extract_inner: None,
     },
 ];
 
-/// English Zipformer streaming transducer 20M.
-const EN_ZIPFORMER_20M_FILES: &[ModelFile] = &[
+/// Whisper Turbo — largest/fastest Whisper variant, int8 (~1 GB total).
+/// Source: https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo
+const WHISPER_TURBO_FILES: &[ModelFile] = &[
     ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
-        dest_name: "en_encoder.int8.onnx",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-encoder.int8.onnx",
+        dest_name: "whisper_turbo_encoder.int8.onnx",
         extract_inner: None,
     },
     ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        dest_name: "en_decoder.int8.onnx",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-decoder.int8.onnx",
+        dest_name: "whisper_turbo_decoder.int8.onnx",
         extract_inner: None,
     },
     ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        dest_name: "en_joiner.int8.onnx",
-        extract_inner: None,
-    },
-    ModelFile {
-        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/tokens.txt",
-        dest_name: "en_tokens.txt",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-tokens.txt",
+        dest_name: "whisper_turbo_tokens.txt",
         extract_inner: None,
     },
 ];
 
-/// Korean streaming Zipformer — ~133 MB total (encoder 127 MB int8 dominates).
-/// Source: https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16
-const KO_ZIPFORMER_FILES: &[ModelFile] = &[
+/// Zipformer CTC Small Chinese — offline, int8, ~63 MB.
+/// Source: https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16
+const ZIPFORMER_CTC_ZH_SMALL_FILES: &[ModelFile] = &[
     ModelFile {
-        url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
-        dest_name: "ko_encoder.int8.onnx",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16/resolve/main/model.int8.onnx",
+        dest_name: "zipformer_ctc_zh_small.int8.onnx",
         extract_inner: None,
     },
     ModelFile {
-        url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        dest_name: "ko_decoder.int8.onnx",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16/resolve/main/tokens.txt",
+        dest_name: "zipformer_ctc_zh_small_tokens.txt",
         extract_inner: None,
     },
     ModelFile {
-        url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        dest_name: "ko_joiner.int8.onnx",
-        extract_inner: None,
-    },
-    ModelFile {
-        url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/tokens.txt",
-        dest_name: "ko_tokens.txt",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16/resolve/main/bbpe.model",
+        dest_name: "zipformer_ctc_zh_small_bbpe.model",
         extract_inner: None,
     },
 ];
@@ -322,19 +524,29 @@ const FUNASR_NANO_FILES: &[ModelFile] = &[
     },
 ];
 
-fn files_for_target(target: &DownloadTarget) -> Result<&'static [ModelFile]> {
+/// Return the download file list for a target. Streaming transducers are
+/// generated from the table; offline models use static arrays.
+fn files_for_target(target: &DownloadTarget) -> Result<Vec<ModelFile>> {
     match target {
-        DownloadTarget::Shared => Ok(SHARED_FILES),
-        DownloadTarget::Model(id) => match id.as_str() {
-            "zh_zipformer_14m" => Ok(ZH_ZIPFORMER_14M_FILES),
-            "en_zipformer_20m" => Ok(EN_ZIPFORMER_20M_FILES),
-            "ko_zipformer" => Ok(KO_ZIPFORMER_FILES),
-            "paraformer_zh_small" => Ok(PARAFORMER_ZH_SMALL_FILES),
-            "moonshine_tiny_en" => Ok(MOONSHINE_TINY_EN_FILES),
-            "sense_voice_multi" => Ok(SENSE_VOICE_MULTI_FILES),
-            "funasr_nano" => Ok(FUNASR_NANO_FILES),
-            other => Err(anyhow!("Unknown model pack: {}", other)),
-        },
+        DownloadTarget::Shared => Ok(SHARED_FILES.to_vec()),
+        DownloadTarget::Model(id) => {
+            // Check the streaming transducer table first.
+            if let Some(def) = find_transducer(id) {
+                return Ok(transducer_model_files(def));
+            }
+            // Offline models with static file arrays.
+            let slice: &[ModelFile] = match id.as_str() {
+                "whisper_base" => WHISPER_BASE_FILES,
+                "whisper_turbo" => WHISPER_TURBO_FILES,
+                "zipformer_ctc_zh_small" => ZIPFORMER_CTC_ZH_SMALL_FILES,
+                "paraformer_zh_small" => PARAFORMER_ZH_SMALL_FILES,
+                "moonshine_tiny_en" => MOONSHINE_TINY_EN_FILES,
+                "sense_voice_multi" => SENSE_VOICE_MULTI_FILES,
+                "funasr_nano" => FUNASR_NANO_FILES,
+                other => return Err(anyhow!("Unknown model pack: {}", other)),
+            };
+            Ok(slice.to_vec())
+        }
     }
 }
 
@@ -344,6 +556,16 @@ fn model_downloaded(model_dir: &PathBuf, files: &[ModelFile]) -> bool {
         let p = model_dir.join(f.dest_name);
         p.exists() && std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false)
     })
+
+}
+
+/// Check whether a streaming transducer's files are present on disk.
+fn transducer_downloaded(model_dir: &PathBuf, prefix: &str) -> bool {
+    let enc = model_dir.join(format!("{prefix}_encoder.int8.onnx"));
+    let dec = model_dir.join(format!("{prefix}_decoder.int8.onnx"));
+    let join = model_dir.join(format!("{prefix}_joiner.int8.onnx"));
+    let tok = model_dir.join(format!("{prefix}_tokens.txt"));
+    enc.exists() && dec.exists() && join.exists() && tok.exists()
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +575,7 @@ fn model_downloaded(model_dir: &PathBuf, files: &[ModelFile]) -> bool {
 pub struct ModelManager {
     model_dir: PathBuf,
     status: Arc<RwLock<ModelStatus>>,
+    download_handle: Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl ModelManager {
@@ -372,6 +595,7 @@ impl ModelManager {
         Self {
             model_dir,
             status: Arc::new(RwLock::new(status)),
+            download_handle: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -381,129 +605,122 @@ impl ModelManager {
     }
 
     /// Return info about available ASR models and their download status.
-    /// The catalog is static — only the `downloaded` flag is computed per call.
+    /// Streaming transducers are generated from the table; offline models
+    /// are appended individually.
     pub fn available_asr_models(&self) -> Vec<AsrModelInfo> {
         let d = &self.model_dir;
-        vec![
-            AsrModelInfo {
-                id: "zh_zipformer_14m".to_string(),
-                name: "Zipformer 14M (Chinese)".to_string(),
-                languages: "Chinese".to_string(),
-                size_mb: 25,
-                ram_mb: 200,
-                recommended_cpu: "Any modern CPU".to_string(),
+        let mut models: Vec<AsrModelInfo> = Vec::new();
+
+        // ── Streaming transducers (from table) ───────────────────────
+        for def in STREAMING_TRANSDUCERS {
+            models.push(AsrModelInfo {
+                id: def.id.to_string(),
+                name: def.name.to_string(),
+                languages: def.languages.to_string(),
+                size_mb: def.size_mb,
+                ram_mb: def.ram_mb,
+                recommended_cpu: def.cpu.to_string(),
                 streaming: true,
-                description:
-                    "Real-time streaming Chinese ASR. 14 million parameters, \
-                     int8-quantised. Very low latency; suitable for always-on \
-                     transcription on laptops."
-                        .to_string(),
-                downloaded: model_downloaded(d, ZH_ZIPFORMER_14M_FILES),
+                description: def.description.to_string(),
+                downloaded: transducer_downloaded(d, def.prefix),
                 runtime_supported: true,
-            },
-            AsrModelInfo {
-                id: "en_zipformer_20m".to_string(),
-                name: "Zipformer 20M (English)".to_string(),
-                languages: "English".to_string(),
-                size_mb: 44,
-                ram_mb: 250,
-                recommended_cpu: "Any modern CPU".to_string(),
-                streaming: true,
-                description:
-                    "Real-time streaming English ASR. 20 million parameters, \
-                     int8-quantised. Very low latency; suitable for always-on \
-                     transcription on laptops."
-                        .to_string(),
-                downloaded: model_downloaded(d, EN_ZIPFORMER_20M_FILES),
-                runtime_supported: true,
-            },
-            AsrModelInfo {
-                id: "ko_zipformer".to_string(),
-                name: "Zipformer (Korean)".to_string(),
-                languages: "Korean".to_string(),
-                size_mb: 133,
-                ram_mb: 500,
-                recommended_cpu: "CPU with AVX2".to_string(),
-                streaming: true,
-                description:
-                    "Real-time streaming Korean ASR. int8-quantised Zipformer \
-                     transducer. Suitable for live transcription on modern \
-                     laptops."
-                        .to_string(),
-                downloaded: model_downloaded(d, KO_ZIPFORMER_FILES),
-                runtime_supported: true,
-            },
-            AsrModelInfo {
-                id: "paraformer_zh_small".to_string(),
-                name: "Paraformer Small (Chinese + English)".to_string(),
-                languages: "Chinese, English".to_string(),
-                size_mb: 82,
-                ram_mb: 400,
-                recommended_cpu: "Any modern CPU".to_string(),
-                streaming: false,
-                description:
-                    "Offline bilingual ASR from FunAudioLLM. Non-autoregressive \
-                     Paraformer architecture — much smaller than FunASR Nano \
-                     (~82 MB vs ~1 GB) while still covering Mandarin and \
-                     English. Processes complete utterances via VAD."
-                        .to_string(),
-                downloaded: model_downloaded(d, PARAFORMER_ZH_SMALL_FILES),
-                runtime_supported: true,
-            },
-            AsrModelInfo {
-                id: "moonshine_tiny_en".to_string(),
-                name: "Moonshine Tiny (English)".to_string(),
-                languages: "English".to_string(),
-                size_mb: 125,
-                ram_mb: 500,
-                recommended_cpu: "CPU with AVX2".to_string(),
-                streaming: false,
-                description:
-                    "Offline English ASR from Useful Sensors. ~27 million \
-                     parameters, int8-quantised. Higher accuracy than the \
-                     Zipformer streaming models; processes complete utterances \
-                     via VAD rather than streaming."
-                        .to_string(),
-                downloaded: model_downloaded(d, MOONSHINE_TINY_EN_FILES),
-                runtime_supported: true,
-            },
-            AsrModelInfo {
-                id: "sense_voice_multi".to_string(),
-                name: "SenseVoice Multilingual".to_string(),
-                languages: "Chinese, English, Japanese, Korean, Cantonese"
-                    .to_string(),
-                size_mb: 239,
-                ram_mb: 800,
-                recommended_cpu: "CPU with AVX2, 4+ cores recommended".to_string(),
-                streaming: false,
-                description:
-                    "Offline multilingual ASR from Alibaba FunAudioLLM. ~234 \
-                     million parameters, int8-quantised. Auto language \
-                     detection across 5 languages; high accuracy but \
-                     processes complete utterances via VAD, not streaming."
-                        .to_string(),
-                downloaded: model_downloaded(d, SENSE_VOICE_MULTI_FILES),
-                runtime_supported: true,
-            },
-            AsrModelInfo {
-                id: "funasr_nano".to_string(),
-                name: "FunASR Nano (Qwen3 0.6B)".to_string(),
-                languages: "Chinese, English".to_string(),
-                size_mb: 1010,
-                ram_mb: 2000,
-                recommended_cpu: "CPU with AVX2, 8+ cores recommended".to_string(),
-                streaming: false,
-                description:
-                    "LLM-powered ASR that feeds encoded audio into Qwen3-0.6B \
-                     (~600 million parameter LLM) as the decoder. Highest \
-                     quality of the catalog but each segment runs a full LLM \
-                     forward pass — expect multi-second latency on CPU. Not \
-                     streaming."
-                        .to_string(),
-                downloaded: model_downloaded(d, FUNASR_NANO_FILES),
-                runtime_supported: true,
-            },
-        ]
+            });
+        }
+
+        // ── Offline models (individual entries) ──────────────────────
+        models.push(AsrModelInfo {
+            id: "whisper_base".to_string(),
+            name: "Whisper Base (Multilingual)".to_string(),
+            languages: "99 languages (auto-detect)".to_string(),
+            size_mb: 161, ram_mb: 500,
+            recommended_cpu: "Any modern CPU".to_string(),
+            streaming: false,
+            description: "OpenAI Whisper base, int8. Offline multilingual ASR \
+                         with auto language detection. Processes utterances via VAD."
+                .to_string(),
+            downloaded: model_downloaded(d, WHISPER_BASE_FILES),
+            runtime_supported: true,
+        });
+        models.push(AsrModelInfo {
+            id: "whisper_turbo".to_string(),
+            name: "Whisper Turbo (Multilingual)".to_string(),
+            languages: "99 languages (auto-detect)".to_string(),
+            size_mb: 1037, ram_mb: 2500,
+            recommended_cpu: "CPU with AVX2, 8+ cores".to_string(),
+            streaming: false,
+            description: "OpenAI Whisper turbo, int8. Highest Whisper quality, \
+                         fastest decoding. ~1 GB on disk. Processes utterances via VAD."
+                .to_string(),
+            downloaded: model_downloaded(d, WHISPER_TURBO_FILES),
+            runtime_supported: true,
+        });
+        models.push(AsrModelInfo {
+            id: "zipformer_ctc_zh_small".to_string(),
+            name: "Zipformer CTC Small (Chinese)".to_string(),
+            languages: "Chinese".to_string(),
+            size_mb: 63, ram_mb: 300,
+            recommended_cpu: "Any modern CPU".to_string(),
+            streaming: false,
+            description: "Offline Chinese ASR using Zipformer CTC. Small int8 model, \
+                         fast inference. Processes utterances via VAD."
+                .to_string(),
+            downloaded: model_downloaded(d, ZIPFORMER_CTC_ZH_SMALL_FILES),
+            runtime_supported: true,
+        });
+        models.push(AsrModelInfo {
+            id: "paraformer_zh_small".to_string(),
+            name: "Paraformer Small (Chinese + English)".to_string(),
+            languages: "Chinese, English".to_string(),
+            size_mb: 82, ram_mb: 400,
+            recommended_cpu: "Any modern CPU".to_string(),
+            streaming: false,
+            description: "Offline bilingual Paraformer. Much smaller than FunASR \
+                         Nano (~82 MB vs ~1 GB). Processes utterances via VAD."
+                .to_string(),
+            downloaded: model_downloaded(d, PARAFORMER_ZH_SMALL_FILES),
+            runtime_supported: true,
+        });
+        models.push(AsrModelInfo {
+            id: "moonshine_tiny_en".to_string(),
+            name: "Moonshine Tiny (English)".to_string(),
+            languages: "English".to_string(),
+            size_mb: 125, ram_mb: 500,
+            recommended_cpu: "CPU with AVX2".to_string(),
+            streaming: false,
+            description: "Offline English ASR from Useful Sensors. ~27M params, \
+                         int8. Processes utterances via VAD."
+                .to_string(),
+            downloaded: model_downloaded(d, MOONSHINE_TINY_EN_FILES),
+            runtime_supported: true,
+        });
+        models.push(AsrModelInfo {
+            id: "sense_voice_multi".to_string(),
+            name: "SenseVoice Multilingual".to_string(),
+            languages: "Chinese, English, Japanese, Korean, Cantonese".to_string(),
+            size_mb: 239, ram_mb: 800,
+            recommended_cpu: "CPU with AVX2, 4+ cores".to_string(),
+            streaming: false,
+            description: "Offline multilingual ASR from FunAudioLLM. ~234M params, \
+                         int8. Auto language detection. Processes utterances via VAD."
+                .to_string(),
+            downloaded: model_downloaded(d, SENSE_VOICE_MULTI_FILES),
+            runtime_supported: true,
+        });
+        models.push(AsrModelInfo {
+            id: "funasr_nano".to_string(),
+            name: "FunASR Nano (Qwen3 0.6B)".to_string(),
+            languages: "Chinese, English".to_string(),
+            size_mb: 1010, ram_mb: 2000,
+            recommended_cpu: "CPU with AVX2, 8+ cores".to_string(),
+            streaming: false,
+            description: "LLM-powered ASR with Qwen3-0.6B decoder. Highest quality \
+                         but ~1 GB and slow on CPU. Not streaming."
+                .to_string(),
+            downloaded: model_downloaded(d, FUNASR_NANO_FILES),
+            runtime_supported: true,
+        });
+
+        models
     }
 
     /// Return paths to model files if the shared tier is present. Callers must
@@ -526,8 +743,8 @@ impl ModelManager {
     /// the `funasr_nano_tokenizer/` dir) and re-derives the shared-tier
     /// status if the shared files were touched.
     pub async fn delete_model(&self, id: &str) -> Result<u32> {
-        let files: &'static [ModelFile] = if id == "shared" {
-            SHARED_FILES
+        let files: Vec<ModelFile> = if id == "shared" {
+            SHARED_FILES.to_vec()
         } else {
             files_for_target(&DownloadTarget::Model(id.to_string()))?
         };
@@ -584,24 +801,17 @@ impl ModelManager {
     /// is an offline recognizer (SenseVoice / Moonshine / FunASR Nano).
     pub fn files_to_warmup(&self, asr_model: &str) -> Result<Vec<PathBuf>> {
         let dir = &self.model_dir;
-        let join = |name: &str| dir.join(name);
-        let collect = |files: &[ModelFile]| -> Vec<PathBuf> {
-            files.iter().map(|f| dir.join(f.dest_name)).collect()
-        };
 
-        let (mut paths, needs_vad) = match asr_model {
-            "zh_zipformer_14m" => (collect(ZH_ZIPFORMER_14M_FILES), false),
-            "en_zipformer_20m" => (collect(EN_ZIPFORMER_20M_FILES), false),
-            "ko_zipformer" => (collect(KO_ZIPFORMER_FILES), false),
-            "paraformer_zh_small" => (collect(PARAFORMER_ZH_SMALL_FILES), true),
-            "sense_voice_multi" => (collect(SENSE_VOICE_MULTI_FILES), true),
-            "moonshine_tiny_en" => (collect(MOONSHINE_TINY_EN_FILES), true),
-            "funasr_nano" => (collect(FUNASR_NANO_FILES), true),
-            other => return Err(anyhow!("Unknown ASR model: {}", other)),
-        };
-        if needs_vad {
-            paths.insert(0, join("silero_vad.onnx"));
+        // Streaming transducers: no VAD needed.
+        if let Some(def) = find_transducer(asr_model) {
+            let files = transducer_model_files(def);
+            return Ok(files.iter().map(|f| dir.join(f.dest_name)).collect());
         }
+
+        // Offline models: need VAD prepended.
+        let files = files_for_target(&DownloadTarget::Model(asr_model.to_string()))?;
+        let mut paths: Vec<PathBuf> = vec![dir.join("silero_vad.onnx")];
+        paths.extend(files.iter().map(|f| dir.join(f.dest_name)));
         Ok(paths)
     }
 
@@ -611,6 +821,7 @@ impl ModelManager {
     pub async fn start_download(
         &self,
         target: DownloadTarget,
+        source: DownloadSource,
         progress_tx: tokio::sync::watch::Sender<ModelStatus>,
     ) -> Result<()> {
         // Validate target early so we can return an API error instead of
@@ -633,9 +844,9 @@ impl ModelManager {
             .await
             .with_context(|| format!("creating model_dir {}", model_dir.display()))?;
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let result =
-                download_target(&model_dir, &target_clone, &status_arc, &progress_tx).await;
+                download_target(&model_dir, &target_clone, source, &status_arc, &progress_tx).await;
 
             // After any download attempt, re-derive status from on-disk state
             // so language-pack downloads don't overwrite the top-level Ready
@@ -654,7 +865,21 @@ impl ModelManager {
             *status_arc.write().await = final_status;
         });
 
+        *self.download_handle.lock().await = Some(handle);
+
         Ok(())
+    }
+
+    /// Cancel a running model download. Aborts the background task and resets
+    /// status based on what is already on disk.
+    pub async fn cancel_download(&self) {
+        if let Some(handle) = self.download_handle.lock().await.take() {
+            handle.abort();
+        }
+        let mut s = self.status.write().await;
+        if matches!(&*s, ModelStatus::Downloading { .. }) {
+            *s = detect_existing_status(&self.model_dir);
+        }
     }
 }
 
@@ -774,6 +999,21 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
         }
     };
 
+    let zipformer_ctc_zh_small = {
+        let model = model_dir.join("zipformer_ctc_zh_small.int8.onnx");
+        let tokens = model_dir.join("zipformer_ctc_zh_small_tokens.txt");
+        let bpe = model_dir.join("zipformer_ctc_zh_small_bbpe.model");
+        if model.exists() && tokens.exists() {
+            Some(ZipformerCtcFiles {
+                model,
+                tokens,
+                bpe_vocab: if bpe.exists() { Some(bpe) } else { None },
+            })
+        } else {
+            None
+        }
+    };
+
     let paraformer_zh_small = {
         let model = model_dir.join("paraformer_zh_small.int8.onnx");
         let tokens = model_dir.join("paraformer_zh_small_tokens.txt");
@@ -784,17 +1024,62 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
         }
     };
 
+    // Build all streaming transducers from the table.
+    let mut transducers = std::collections::HashMap::new();
+    for def in STREAMING_TRANSDUCERS {
+        if let Some(files) = build_transducer(model_dir, def.prefix) {
+            transducers.insert(def.id.to_string(), files);
+        }
+    }
+
+    let whisper_base = {
+        let encoder = model_dir.join("whisper_base_encoder.int8.onnx");
+        let decoder = model_dir.join("whisper_base_decoder.int8.onnx");
+        let tokens = model_dir.join("whisper_base_tokens.txt");
+        if encoder.exists() && decoder.exists() && tokens.exists() {
+            Some(WhisperFiles { encoder, decoder, tokens })
+        } else {
+            None
+        }
+    };
+
+    let whisper_turbo = {
+        let encoder = model_dir.join("whisper_turbo_encoder.int8.onnx");
+        let decoder = model_dir.join("whisper_turbo_decoder.int8.onnx");
+        let tokens = model_dir.join("whisper_turbo_tokens.txt");
+        if encoder.exists() && decoder.exists() && tokens.exists() {
+            Some(WhisperFiles { encoder, decoder, tokens })
+        } else {
+            None
+        }
+    };
+
     ModelPaths {
         silero_vad: model_dir.join("silero_vad.onnx"),
-        zh: build_transducer(model_dir, "zh"),
-        en: build_transducer(model_dir, "en"),
-        ko: build_transducer(model_dir, "ko"),
+        transducers,
         sense_voice,
         moonshine_en,
+        zipformer_ctc_zh_small,
         paraformer_zh_small,
         funasr_nano,
+        whisper_base,
+        whisper_turbo,
         pyannote_segmentation: opt("pyannote-seg3.onnx"),
         speaker_embedding: opt("speaker_eres2net.onnx"),
+    }
+}
+
+/// Rewrite a HuggingFace URL for the chosen download source.
+///
+/// All ASR model URLs in the catalog use `huggingface.co`. For HfMirror we
+/// swap the domain to `hf-mirror.com` (a full public mirror of HuggingFace).
+/// ModelScope is not supported for ASR models — most sherpa-onnx repos are
+/// not mirrored there — so it falls back to HuggingFace. GitHub URLs
+/// (e.g. Silero VAD) are left untouched.
+fn rewrite_url(url: &str, source: DownloadSource) -> String {
+    match source {
+        DownloadSource::HuggingFace | DownloadSource::ModelScope => url.to_string(),
+        DownloadSource::HfMirror => url.replace("https://huggingface.co/", "https://hf-mirror.com/"),
     }
 }
 
@@ -802,6 +1087,7 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
 async fn download_target(
     model_dir: &PathBuf,
     target: &DownloadTarget,
+    source: DownloadSource,
     status_arc: &Arc<RwLock<ModelStatus>>,
     progress_tx: &tokio::sync::watch::Sender<ModelStatus>,
 ) -> Result<()> {
@@ -819,7 +1105,7 @@ async fn download_target(
         *status_arc.write().await = current_status.clone();
         let _ = progress_tx.send(current_status);
 
-        download_file_with_retry(&client, file, model_dir).await?;
+        download_file_with_retry(&client, file, model_dir, source).await?;
 
         info!(
             file = file.dest_name,
@@ -835,6 +1121,7 @@ async fn download_file_with_retry(
     client: &reqwest::Client,
     file: &ModelFile,
     model_dir: &PathBuf,
+    source: DownloadSource,
 ) -> Result<()> {
     let dest = model_dir.join(file.dest_name);
 
@@ -847,9 +1134,11 @@ async fn download_file_with_retry(
         }
     }
 
+    let url = rewrite_url(file.url, source);
+
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=3u8 {
-        match do_download(client, file, model_dir, &dest).await {
+        match do_download(client, &url, file.dest_name, &dest).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 warn!(attempt, file = file.dest_name, error = %e, "Download attempt failed");
@@ -865,11 +1154,11 @@ async fn download_file_with_retry(
 
 async fn do_download(
     client: &reqwest::Client,
-    file: &ModelFile,
-    _model_dir: &PathBuf,
+    url: &str,
+    dest_name: &str,
     dest: &PathBuf,
 ) -> Result<()> {
-    info!(url = file.url, dest = %dest.display(), "Downloading model file");
+    info!(url, dest = %dest.display(), "Downloading model file");
 
     // Ensure parent directory exists (dest_name may include subdirs,
     // e.g. "funasr_nano_tokenizer/tokenizer.json").
@@ -880,27 +1169,25 @@ async fn do_download(
     }
 
     let response = client
-        .get(file.url)
+        .get(url)
         .send()
         .await
-        .with_context(|| format!("GET {}", file.url))?
+        .with_context(|| format!("GET {}", url))?
         .error_for_status()
-        .with_context(|| format!("HTTP error for {}", file.url))?;
+        .with_context(|| format!("HTTP error for {}", url))?;
 
     let bytes = response
         .bytes()
         .await
-        .with_context(|| format!("reading response body from {}", file.url))?;
+        .with_context(|| format!("reading response body from {}", url))?;
 
-    if let Some(inner_path) = file.extract_inner {
-        // It's a tar.bz2 — extract the inner file
-        extract_bz2_tar(&bytes, inner_path, dest)
-            .with_context(|| format!("extracting {} from archive", inner_path))?;
-    } else {
-        tokio::fs::write(dest, &bytes)
-            .await
-            .with_context(|| format!("writing {}", dest.display()))?;
-    }
+    // All current model files are plain downloads (no archive extraction
+    // needed). The extract_inner path is kept as a future extension point
+    // but not used via the rewritten-URL path.
+    let _ = dest_name;
+    tokio::fs::write(dest, &bytes)
+        .await
+        .with_context(|| format!("writing {}", dest.display()))?;
 
     // Verify non-zero size
     let meta = std::fs::metadata(dest)?;

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+use crate::engine::llm_catalog::DownloadSource;
 use crate::engine::llm_router::LlmSelection;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +29,12 @@ pub struct LlmSettings {
     #[serde(default = "default_local_endpoint_port")]
     pub local_endpoint_port: u16,
 
+    #[serde(default)]
+    pub download_source: DownloadSource,
+
+    #[serde(default)]
+    pub load_on_startup: bool,
+
     // Legacy flat fields — accepted during deserialization so old
     // settings.json files parse without error. migrate_legacy_selection()
     // promotes these into `remote` and sets `selection: Remote` when both
@@ -46,6 +53,8 @@ impl Default for LlmSettings {
             selection: LlmSelection::Disabled,
             remote: RemoteLlmSettings::default(),
             local_endpoint_port: default_local_endpoint_port(),
+            download_source: DownloadSource::default(),
+            load_on_startup: false,
             base_url: None,
             api_key: None,
             model: None,
@@ -92,6 +101,8 @@ pub fn migrate_legacy_selection(llm: &mut LlmSettings) {
 pub struct AudioSettings {
     pub device_name: Option<String>,
     pub asr_model: Option<String>,
+    #[serde(default)]
+    pub download_source: DownloadSource,
 }
 
 impl Default for AppSettings {
@@ -168,6 +179,12 @@ impl SettingsManager {
             if let Some(p) = llm.local_endpoint_port {
                 settings.llm.local_endpoint_port = p;
             }
+            if let Some(src) = llm.download_source {
+                settings.llm.download_source = src;
+            }
+            if let Some(v) = llm.load_on_startup {
+                settings.llm.load_on_startup = v;
+            }
             // Legacy flat-shape patches
             if let Some(v) = llm.base_url {
                 settings.llm.remote.base_url = Some(v);
@@ -185,6 +202,9 @@ impl SettingsManager {
             }
             if let Some(v) = audio.asr_model {
                 settings.audio.asr_model = Some(v);
+            }
+            if let Some(v) = audio.download_source {
+                settings.audio.download_source = v;
             }
         }
         // Save to disk
@@ -208,6 +228,8 @@ pub struct LlmSettingsPatch {
     pub selection: Option<LlmSelection>,
     pub remote: Option<RemoteLlmSettingsPatch>,
     pub local_endpoint_port: Option<u16>,
+    pub download_source: Option<DownloadSource>,
+    pub load_on_startup: Option<bool>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub model: Option<String>,
@@ -224,6 +246,7 @@ pub struct RemoteLlmSettingsPatch {
 pub struct AudioSettingsPatch {
     pub device_name: Option<String>,
     pub asr_model: Option<String>,
+    pub download_source: Option<DownloadSource>,
 }
 
 #[cfg(test)]
@@ -266,7 +289,7 @@ mod tests {
     fn deserializes_new_nested_llm_shape() {
         let json = r#"{
             "llm": {
-                "selection": {"kind": "local", "id": "qwen3.5-0.8b-q4km"},
+                "selection": {"kind": "local", "id": "qwen3.5-0.8b"},
                 "remote": {"base_url": "https://example.com/v1", "api_key": null, "model": null},
                 "local_endpoint_port": 11434
             },
@@ -275,7 +298,7 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(json).unwrap();
         assert!(matches!(
             settings.llm.selection,
-            LlmSelection::Local { ref id } if id == "qwen3.5-0.8b-q4km"
+            LlmSelection::Local { ref id } if id == "qwen3.5-0.8b"
         ));
         assert_eq!(settings.llm.local_endpoint_port, 11434);
         assert_eq!(settings.llm.remote.base_url.as_deref(), Some("https://example.com/v1"));

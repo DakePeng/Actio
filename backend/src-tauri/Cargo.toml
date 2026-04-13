@@ -17,7 +17,6 @@ actio-core = { path = "../actio-core", default-features = false }
 [features]
 default = ["local-llm"]
 local-llm = ["actio-core/local-llm"]
-local-llm-metal = ["actio-core/local-llm-metal"]
 
 [[bin]]
 name = "actio-desktop"

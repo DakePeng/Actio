@@ -3,6 +3,7 @@ use tracing::{info, warn};
 
 use crate::engine::model_manager::{
     FunAsrNanoFiles, MoonshineFiles, ParaformerFiles, SenseVoiceFiles, TransducerFiles,
+    WhisperFiles, ZipformerCtcFiles,
 };
 use crate::engine::vad::SpeechSegment;
 
@@ -33,8 +34,10 @@ pub fn start_streaming_asr(
     let joiner = model_files.joiner.to_string_lossy().to_string();
     let tokens = model_files.tokens.to_string_lossy().to_string();
 
-    // Sync bridge: tokio audio_rx → blocking ASR thread
-    let (audio_tx, audio_cb_rx) = crossbeam_channel::bounded::<Vec<f32>>(64);
+    // Sync bridge: tokio audio_rx → blocking ASR thread. Unbounded so audio
+    // captured during model load (wake-from-hibernation) queues up instead of
+    // being dropped. The recognizer processes backlog faster than real-time.
+    let (audio_tx, audio_cb_rx) = crossbeam_channel::unbounded::<Vec<f32>>();
     // Sync bridge: blocking ASR thread → tokio transcript consumer
     let (result_cb_tx, result_rx) = crossbeam_channel::bounded::<TranscriptResult>(64);
 
@@ -222,6 +225,32 @@ pub fn start_paraformer_offline_asr(
     spawn_offline_asr_loop("Paraformer", Box::new(config_builder), speech_rx)
 }
 
+/// Start a non-streaming ASR task using an offline Zipformer CTC model.
+pub fn start_zipformer_ctc_asr(
+    files: &ZipformerCtcFiles,
+    speech_rx: mpsc::Receiver<SpeechSegment>,
+) -> anyhow::Result<mpsc::Receiver<TranscriptResult>> {
+    let model = files.model.to_string_lossy().to_string();
+    let tokens = files.tokens.to_string_lossy().to_string();
+    let bpe_vocab = files.bpe_vocab.as_ref().map(|p| p.to_string_lossy().to_string());
+
+    let config_builder = move || {
+        let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
+        config.model_config.zipformer_ctc = sherpa_onnx::OfflineZipformerCtcModelConfig {
+            model: Some(model),
+        };
+        config.model_config.tokens = Some(tokens);
+        if let Some(bpe) = bpe_vocab {
+            config.model_config.bpe_vocab = Some(bpe);
+        }
+        config.model_config.num_threads = 2;
+        config.model_config.provider = Some("cpu".to_string());
+        config
+    };
+
+    spawn_offline_asr_loop("ZipformerCTC", Box::new(config_builder), speech_rx)
+}
+
 /// Start a non-streaming ASR task using FunASR Nano (Qwen3-0.6B cascaded
 /// LLM-ASR). Expensive to load and run — expect multi-second latency per
 /// segment on CPU. Supports Chinese and English.
@@ -251,6 +280,34 @@ pub fn start_funasr_nano_asr(
     };
 
     spawn_offline_asr_loop("FunASR Nano", Box::new(config_builder), speech_rx)
+}
+
+/// Start a non-streaming ASR task using OpenAI Whisper (encoder + decoder).
+/// Supports ~99 languages with auto-detection.
+pub fn start_whisper_asr(
+    files: &WhisperFiles,
+    speech_rx: mpsc::Receiver<SpeechSegment>,
+) -> anyhow::Result<mpsc::Receiver<TranscriptResult>> {
+    let encoder = files.encoder.to_string_lossy().to_string();
+    let decoder = files.decoder.to_string_lossy().to_string();
+    let tokens = files.tokens.to_string_lossy().to_string();
+
+    let config_builder = move || {
+        let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
+        config.model_config.whisper = sherpa_onnx::OfflineWhisperModelConfig {
+            encoder: Some(encoder),
+            decoder: Some(decoder),
+            language: Some(String::new()), // empty = auto-detect
+            task: Some("transcribe".to_string()),
+            ..Default::default()
+        };
+        config.model_config.tokens = Some(tokens);
+        config.model_config.num_threads = 2;
+        config.model_config.provider = Some("cpu".to_string());
+        config
+    };
+
+    spawn_offline_asr_loop("Whisper", Box::new(config_builder), speech_rx)
 }
 
 /// Internal: run an OfflineRecognizer in a blocking thread, fed by VAD

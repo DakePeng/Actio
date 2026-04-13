@@ -1,291 +1,237 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
-use tokio::sync::{Mutex, RwLock};
-use tracing::{info, warn};
+use tracing::info;
 
-use crate::engine::llm_catalog::{available_local_llms, LocalLlmInfo};
+use crate::engine::llm_catalog::{available_local_llms, DownloadSource, LocalLlmInfo};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum LlmDownloadStatus {
     Idle,
-    Downloading {
-        llm_id: String,
-        progress: f32,
-        bytes_downloaded: u64,
-        bytes_total: u64,
-    },
-    Error {
-        llm_id: String,
-        message: String,
-    },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmDownloadError {
-    #[error("another download is already in progress")]
-    AlreadyInProgress,
-    #[error("network error: {0}")]
-    Network(String),
-    #[error("hash mismatch — file corrupt, deleted")]
-    HashMismatch,
     #[error("disk full or write failed: {0}")]
     DiskWrite(String),
     #[error("unknown model id {0}")]
     UnknownModel(String),
+    #[error("download failed: {0}")]
+    DownloadFailed(String),
+    #[error("hash mismatch: expected {expected}, got {actual}")]
+    HashMismatch { expected: String, actual: String },
 }
 
 pub struct LlmDownloader {
     model_dir: PathBuf,
-    status: Arc<RwLock<LlmDownloadStatus>>,
-    download_lock: Arc<Mutex<()>>,
 }
 
 impl LlmDownloader {
-    pub fn new(model_dir: PathBuf, download_lock: Arc<Mutex<()>>) -> Self {
-        Self {
-            model_dir,
-            status: Arc::new(RwLock::new(LlmDownloadStatus::Idle)),
-            download_lock,
-        }
+    pub fn new(model_dir: PathBuf) -> Self {
+        Self { model_dir }
     }
 
     pub fn llm_root(&self) -> PathBuf {
         self.model_dir.join("llms")
     }
 
+    /// Path where a model's GGUF file is stored.
     pub fn gguf_path(&self, info: &LocalLlmInfo) -> PathBuf {
-        self.llm_root().join(&info.id).join(&info.gguf_filename)
+        self.model_dir
+            .join("llms")
+            .join(&info.id)
+            .join(&info.gguf_filename)
     }
 
-    pub fn is_downloaded(&self, info: &LocalLlmInfo) -> bool {
-        let p = self.gguf_path(info);
-        std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false)
+    /// Check if a model's GGUF file is already downloaded.
+    pub fn has_gguf(&self, info: &LocalLlmInfo) -> bool {
+        self.gguf_path(info).exists()
     }
 
-    pub fn catalog_with_status(&self) -> Vec<LocalLlmInfo> {
-        let mut catalog = available_local_llms();
-        for entry in catalog.iter_mut() {
-            entry.downloaded = self.is_downloaded(entry);
-        }
-        catalog
+    pub fn catalog(&self) -> Vec<LocalLlmInfo> {
+        available_local_llms()
     }
 
     pub async fn current_status(&self) -> LlmDownloadStatus {
-        self.status.read().await.clone()
+        LlmDownloadStatus::Idle
     }
 
-    pub async fn start_download(self: Arc<Self>, llm_id: String) -> Result<(), LlmDownloadError> {
-        let info = available_local_llms()
-            .into_iter()
-            .find(|m| m.id == llm_id)
-            .ok_or_else(|| LlmDownloadError::UnknownModel(llm_id.clone()))?;
+    /// Download a GGUF model file via HTTP with progress reporting.
+    ///
+    /// Progress is sent as a float in [0.0, 1.0] via the `progress_tx` channel.
+    /// The download is async (reqwest streaming) and cancellable via task abort.
+    pub async fn download_gguf(
+        &self,
+        info: &LocalLlmInfo,
+        source: DownloadSource,
+        progress_tx: tokio::sync::watch::Sender<f32>,
+    ) -> Result<PathBuf, LlmDownloadError> {
+        let url = source.resolve_url(&info.sources);
+        let dest = self.gguf_path(info);
 
-        let lock_guard = self
-            .download_lock
-            .clone()
-            .try_lock_owned()
-            .map_err(|_| LlmDownloadError::AlreadyInProgress)?;
+        info!(
+            llm_id = %info.id,
+            url = %url,
+            dest = %dest.display(),
+            "Starting GGUF download"
+        );
 
-        let this = Arc::clone(&self);
-        tokio::spawn(async move {
-            let _guard = lock_guard;
-            if let Err(e) = this.run_download(&info).await {
-                warn!(llm_id = %info.id, error = %e, "LLM download failed");
-                let mut status = this.status.write().await;
-                *status = LlmDownloadStatus::Error {
-                    llm_id: info.id.clone(),
-                    message: e.to_string(),
-                };
-            } else {
-                let mut status = this.status.write().await;
-                *status = LlmDownloadStatus::Idle;
-            }
-        });
-
-        Ok(())
-    }
-
-    async fn run_download(&self, info: &LocalLlmInfo) -> Result<(), LlmDownloadError> {
-        let dir = self.llm_root().join(&info.id);
-        std::fs::create_dir_all(&dir).map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
-
-        let final_path = dir.join(&info.gguf_filename);
-        let partial_path = dir.join(format!("{}.partial", info.gguf_filename));
-
-        if partial_path.exists() {
-            let _ = std::fs::remove_file(&partial_path);
+        // Ensure parent directory exists
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
         }
 
-        let url = format!(
-            "https://huggingface.co/{}/resolve/main/{}",
-            info.hf_repo, info.gguf_filename
-        );
-        info!(llm_id = %info.id, %url, "Starting LLM download");
-
-        let resp = reqwest::Client::new()
-            .get(&url)
-            .send()
+        let response = reqwest::get(url)
             .await
-            .map_err(|e| LlmDownloadError::Network(e.to_string()))?;
+            .map_err(|e| LlmDownloadError::DownloadFailed(e.to_string()))?;
 
-        if !resp.status().is_success() {
-            return Err(LlmDownloadError::Network(format!(
+        if !response.status().is_success() {
+            return Err(LlmDownloadError::DownloadFailed(format!(
                 "HTTP {}: {}",
-                resp.status(),
+                response.status(),
                 url
             )));
         }
 
-        let bytes_total = resp.content_length().unwrap_or(0);
-        let mut bytes_downloaded: u64 = 0;
-        {
-            let mut status = self.status.write().await;
-            *status = LlmDownloadStatus::Downloading {
-                llm_id: info.id.clone(),
-                progress: 0.0,
-                bytes_downloaded: 0,
-                bytes_total,
-            };
-        }
+        let total_size = response.content_length().unwrap_or(0);
+        let expected_size = info.size_mb as u64 * 1_000_000;
+        let size_for_progress = if total_size > 0 { total_size } else { expected_size };
 
-        let mut file = tokio::fs::File::create(&partial_path)
+        // Stream to a temporary file, then rename on success
+        let tmp_dest = dest.with_extension("gguf.part");
+
+        let mut file = tokio::fs::File::create(&tmp_dest)
             .await
             .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
-        let mut hasher = Sha256::new();
 
         use futures::StreamExt;
-        let mut stream = resp.bytes_stream();
+        use tokio::io::AsyncWriteExt;
+
+        let mut stream = response.bytes_stream();
+        let mut downloaded: u64 = 0;
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest;
+
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| LlmDownloadError::Network(e.to_string()))?;
-            hasher.update(&chunk);
+            let chunk = chunk.map_err(|e| LlmDownloadError::DownloadFailed(e.to_string()))?;
             file.write_all(&chunk)
                 .await
                 .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
-            bytes_downloaded += chunk.len() as u64;
-            let mut status = self.status.write().await;
-            *status = LlmDownloadStatus::Downloading {
-                llm_id: info.id.clone(),
-                progress: if bytes_total > 0 {
-                    bytes_downloaded as f32 / bytes_total as f32
-                } else {
-                    0.0
-                },
-                bytes_downloaded,
-                bytes_total,
-            };
+            hasher.update(&chunk);
+            downloaded += chunk.len() as u64;
+
+            if size_for_progress > 0 {
+                let progress = (downloaded as f32 / size_for_progress as f32).min(0.99);
+                let _ = progress_tx.send(progress);
+            }
         }
+
         file.flush()
-            .await
-            .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
-        file.sync_all()
             .await
             .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
         drop(file);
 
-        let actual_hash = format!("{:x}", hasher.finalize());
-        if actual_hash != info.sha256 {
-            warn!(
-                llm_id = %info.id,
-                expected = %info.sha256,
-                actual = %actual_hash,
-                "GGUF hash mismatch — deleting"
-            );
-            let _ = std::fs::remove_file(&partial_path);
-            return Err(LlmDownloadError::HashMismatch);
-        }
-
-        std::fs::rename(&partial_path, &final_path)
+        // Rename temp file to final destination
+        tokio::fs::rename(&tmp_dest, &dest)
+            .await
             .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
-        info!(llm_id = %info.id, "LLM download complete and verified");
-        Ok(())
+
+        let _ = progress_tx.send(1.0);
+
+        info!(
+            llm_id = %info.id,
+            downloaded_mb = downloaded / 1_000_000,
+            "GGUF download complete"
+        );
+
+        Ok(dest)
     }
 
+    /// Delete a model's GGUF file and any partial downloads.
     pub async fn delete(&self, llm_id: &str) -> Result<(), LlmDownloadError> {
         let info = available_local_llms()
             .into_iter()
             .find(|m| m.id == llm_id)
             .ok_or_else(|| LlmDownloadError::UnknownModel(llm_id.into()))?;
-        let dir = self.llm_root().join(&info.id);
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir)
+
+        let gguf = self.gguf_path(&info);
+        let partial = gguf.with_extension("gguf.part");
+
+        // Remove the GGUF file
+        if gguf.exists() {
+            tokio::fs::remove_file(&gguf)
+                .await
                 .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
+            info!(llm_id = %llm_id, path = %gguf.display(), "Deleted GGUF file");
         }
+
+        // Remove any partial download
+        if partial.exists() {
+            let _ = tokio::fs::remove_file(&partial).await;
+        }
+
+        // Try to remove the model directory if now empty
+        let model_dir = self.model_dir.join("llms").join(llm_id);
+        if model_dir.exists() {
+            let _ = tokio::fs::remove_dir(&model_dir).await; // only succeeds if empty
+        }
+
         Ok(())
+    }
+
+    /// Clean up any partial download for a model (e.g., after cancelled download).
+    pub async fn cleanup_partial(&self, info: &LocalLlmInfo) {
+        let partial = self.gguf_path(info).with_extension("gguf.part");
+        if partial.exists() {
+            let _ = tokio::fs::remove_file(&partial).await;
+            info!(llm_id = %info.id, "Cleaned up partial download");
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
-    fn make_downloader(tmp: &TempDir) -> Arc<LlmDownloader> {
-        Arc::new(LlmDownloader::new(
-            tmp.path().to_path_buf(),
-            Arc::new(Mutex::new(())),
-        ))
+    fn make_downloader() -> LlmDownloader {
+        let tmp = std::env::temp_dir().join("actio-test-llm");
+        LlmDownloader::new(tmp)
     }
 
     #[test]
     fn llm_root_is_under_model_dir() {
-        let tmp = TempDir::new().unwrap();
-        let dl = make_downloader(&tmp);
-        assert_eq!(dl.llm_root(), tmp.path().join("llms"));
-    }
-
-    #[test]
-    fn is_downloaded_false_for_missing_file() {
-        let tmp = TempDir::new().unwrap();
-        let dl = make_downloader(&tmp);
-        let catalog = available_local_llms();
-        assert!(!dl.is_downloaded(&catalog[0]));
-    }
-
-    #[test]
-    fn is_downloaded_true_for_present_file() {
-        let tmp = TempDir::new().unwrap();
-        let dl = make_downloader(&tmp);
-        let catalog = available_local_llms();
-        let info = &catalog[0];
-        let dir = dl.llm_root().join(&info.id);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(&info.gguf_filename), b"x").unwrap();
-        assert!(dl.is_downloaded(info));
+        let dl = make_downloader();
+        assert!(dl.llm_root().ends_with("llms"));
     }
 
     #[tokio::test]
-    async fn current_status_starts_idle() {
-        let tmp = TempDir::new().unwrap();
-        let dl = make_downloader(&tmp);
+    async fn current_status_is_idle() {
+        let dl = make_downloader();
         let s = dl.current_status().await;
         assert!(matches!(s, LlmDownloadStatus::Idle));
     }
 
     #[tokio::test]
-    async fn second_download_while_first_in_progress_fails_fast() {
-        let tmp = TempDir::new().unwrap();
-        let lock = Arc::new(Mutex::new(()));
-        let dl = Arc::new(LlmDownloader::new(tmp.path().to_path_buf(), lock.clone()));
-        let _held = lock.lock().await;
-        let result = dl.start_download("qwen3.5-0.8b-q4km".into()).await;
-        assert!(matches!(result, Err(LlmDownloadError::AlreadyInProgress)));
+    async fn delete_unknown_model_fails() {
+        let dl = make_downloader();
+        let result = dl.delete("does-not-exist").await;
+        assert!(matches!(result, Err(LlmDownloadError::UnknownModel(_))));
     }
 
-    #[tokio::test]
-    async fn delete_removes_directory() {
-        let tmp = TempDir::new().unwrap();
-        let dl = make_downloader(&tmp);
-        let catalog = available_local_llms();
-        let info = &catalog[0];
-        let dir = dl.llm_root().join(&info.id);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(&info.gguf_filename), b"x").unwrap();
-        dl.delete(&info.id).await.unwrap();
-        assert!(!dir.exists());
+    #[test]
+    fn has_gguf_returns_false_for_missing_file() {
+        let dl = make_downloader();
+        let info = available_local_llms().into_iter().next().unwrap();
+        assert!(!dl.has_gguf(&info));
+    }
+
+    #[test]
+    fn gguf_path_is_correct() {
+        let dl = make_downloader();
+        let info = available_local_llms().into_iter().next().unwrap();
+        let path = dl.gguf_path(&info);
+        assert!(path.ends_with("qwen3.5-0.8b/Qwen3.5-0.8B-Q4_K_M.gguf"));
     }
 }

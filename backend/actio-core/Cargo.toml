@@ -59,8 +59,10 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
-# Local LLM (feature-gated)
-mistralrs = { version = "0.8", default-features = false, optional = true }
+# Local LLM (feature-gated) — llama.cpp via FFI bindings for GGUF inference
+llama-cpp-2 = { version = "=0.1.143", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+
 
 # Hash verification for LLM downloads
 sha2 = "0.10"
@@ -71,8 +73,7 @@ tempfile = "3"
 
 [features]
 default = ["local-llm"]
-local-llm = ["dep:mistralrs"]
-local-llm-metal = ["local-llm", "mistralrs/metal"]
+local-llm = ["dep:llama-cpp-2", "dep:encoding_rs"]
 
 [lib]
 name = "actio_core"

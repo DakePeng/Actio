@@ -92,14 +92,16 @@ pub fn router(state: AppState) -> Router {
         .route("/settings/models", get(settings::get_model_status))
         .route("/settings/models/available", get(settings::get_available_models))
         .route("/settings/models/download", post(settings::start_model_download))
+        .route("/settings/models/cancel-download", post(settings::cancel_model_download))
         .route("/settings/models/warmup", post(settings::warmup_models))
         .route("/settings/models/:id", delete(settings::delete_model))
         .route("/settings/audio-devices", get(settings::list_audio_devices))
         // settings / local llm
         .route("/settings/llm/models", get(llm::list_local_llms))
-        .route("/settings/llm/models/download", post(llm::start_llm_download))
         .route("/settings/llm/models/:id", delete(llm::delete_local_llm))
-        .route("/settings/llm/download-status", get(llm::llm_download_status))
+        .route("/settings/llm/load", post(llm::start_llm_load))
+        .route("/settings/llm/cancel-load", post(llm::cancel_llm_load))
+        .route("/settings/llm/load-status", get(llm::llm_load_status))
         // OpenAI-compat
         .route("/v1/models", get(llm::openai_list_models))
         .route("/v1/chat/completions", post(llm::openai_chat_completions))

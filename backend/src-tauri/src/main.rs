@@ -441,6 +441,9 @@ fn main() {
             std::fs::create_dir_all(&data_dir)
                 .expect("failed to create app_data_dir");
 
+            eprintln!("[actio] data_dir = {}", data_dir.display());
+            eprintln!("[actio] model_dir = {}", data_dir.join("models").display());
+
             let config = actio_core::CoreConfig {
                 data_dir: data_dir.clone(),
                 db_path: data_dir.join("actio.db"),

@@ -35,28 +35,21 @@ pub async fn ws_session(
     State(state): State<AppState>,
     Query(params): Query<WsSessionParams>,
 ) -> impl IntoResponse {
+    // The aggregator is a single global broadcast channel — every WebSocket
+    // subscriber receives every transcript regardless of session. So when no
+    // session_id is supplied, we treat the connection as a pure listener:
+    // it taps the live transcript stream produced by whatever inference
+    // pipeline is currently running (typically the always-on global one
+    // started in lib.rs) without creating or validating a session row.
     let session_id = match params.session_id {
-        Some(session_id) => match session::get_session(&state.pool, session_id).await {
-            Ok(_) => session_id,
+        Some(sid) => match session::get_session(&state.pool, sid).await {
+            Ok(_) => sid,
             Err(error) => {
-                warn!(%session_id, %error, "WebSocket requested unknown session");
+                warn!(%sid, %error, "WebSocket requested unknown session");
                 return axum::http::StatusCode::NOT_FOUND.into_response();
             }
         },
-        None => match session::create_session(
-            &state.pool,
-            params.tenant_id.unwrap_or(Uuid::nil()),
-            params.source_type.as_deref().unwrap_or("microphone"),
-            params.mode.as_deref().unwrap_or("realtime"),
-        )
-        .await
-        {
-            Ok(session) => session.id.parse::<Uuid>().unwrap_or_default(),
-            Err(error) => {
-                warn!(%error, "Failed to create session for websocket");
-                return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        },
+        None => Uuid::nil(), // listen-only — no session attached
     };
 
     ws.on_upgrade(move |socket| handle_socket(socket, state, session_id))

@@ -8,8 +8,6 @@ import { RecordingTab } from './RecordingTab';
 import { PeopleTab } from './PeopleTab';
 import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
-import { ActioIcon } from './ActioIcon';
-import { useActioIconState } from '../hooks/useActioIconState';
 
 // Dynamic greetings — picked randomly each time the board opens.
 // Each entry has a `text` and an optional `nameStyle`:
@@ -47,7 +45,6 @@ export function BoardWindow() {
   const profileName = useStore((s) => s.profile.name);
   const setBoardWindow = useStore((s) => s.setBoardWindow);
   const setNewReminderBar = useStore((s) => s.setNewReminderBar);
-  const iconState = useActioIconState();
   const clearFeedback = useStore((s) => s.clearFeedback);
 
   // Re-pick a greeting each time the board opens
@@ -187,7 +184,6 @@ export function BoardWindow() {
             >
               <div className="desktop-toolbar">
                 <div className="desktop-toolbar__brand">
-                  <ActioIcon state={iconState} size={36} />
                   <div>
                     <div className="desktop-toolbar__title">{greeting}</div>
                   </div>

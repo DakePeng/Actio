@@ -1,15 +1,12 @@
-import { ActioIcon } from './ActioIcon';
-import { useActioIconState } from '../hooks/useActioIconState';
-
 export function Header() {
-  const iconState = useActioIconState();
-
   return (
     <header className="topbar">
       <div className="topbar__inner">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true">
-            <ActioIcon state={iconState} size={18} />
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M3 9.5L7.25 13.5L15 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
           <div className="brand-copy">
             <div className="brand-title">actio</div>

@@ -41,12 +41,19 @@ pub async fn start_model_download(
     Json(req): Json<DownloadRequest>,
 ) -> Result<StatusCode, AppApiError> {
     let (tx, _rx) = watch::channel(ModelStatus::NotDownloaded);
+    let source = state.settings_manager.get().await.audio.download_source;
     state
         .model_manager
-        .start_download(req.target, tx)
+        .start_download(req.target, source, tx)
         .await
         .map_err(|e| AppApiError(e.to_string()))?;
     Ok(StatusCode::ACCEPTED)
+}
+
+/// POST /settings/models/cancel-download — abort a running ASR model download.
+pub async fn cancel_model_download(State(state): State<AppState>) -> StatusCode {
+    state.model_manager.cancel_download().await;
+    StatusCode::OK
 }
 
 #[derive(Deserialize)]
@@ -187,6 +194,7 @@ pub async fn test_llm(
 
     let settings = state.settings_manager.get().await;
     let started = std::time::Instant::now();
+    tracing::info!(selection = ?settings.llm.selection, "test_llm: starting");
 
     match &settings.llm.selection {
         LlmSelection::Disabled => Ok(Json(LlmTestResult {
@@ -194,6 +202,7 @@ pub async fn test_llm(
             message: "No LLM backend selected. Pick Local or Remote in Settings.".into(),
         })),
         LlmSelection::Local { id } => {
+            tracing::info!(llm_id = %id, "test_llm: loading local engine");
             let engine = match state.engine_slot.get_or_load(id).await {
                 Ok(e) => e,
                 Err(e) => {
@@ -209,6 +218,7 @@ pub async fn test_llm(
                     content: "Reply with the single word 'ok' and nothing else.".into(),
                 },
             ];
+            tracing::info!(llm_id = %id, "test_llm: sending test prompt");
             match engine
                 .chat_completion(messages, GenerationParams {
                     max_tokens: 8,
@@ -217,19 +227,25 @@ pub async fn test_llm(
                 }, EnginePriority::Internal)
                 .await
             {
-                Ok(resp) => Ok(Json(LlmTestResult {
-                    success: true,
-                    message: format!(
-                        "{} responded in {} ms: {}",
-                        engine.metadata().name,
-                        started.elapsed().as_millis(),
-                        resp.trim(),
-                    ),
-                })),
-                Err(e) => Ok(Json(LlmTestResult {
-                    success: false,
-                    message: format!("{}: {e}", engine.metadata().name),
-                })),
+                Ok(resp) => {
+                    tracing::info!(llm_id = %id, elapsed_ms = started.elapsed().as_millis() as u64, response = %resp.trim(), "test_llm: success");
+                    Ok(Json(LlmTestResult {
+                        success: true,
+                        message: format!(
+                            "{} responded in {} ms: {}",
+                            engine.metadata().name,
+                            started.elapsed().as_millis(),
+                            resp.trim(),
+                        ),
+                    }))
+                }
+                Err(e) => {
+                    tracing::warn!(llm_id = %id, error = %e, elapsed_ms = started.elapsed().as_millis() as u64, "test_llm: inference failed");
+                    Ok(Json(LlmTestResult {
+                        success: false,
+                        message: format!("{}: {e}", engine.metadata().name),
+                    }))
+                }
             }
         }
         LlmSelection::Remote => {

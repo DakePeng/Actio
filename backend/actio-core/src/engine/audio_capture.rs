@@ -102,8 +102,11 @@ pub fn start_capture(device_name: Option<&str>) -> anyhow::Result<(AudioCaptureH
 
     let config: cpal::StreamConfig = supported.into();
 
-    // Crossbeam channel: sync, bounded, ~10 seconds of 16kHz audio
-    let (cb_tx, cb_rx): (Sender<Vec<f32>>, Receiver<Vec<f32>>) = bounded(320);
+    // Crossbeam channel: sync, bounded. Sized to hold several minutes of
+    // audio so the capture can run ahead of the recognizer during model load
+    // (wake-from-hibernation). The recognizer catches up faster than real-time
+    // once it's ready, so the backlog drains quickly.
+    let (cb_tx, cb_rx): (Sender<Vec<f32>>, Receiver<Vec<f32>>) = bounded(8000);
 
     let metrics = Arc::new(AudioCaptureMetrics {
         frames_captured: AtomicU64::new(0),
@@ -151,7 +154,7 @@ pub fn start_capture(device_name: Option<&str>) -> anyhow::Result<(AudioCaptureH
     info!(target_rate = 16000, "Audio capture started (resampling from {}Hz)", device_rate);
 
     // Bridge: crossbeam sync channel → tokio mpsc async channel
-    let (tx, rx) = mpsc::channel::<Vec<f32>>(64);
+    let (tx, rx) = mpsc::channel::<Vec<f32>>(8000);
     let stop_bridge = stop_flag.clone();
     tokio::spawn(async move {
         let mut chunk_count: u64 = 0;

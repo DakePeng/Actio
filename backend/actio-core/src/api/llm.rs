@@ -5,46 +5,46 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::session::AppApiError;
 use crate::engine::llm_catalog::LocalLlmInfo;
-use crate::engine::llm_downloader::{LlmDownloadError, LlmDownloadStatus};
+use crate::engine::local_llm_engine::LoadStatus;
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
 // /settings/llm/* routes
 // ---------------------------------------------------------------------------
 
+/// GET /settings/llm/models — model catalog.
+pub async fn list_local_llms(State(state): State<AppState>) -> Json<Vec<LocalLlmInfo>> {
+    Json(state.llm_downloader.catalog())
+}
+
 #[derive(Deserialize)]
-pub struct DownloadLlmRequest {
+pub struct LoadLlmRequest {
     pub llm_id: String,
 }
 
-/// GET /settings/llm/models — catalog with `downloaded` flags filled in.
-pub async fn list_local_llms(State(state): State<AppState>) -> Json<Vec<LocalLlmInfo>> {
-    Json(state.llm_downloader.catalog_with_status())
-}
-
-/// POST /settings/llm/models/download — kick off a background download.
-pub async fn start_llm_download(
+/// POST /settings/llm/load — start loading a model in the background.
+pub async fn start_llm_load(
     State(state): State<AppState>,
-    Json(req): Json<DownloadLlmRequest>,
+    Json(req): Json<LoadLlmRequest>,
 ) -> Result<StatusCode, AppApiError> {
-    state
-        .llm_downloader
-        .clone()
-        .start_download(req.llm_id)
-        .await
-        .map_err(|e| match e {
-            LlmDownloadError::AlreadyInProgress => AppApiError(format!("{e}")),
-            LlmDownloadError::UnknownModel(id) => AppApiError(format!("unknown model {id}")),
-            other => AppApiError(other.to_string()),
-        })?;
+    let source = state.settings_manager.get().await.llm.download_source;
+    state.engine_slot.start_load(req.llm_id, source, &state.llm_downloader).await;
     Ok(StatusCode::ACCEPTED)
 }
 
-/// GET /settings/llm/download-status — current downloader state.
-pub async fn llm_download_status(
+/// POST /settings/llm/cancel-load — cancel an in-progress load.
+pub async fn cancel_llm_load(
     State(state): State<AppState>,
-) -> Json<LlmDownloadStatus> {
-    Json(state.llm_downloader.current_status().await)
+) -> StatusCode {
+    state.engine_slot.cancel_load().await;
+    StatusCode::OK
+}
+
+/// GET /settings/llm/load-status — current loading state.
+pub async fn llm_load_status(
+    State(state): State<AppState>,
+) -> Json<LoadStatus> {
+    Json(state.engine_slot.load_status().await)
 }
 
 #[derive(Serialize)]

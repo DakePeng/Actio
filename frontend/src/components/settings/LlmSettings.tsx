@@ -11,7 +11,6 @@ interface LocalLlmInfo {
   ram_mb: number;
   recommended_ram_gb: number;
   description: string;
-  downloaded: boolean;
   runtime_supported: boolean;
 }
 
@@ -26,20 +25,23 @@ interface RemoteLlmSettings {
   model?: string;
 }
 
+type DownloadSource = 'hugging_face' | 'hf_mirror' | 'model_scope';
+
 interface LlmSettingsData {
   selection: LlmSelection;
   remote: RemoteLlmSettings;
   local_endpoint_port: number;
+  download_source: DownloadSource;
+  load_on_startup: boolean;
 }
 
-interface LlmDownloadStatus {
-  state: 'idle' | 'downloading' | 'error';
-  llm_id?: string;
-  progress?: number;
-  bytes_downloaded?: number;
-  bytes_total?: number;
-  message?: string;
-}
+type LoadStatus =
+  | { state: 'idle' }
+  | { state: 'downloading'; llm_id: string; progress: number }
+  | { state: 'quantizing'; llm_id: string }
+  | { state: 'loading'; llm_id: string }
+  | { state: 'loaded'; llm_id: string }
+  | { state: 'error'; llm_id: string; message: string };
 
 interface LlmTestResult {
   success: boolean;
@@ -69,24 +71,21 @@ async function listLocalLlms(): Promise<LocalLlmInfo[]> {
   return res.json();
 }
 
-async function startLlmDownload(llmId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings/llm/models/download`, {
+async function startLlmLoad(llmId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/settings/llm/load`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ llm_id: llmId }),
   });
-  if (!res.ok) throw new Error('Failed to start download');
+  if (!res.ok) throw new Error('Failed to start loading');
 }
 
-async function deleteLocalLlm(llmId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings/llm/models/${llmId}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) throw new Error('Failed to delete model');
+async function cancelLlmLoad(): Promise<void> {
+  await fetch(`${API_BASE}/settings/llm/cancel-load`, { method: 'POST' });
 }
 
-async function fetchLlmDownloadStatus(): Promise<LlmDownloadStatus> {
-  const res = await fetch(`${API_BASE}/settings/llm/download-status`);
+async function fetchLoadStatus(): Promise<LoadStatus> {
+  const res = await fetch(`${API_BASE}/settings/llm/load-status`);
   if (!res.ok) throw new Error('Failed to fetch status');
   return res.json();
 }
@@ -104,9 +103,11 @@ export function LlmSettings() {
   const [remote, setRemote] = useState<RemoteLlmSettings>({});
   const [portInput, setPortInput] = useState('3000');
   const [portError, setPortError] = useState<string | null>(null);
+  const [downloadSource, setDownloadSource] = useState<DownloadSource>('hugging_face');
+  const [loadOnStartup, setLoadOnStartup] = useState(false);
 
   const [models, setModels] = useState<LocalLlmInfo[]>([]);
-  const [downloadStatus, setDownloadStatus] = useState<LlmDownloadStatus>({ state: 'idle' });
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>({ state: 'idle' });
   const [testResult, setTestResult] = useState<LlmTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,8 +125,9 @@ export function LlmSettings() {
       if (s.llm) {
         setSelection(s.llm.selection ?? { kind: 'disabled' });
         setRemote(s.llm.remote ?? {});
-
         setPortInput(String(s.llm.local_endpoint_port ?? 3000));
+        setDownloadSource(s.llm.download_source ?? 'hugging_face');
+        setLoadOnStartup(s.llm.load_on_startup ?? false);
       }
     } catch {}
   }, []);
@@ -133,22 +135,22 @@ export function LlmSettings() {
   useEffect(() => {
     refreshSettings();
     refreshModels();
+    // Restore in-progress load status if navigating back
+    fetchLoadStatus().then(setLoadStatus).catch(() => {});
   }, [refreshSettings, refreshModels]);
 
-  // Poll download status while downloading
+  // Poll load status while loading/downloading/quantizing
   useEffect(() => {
-    if (downloadStatus.state !== 'downloading') return;
+    const active = loadStatus.state === 'downloading' || loadStatus.state === 'loading';
+    if (!active) return;
     const interval = setInterval(async () => {
       try {
-        const status = await fetchLlmDownloadStatus();
-        setDownloadStatus(status);
-        if (status.state === 'idle' || status.state === 'error') {
-          refreshModels();
-        }
+        const status = await fetchLoadStatus();
+        setLoadStatus(status);
       } catch {}
-    }, 1000);
+    }, 2000);
     return () => clearInterval(interval);
-  }, [downloadStatus.state, refreshModels]);
+  }, [loadStatus.state]);
 
   const handleSelectionChange = async (sel: LlmSelection) => {
     setSelection(sel);
@@ -156,44 +158,21 @@ export function LlmSettings() {
     setError(null);
     try {
       await patchLlmSettings({ selection: sel });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save');
-    }
-  };
-
-  const handleDownload = async (llmId: string) => {
-    setError(null);
-    try {
-      await startLlmDownload(llmId);
-      setDownloadStatus({ state: 'downloading', llm_id: llmId, progress: 0 });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Download failed');
-    }
-  };
-
-  const handleDelete = async (llmId: string, name: string) => {
-    const isActive = selection.kind === 'local' && selection.id === llmId;
-    const msg = isActive
-      ? `Delete ${name}? It is currently selected — action item extraction will be disabled until you pick another model.`
-      : `Delete ${name}?`;
-    if (!confirm(msg)) return;
-
-    setError(null);
-    try {
-      await deleteLocalLlm(llmId);
-      await refreshModels();
-      if (isActive) {
-        await refreshSettings();
+      // If selecting a local model, trigger load then fetch real status
+      if (sel.kind === 'local' && sel.id) {
+        await startLlmLoad(sel.id);
+        const status = await fetchLoadStatus();
+        setLoadStatus(status);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed');
+      setError(e instanceof Error ? e.message : 'Failed to save');
     }
   };
 
   const handleApplyPort = async () => {
     const port = parseInt(portInput, 10);
     if (isNaN(port) || port < 1024 || port > 65535) {
-      setPortError('Port must be 1024–65535');
+      setPortError('Port must be 1024\u201365535');
       return;
     }
     setPortError(null);
@@ -253,14 +232,8 @@ export function LlmSettings() {
             type="radio"
             checked={selection.kind === 'local'}
             onChange={() => {
-              const first = models.find((m) => m.downloaded);
-              if (first) {
-                handleSelectionChange({ kind: 'local', id: first.id });
-              } else {
-                // Allow selecting Local even without downloads so the
-                // model list (with download buttons) becomes visible.
-                setSelection({ kind: 'local', id: '' });
-              }
+              setSelection({ kind: 'local', id: '' });
+              patchLlmSettings({ selection: { kind: 'local', id: '' } }).catch(() => {});
             }}
           />
           <span>Local</span>
@@ -280,73 +253,142 @@ export function LlmSettings() {
       {/* Local model picker */}
       {selection.kind === 'local' && (
         <div style={{ marginTop: 16 }}>
+          <div className="language-model-source-row">
+            <span className="settings-field__label">Download from</span>
+            <select
+              className="settings-input"
+              value={downloadSource}
+              onChange={async (e) => {
+                const src = e.target.value as DownloadSource;
+                setDownloadSource(src);
+                try {
+                  await patchLlmSettings({ download_source: src });
+                } catch {}
+              }}
+              style={{ width: 'auto' }}
+            >
+              <option value="hugging_face">Hugging Face</option>
+              <option value="hf_mirror">HF Mirror (hf-mirror.com)</option>
+              <option value="model_scope">ModelScope (modelscope.cn)</option>
+            </select>
+          </div>
+
           <div className="settings-field__label">Local model</div>
-          {models.map((m) => (
-            <div key={m.id} className={`model-list__row ${!m.downloaded ? 'model-list__row--disabled' : ''}`}>
-              <label className="language-model-radio-row">
-                <input
-                  type="radio"
-                  name="local-model"
-                  checked={selection.kind === 'local' && selection.id === m.id}
-                  disabled={!m.downloaded}
-                  onChange={() => handleSelectionChange({ kind: 'local', id: m.id })}
-                />
-                <span>{m.name}</span>
-                {m.downloaded && <span className="model-list__check">Downloaded</span>}
-              </label>
-              <div className="settings-row__sublabel" style={{ marginLeft: 24 }}>
-                ~{m.size_mb} MB on disk · ~{m.ram_mb} MB RAM · {m.recommended_ram_gb} GB+ recommended
-              </div>
-              <div className="settings-row__sublabel" style={{ marginLeft: 24 }}>
-                {m.description}
-              </div>
-              <div style={{ marginLeft: 24, marginTop: 4 }}>
-                {!m.downloaded && !(downloadStatus.state === 'downloading' && downloadStatus.llm_id === m.id) && (
-                  <button
-                    type="button"
-                    className="model-list__download-btn"
-                    onClick={() => handleDownload(m.id)}
-                    disabled={downloadStatus.state === 'downloading'}
-                  >
-                    {downloadStatus.state === 'downloading'
-                      ? 'Another download in progress…'
-                      : `Download ${m.size_mb} MB`}
-                  </button>
-                )}
-                {downloadStatus.state === 'downloading' && downloadStatus.llm_id === m.id && (
-                  <div className="model-progress" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{
-                      flex: 1,
-                      height: 8,
-                      background: 'var(--color-bg-hover, #e0e0e0)',
-                      borderRadius: 4,
-                      overflow: 'hidden',
-                    }}>
-                      <div style={{
-                        height: '100%',
-                        width: `${(downloadStatus.progress ?? 0) * 100}%`,
-                        background: 'var(--color-accent, #3b82f6)',
-                        borderRadius: 4,
-                        transition: 'width 0.3s ease',
-                      }} />
+          <div className="model-list">
+            {models.map((m) => {
+              const isSelected = selection.kind === 'local' && selection.id === m.id;
+              const needsLoad = isSelected && (loadStatus.state === 'idle' || (loadStatus.state === 'error' && loadStatus.llm_id === m.id));
+              const isDownloading = loadStatus.state === 'downloading' && loadStatus.llm_id === m.id;
+              const isLoadingPhase = loadStatus.state === 'loading' && loadStatus.llm_id === m.id;
+              const isLoaded = loadStatus.state === 'loaded' && loadStatus.llm_id === m.id;
+              const hasError = loadStatus.state === 'error' && loadStatus.llm_id === m.id;
+              const anyBusy = loadStatus.state === 'downloading' || loadStatus.state === 'loading';
+
+              const cancelAndUnselect = async () => {
+                await cancelLlmLoad();
+                setLoadStatus({ state: 'idle' });
+                const cleared: LlmSelection = { kind: 'local', id: '' };
+                setSelection(cleared);
+                patchLlmSettings({ selection: cleared }).catch(() => {});
+              };
+
+              return (
+                <div key={m.id} className="model-list__item">
+                  <label className="language-model-radio-row">
+                    <input
+                      type="radio"
+                      name="local-model"
+                      checked={selection.kind === 'local' && selection.id === m.id}
+                      disabled={anyBusy}
+                      onChange={() => handleSelectionChange({ kind: 'local', id: m.id })}
+                    />
+                    <div className="model-list__info">
+                      <div className="model-list__name">
+                        {m.name}
+                        <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginLeft: 6, fontFamily: 'monospace' }}>{m.id}</span>
+                        {isLoaded && <span className="model-list__check" style={{ marginLeft: 8 }}>Loaded</span>}
+                      </div>
+                      <div className="model-list__spec">
+                        ~{m.size_mb} MB download · ~{m.ram_mb} MB RAM · {m.recommended_ram_gb} GB+ recommended
+                      </div>
+                      <div className="model-list__desc">{m.description}</div>
                     </div>
-                    <span style={{ fontSize: 12, minWidth: 40 }}>
-                      {Math.round((downloadStatus.progress ?? 0) * 100)}%
-                    </span>
-                  </div>
-                )}
-                {m.downloaded && (
-                  <button
-                    type="button"
-                    className="model-list__delete-btn"
-                    onClick={() => handleDelete(m.id, m.name)}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+                  </label>
+                  {isDownloading && (
+                    <div className="model-list__actions" style={{ flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                        <div className="model-list__loading-bar" style={{ background: 'var(--color-bg-hover, #e0e0e0)' }}>
+                          <div style={{
+                            height: '100%',
+                            width: `${Math.round((loadStatus.progress ?? 0) * 100)}%`,
+                            background: 'var(--color-accent, #3b82f6)',
+                            borderRadius: 3,
+                            transition: 'width 0.5s ease',
+                          }} />
+                        </div>
+                        <span style={{ fontSize: 12, minWidth: 36 }}>{Math.round((loadStatus.progress ?? 0) * 100)}%</span>
+                        <button type="button" className="model-list__delete-btn" onClick={cancelAndUnselect}>Cancel</button>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                        Downloading model…
+                      </div>
+                    </div>
+                  )}
+                  {/* quantizing UI removed — GGUF models are pre-quantized */}
+                  {isLoadingPhase && (
+                    <div className="model-list__actions" style={{ flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                        <div className="model-list__loading-bar"><div className="model-list__loading-bar-fill" /></div>
+                        <button type="button" className="model-list__delete-btn" onClick={cancelAndUnselect}>Cancel</button>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                        Loading model…
+                      </div>
+                    </div>
+                  )}
+                  {needsLoad && (
+                    <div className="model-list__actions">
+                      <button
+                        type="button"
+                        className="model-list__download-btn"
+                        onClick={async () => {
+                          await startLlmLoad(m.id);
+                          const status = await fetchLoadStatus();
+                          setLoadStatus(status);
+                        }}
+                      >
+                        Load model
+                      </button>
+                      {hasError && (
+                        <span style={{ fontSize: 12, color: 'var(--color-priority-high-text, #d33)' }}>
+                          {loadStatus.message}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Load on startup */}
+          <label className="language-model-radio-row" style={{ marginTop: 12 }}>
+            <input
+              type="checkbox"
+              checked={loadOnStartup}
+              onChange={async (e) => {
+                const v = e.target.checked;
+                setLoadOnStartup(v);
+                try {
+                  await patchLlmSettings({ load_on_startup: v });
+                } catch {}
+              }}
+            />
+            <span>Load model at application startup</span>
+          </label>
+          <div className="language-model-endpoint-hint">
+            When enabled, the selected model downloads and loads automatically when Actio starts.
+          </div>
 
           {/* Endpoint port */}
           <div style={{ marginTop: 16 }}>
@@ -450,7 +492,7 @@ export function LlmSettings() {
             type="button"
             className="settings-btn settings-btn--secondary"
             onClick={handleTest}
-            disabled={testing}
+            disabled={testing || loadStatus.state === 'loading'}
           >
             {testing ? 'Testing...' : 'Test Connection'}
           </button>

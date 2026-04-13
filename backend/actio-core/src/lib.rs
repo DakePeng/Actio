@@ -86,15 +86,8 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     let aggregator = Arc::new(TranscriptAggregator::new(pool.clone()));
     let metrics = Arc::new(Metrics::new());
 
-    // Shared download mutex enforces "one download at a time" across both
-    // ASR (ModelManager) and LLM (LlmDownloader).
-    let download_lock = Arc::new(tokio::sync::Mutex::new(()));
-
     let model_manager = Arc::new(ModelManager::new(config.model_dir.clone()));
-    let llm_downloader = Arc::new(LlmDownloader::new(
-        config.model_dir.clone(),
-        download_lock.clone(),
-    ));
+    let llm_downloader = Arc::new(LlmDownloader::new(config.model_dir.clone()));
     let engine_slot = Arc::new(EngineSlot::new(config.model_dir.clone()));
 
     let remote_client_envseed = LlmConfig::from_env_optional()
@@ -139,6 +132,29 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         if let Err(e) = endpoint.start_or_rebind(configured_port, state_clone).await {
             warn!(port = configured_port, error = %e,
                 "Failed to bind local LLM endpoint listener at startup; /v1 routes may be unavailable on configured port");
+        }
+    }
+
+    // If load_on_startup is enabled and a local model is selected with a
+    // cached UQFF file, start loading it in the background.
+    // If no UQFF exists, skip — don't trigger a download at startup.
+    if initial_settings.llm.load_on_startup {
+        if let crate::engine::llm_router::LlmSelection::Local { ref id } = initial_settings.llm.selection {
+            let info = crate::engine::llm_catalog::available_local_llms()
+                .into_iter()
+                .find(|m| m.id == *id);
+            if let Some(info) = info {
+                if crate::engine::local_llm_engine::LocalLlmEngine::has_gguf(&config.model_dir, &info) {
+                    info!(llm_id = %id, "Loading cached local LLM at startup");
+                    state.engine_slot.start_load(
+                        id.clone(),
+                        initial_settings.llm.download_source,
+                        &state.llm_downloader,
+                    ).await;
+                } else {
+                    info!(llm_id = %id, "Skipping startup load — no cached GGUF, model needs download first");
+                }
+            }
         }
     }
 

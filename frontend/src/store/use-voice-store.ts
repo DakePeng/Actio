@@ -3,7 +3,6 @@ import type { Segment, Person } from '../types';
 
 export type ClipInterval = 1 | 2 | 5 | 10 | 30;
 
-const API_BASE = 'http://127.0.0.1:3000';
 const WS_BASE = 'ws://127.0.0.1:3000';
 
 interface RecordingSession {
@@ -85,89 +84,62 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   _ws: null,
 
   startRecording: () => {
-    // Optimistic: animate immediately, wire backend in background
-    const optimistic: RecordingSession = {
-      id: '',
+    // The backend runs an always-on inference pipeline. Recording is just
+    // "subscribe to the live transcript stream" — no session creation, no
+    // backend state change. Closing the WebSocket detaches us; the pipeline
+    // keeps running for other consumers.
+    const session: RecordingSession = {
+      id: 'live',
       startedAt: new Date().toISOString(),
       liveTranscript: '',
       pendingPartial: '',
       pipelineReady: false,
     };
-    set({ isRecording: true, currentSession: optimistic });
+    set({ isRecording: true, currentSession: session });
 
-    (async () => {
-      let sessionId: string;
-      let startedAt: string;
+    const ws = new WebSocket(`${WS_BASE}/ws`);
+    ws.onmessage = (event) => {
       try {
-        const res = await fetch(`${API_BASE}/sessions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: '{}',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        sessionId = data.id;
-        startedAt = data.started_at ?? optimistic.startedAt;
-      } catch (e) {
-        console.error('[Actio] Backend unavailable — recording locally only:', e);
-        // Keep recording state; transcripts won't appear but timer works
-        return;
-      }
-
-      // Patch session with real backend id
-      set((state) => ({
-        currentSession: state.currentSession
-          ? { ...state.currentSession, id: sessionId, startedAt }
-          : null,
-      }));
-
-      const ws = new WebSocket(`${WS_BASE}/ws?session_id=${sessionId}`);
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.kind === 'transcript' && msg.text) {
-            if (msg.is_final) {
-              // Commit: append finalized text, clear pending partial
-              set((state) => {
-                if (!state.currentSession) return state;
-                const prev = state.currentSession.liveTranscript;
-                return {
-                  currentSession: {
-                    ...state.currentSession,
-                    liveTranscript: prev ? `${prev} ${msg.text}` : msg.text,
-                    pendingPartial: '',
-                    pipelineReady: true,
-                  },
-                };
-              });
-            } else {
-              // Partial: replace in-progress text (don't append)
-              set((state) => {
-                if (!state.currentSession) return state;
-                return {
-                  currentSession: {
-                    ...state.currentSession,
-                    pendingPartial: msg.text,
-                    pipelineReady: true,
-                  },
-                };
-              });
-            }
+        const msg = JSON.parse(event.data);
+        if (msg.kind === 'transcript' && msg.text) {
+          if (msg.is_final) {
+            // Commit: append finalized text, clear pending partial
+            set((state) => {
+              if (!state.currentSession) return state;
+              const prev = state.currentSession.liveTranscript;
+              return {
+                currentSession: {
+                  ...state.currentSession,
+                  liveTranscript: prev ? `${prev} ${msg.text}` : msg.text,
+                  pendingPartial: '',
+                  pipelineReady: true,
+                },
+              };
+            });
+          } else {
+            // Partial: replace in-progress text (don't append)
+            set((state) => {
+              if (!state.currentSession) return state;
+              return {
+                currentSession: {
+                  ...state.currentSession,
+                  pendingPartial: msg.text,
+                  pipelineReady: true,
+                },
+              };
+            });
           }
-        } catch { /* ignore malformed frames */ }
-      };
-      ws.onerror = (e) => console.warn('[Actio] WS error', e);
-      set({ _ws: ws });
-    })();
+        }
+      } catch { /* ignore malformed frames */ }
+    };
+    ws.onerror = (e) => console.warn('[Actio] WS error', e);
+    set({ _ws: ws });
   },
 
   stopRecording: () => {
     const { currentSession, _ws } = get();
     _ws?.close();
-    if (currentSession) {
-      fetch(`${API_BASE}/sessions/${currentSession.id}/end`, { method: 'POST' }).catch(() => {});
-      if (currentSession.liveTranscript.trim()) get().flushInterval();
-    }
+    if (currentSession?.liveTranscript.trim()) get().flushInterval();
     set({ isRecording: false, currentSession: null, _ws: null });
   },
 

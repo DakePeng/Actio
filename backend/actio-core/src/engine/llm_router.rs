@@ -119,11 +119,11 @@ mod tests {
     #[test]
     fn selection_serializes_with_kind_tag() {
         let local = LlmSelection::Local {
-            id: "qwen3.5-0.8b-q4km".into(),
+            id: "qwen3.5-0.8b".into(),
         };
         let json = serde_json::to_string(&local).unwrap();
         assert!(json.contains("\"kind\":\"local\""));
-        assert!(json.contains("\"id\":\"qwen3.5-0.8b-q4km\""));
+        assert!(json.contains("\"id\":\"qwen3.5-0.8b\""));
     }
 
     #[test]

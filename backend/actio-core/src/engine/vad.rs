@@ -63,8 +63,9 @@ pub fn start_vad(
     let model_path_owned = model_path.to_path_buf();
     let window = config.window_size as usize;
 
-    // Sync bridge: tokio audio_rx → blocking VAD thread
-    let (audio_tx, audio_cb_rx) = crossbeam_channel::bounded::<Vec<f32>>(64);
+    // Sync bridge: tokio audio_rx → blocking VAD thread. Unbounded so audio
+    // captured during model load queues up instead of being dropped.
+    let (audio_tx, audio_cb_rx) = crossbeam_channel::unbounded::<Vec<f32>>();
     // Sync bridge: blocking VAD thread → tokio segment consumer
     let (seg_cb_tx, seg_rx) = crossbeam_channel::bounded::<SpeechSegment>(32);
 

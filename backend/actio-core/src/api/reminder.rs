@@ -57,6 +57,9 @@ pub struct CreateReminderRequest {
     pub due_time: Option<chrono::DateTime<chrono::Utc>>,
     pub labels: Option<Vec<Uuid>>,
     pub session_id: Option<Uuid>,
+    /// Free-form context payload — used by the chat composer to stash
+    /// attachment metadata (e.g. JSON-encoded image data URLs).
+    pub context: Option<String>,
 }
 
 pub async fn create_reminder(
@@ -79,7 +82,7 @@ pub async fn create_reminder(
         priority: req.priority,
         due_time: req.due_time,
         transcript_excerpt: None,
-        context: None,
+        context: req.context,
         source_time: None,
     };
     let reminder = reminder_repo::create_reminder(&state.pool, &new_reminder, label_ids)

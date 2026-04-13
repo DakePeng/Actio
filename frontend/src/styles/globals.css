@@ -222,8 +222,12 @@ body.body--standby .tray--launcher:hover {
 .brand-mark {
   width: 42px;
   height: 42px;
+  border-radius: 14px;
   display: grid;
   place-items: center;
+  background: var(--color-accent);
+  color: white;
+  box-shadow: 0 14px 32px rgba(79, 70, 229, 0.28);
 }
 
 .brand-copy {
@@ -1085,6 +1089,14 @@ body.body--standby .tray--launcher:hover {
   font-size: 0.9rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+
+.tray-brand-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  animation: pulse 2s infinite;
 }
 
 .tray-brand-name {
@@ -2141,6 +2153,10 @@ body {
 
 .tray-brand {
   gap: 10px;
+}
+
+.tray-brand-dot {
+  animation: none;
 }
 
 .tray-brand-name {
@@ -3494,6 +3510,23 @@ body.body--native-board .desktop-window {
   color: var(--color-text-secondary);
   min-width: 36px;
   text-align: right;
+}
+
+.model-progress__cancel-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.model-progress__cancel-btn:hover {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.45);
 }
 
 .model-error {

@@ -1,0 +1,10 @@
+[env]
+# Required for llama-cpp-2 build on Windows:
+# - LIBCLANG_PATH: bindgen needs libclang.dll for FFI generation
+# - CXXFLAGS/CFLAGS: /utf-8 prevents MSVC encoding errors with non-ASCII
+#   source chars in llama.cpp (e.g. jinja/utils.h) on non-English locales
+# - CMAKE: path to cmake.exe (VS BuildTools bundles it but it's not in PATH)
+LIBCLANG_PATH = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin"
+CMAKE = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
+CXXFLAGS = "/utf-8"
+CFLAGS = "/utf-8"

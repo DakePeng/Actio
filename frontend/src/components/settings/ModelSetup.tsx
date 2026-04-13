@@ -25,21 +25,52 @@ interface AsrModelInfo {
   runtime_supported: boolean;
 }
 
+type AsrDownloadSource = 'hugging_face' | 'hf_mirror';
+
 interface Settings {
   audio?: {
     device_name?: string;
     asr_model?: string;
+    download_source?: AsrDownloadSource;
   };
   llm?: Record<string, unknown>;
 }
 
 const API_BASE = 'http://127.0.0.1:3000';
 
+type LanguageTab = 'all' | 'chinese' | 'english' | 'korean' | 'french' | 'multilingual';
+
+const LANGUAGE_TABS: { id: LanguageTab; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'chinese', label: 'Chinese' },
+  { id: 'english', label: 'English' },
+  { id: 'korean', label: 'Korean' },
+  { id: 'french', label: 'French' },
+  { id: 'multilingual', label: 'Multilingual' },
+];
+
+function isMultilingual(languages: string): boolean {
+  return languages.includes(',') || languages.includes('languages');
+}
+
+function matchesTab(m: AsrModelInfo, tab: LanguageTab): boolean {
+  if (tab === 'all') return true;
+  if (tab === 'multilingual') return isMultilingual(m.languages);
+  const lang = m.languages.toLowerCase();
+  if (tab === 'chinese') return lang === 'chinese';
+  if (tab === 'english') return lang === 'english';
+  if (tab === 'korean') return lang === 'korean';
+  if (tab === 'french') return lang === 'french';
+  return false;
+}
+
 export function ModelSetup({ onReady }: { onReady?: () => void }) {
   const [status, setStatus] = useState<ModelStatus>({ state: 'not_downloaded' });
   const [models, setModels] = useState<AsrModelInfo[]>([]);
   const [activeModel, setActiveModel] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [langTab, setLangTab] = useState<LanguageTab>('all');
+  const [downloadSource, setDownloadSource] = useState<AsrDownloadSource>('hugging_face');
 
   const refreshAll = useCallback(async () => {
     try {
@@ -57,6 +88,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
       if (settingsRes.ok) {
         const settings: Settings = await settingsRes.json();
         setActiveModel(settings.audio?.asr_model ?? '');
+        setDownloadSource(settings.audio?.download_source ?? 'hugging_face');
       }
     } catch {
       // Server not ready
@@ -73,6 +105,15 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     const interval = setInterval(() => void refreshAll(), 1000);
     return () => clearInterval(interval);
   }, [status.state, refreshAll]);
+
+  const handleCancelDownload = async () => {
+    try {
+      await fetch(`${API_BASE}/settings/models/cancel-download`, { method: 'POST' });
+      await refreshAll();
+    } catch {
+      // ignore
+    }
+  };
 
   const handleDownload = async (target: DownloadTarget) => {
     setError(null);
@@ -155,6 +196,29 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     <section className="settings-section">
       <div className="settings-section__title">Speech Models</div>
 
+      <div className="settings-field" style={{ marginBottom: 8 }}>
+        <span className="settings-field__label">Download from</span>
+        <select
+          className="settings-input"
+          value={downloadSource}
+          onChange={async (e) => {
+            const src = e.target.value as AsrDownloadSource;
+            setDownloadSource(src);
+            try {
+              await fetch(`${API_BASE}/settings`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ audio: { download_source: src } }),
+              });
+            } catch { /* ignore */ }
+          }}
+          style={{ width: 'auto' }}
+        >
+          <option value="hugging_face">Hugging Face</option>
+          <option value="hf_mirror">HF Mirror (hf-mirror.com)</option>
+        </select>
+      </div>
+
       {error && <div className="model-error">{error}</div>}
 
       {isDownloading && (
@@ -172,6 +236,14 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
             <div className="model-progress__text">
               {Math.round((status.progress ?? 0) * 100)}%
             </div>
+            <button
+              type="button"
+              className="model-progress__cancel-btn"
+              onClick={handleCancelDownload}
+              title="Cancel download"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -179,8 +251,22 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
       {models.length > 0 && (
         <div className="settings-field">
           <div className="settings-field__label">ASR Models</div>
+          <div className="model-lang-tabs">
+            {LANGUAGE_TABS
+              .filter((tab) => tab.id === 'all' || models.some((m) => matchesTab(m, tab.id)))
+              .map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`model-lang-tab${langTab === tab.id ? ' is-active' : ''}`}
+                  onClick={() => setLangTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+          </div>
           <div className="model-list">
-            {models.map((m) => {
+            {models.filter((m) => matchesTab(m, langTab)).map((m) => {
               const isActive = activeModel === m.id;
               // Selecting the radio is only allowed when the model is both
               // downloaded and runtime-supported. Downloading is always

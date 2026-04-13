@@ -29,6 +29,13 @@ impl TranscriptAggregator {
         self.events.subscribe()
     }
 
+    /// Number of currently-attached broadcast receivers. Used by the
+    /// pipeline supervisor to decide whether to keep the always-on
+    /// recognizer warm or hibernate it to free RAM.
+    pub fn receiver_count(&self) -> usize {
+        self.events.receiver_count()
+    }
+
     fn publish(&self, t: &AggregatedTranscript) {
         // Ignore send errors — no active subscribers is fine
         let _ = self.events.send(t.clone());

@@ -82,6 +82,7 @@ export function createActioApiClient() {
           priority: reminder.priority,
           due_time: normalizeDueTime(reminder.dueTime),
           labels: reminder.labels,
+          context: reminder.context,
         }),
       });
       return mapBackendReminder(created);
