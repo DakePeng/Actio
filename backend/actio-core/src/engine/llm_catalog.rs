@@ -51,7 +51,7 @@ pub fn available_local_llms() -> Vec<LocalLlmInfo> {
             sources: GgufSources {
                 huggingface: "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf".into(),
                 hf_mirror: "https://hf-mirror.com/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf".into(),
-                model_scope: "https://modelscope.cn/api/v1/models/unsloth/Qwen3.5-0.8B-GGUF/repo?Revision=master&FilePath=Qwen3.5-0.8B-Q4_K_M.gguf".into(),
+                model_scope: "https://modelscope.cn/models/unsloth/Qwen3.5-0.8B-GGUF/resolve/master/Qwen3.5-0.8B-Q4_K_M.gguf".into(),
             },
             size_mb: 510,  // 535,171,328 bytes
             ram_mb: 700,
@@ -67,7 +67,7 @@ pub fn available_local_llms() -> Vec<LocalLlmInfo> {
             sources: GgufSources {
                 huggingface: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf".into(),
                 hf_mirror: "https://hf-mirror.com/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf".into(),
-                model_scope: "https://modelscope.cn/api/v1/models/unsloth/Qwen3.5-2B-GGUF/repo?Revision=master&FilePath=Qwen3.5-2B-Q4_K_M.gguf".into(),
+                model_scope: "https://modelscope.cn/models/unsloth/Qwen3.5-2B-GGUF/resolve/master/Qwen3.5-2B-Q4_K_M.gguf".into(),
             },
             size_mb: 1221,  // 1,280,835,840 bytes
             ram_mb: 1700,

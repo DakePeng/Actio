@@ -299,31 +299,74 @@ pub async fn openai_chat_completions(
         }
     };
 
+    let is_stream = req.stream.unwrap_or(false);
+
     match engine.chat_completion(messages, params, EnginePriority::External).await {
         Ok(content) => {
-            let resp = OpenAiChatResponse {
-                id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),
-                object: "chat.completion",
-                created: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-                model: loaded_id.clone(),
-                choices: vec![OpenAiChoice {
-                    index: 0,
-                    message: OpenAiResponseMessage {
-                        role: "assistant",
-                        content,
+            let id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
+            let created = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            if is_stream {
+                // Wrap as SSE: one chunk with the full content, then [DONE].
+                let chunk = serde_json::json!({
+                    "id": id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": loaded_id,
+                    "choices": [{
+                        "index": 0,
+                        "delta": { "role": "assistant", "content": content },
+                        "finish_reason": null
+                    }]
+                });
+                let done_chunk = serde_json::json!({
+                    "id": id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": loaded_id,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop"
+                    }]
+                });
+                let body = format!(
+                    "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                    serde_json::to_string(&chunk).unwrap(),
+                    serde_json::to_string(&done_chunk).unwrap(),
+                );
+                axum::response::Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "text/event-stream")
+                    .header("cache-control", "no-cache")
+                    .body(axum::body::Body::from(body))
+                    .unwrap()
+                    .into_response()
+            } else {
+                let resp = OpenAiChatResponse {
+                    id,
+                    object: "chat.completion",
+                    created,
+                    model: loaded_id.clone(),
+                    choices: vec![OpenAiChoice {
+                        index: 0,
+                        message: OpenAiResponseMessage {
+                            role: "assistant",
+                            content,
+                        },
+                        finish_reason: "stop",
+                    }],
+                    usage: OpenAiUsage {
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                        total_tokens: 0,
                     },
-                    finish_reason: "stop",
-                }],
-                usage: OpenAiUsage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                },
-            };
-            (StatusCode::OK, Json(resp)).into_response()
+                };
+                (StatusCode::OK, Json(resp)).into_response()
+            }
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

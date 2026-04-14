@@ -67,7 +67,9 @@ static LLAMA_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
 #[cfg(feature = "local-llm")]
 fn get_or_init_backend() -> &'static LlamaBackend {
     LLAMA_BACKEND.get_or_init(|| {
-        LlamaBackend::init().expect("failed to initialize llama.cpp backend")
+        let mut backend = LlamaBackend::init().expect("failed to initialize llama.cpp backend");
+        backend.void_logs();
+        backend
     })
 }
 

@@ -173,6 +173,15 @@ pub async fn patch_settings(
             tracing::info!("LLM selection changed away from Local — unloaded engine");
         }
         *state.router.write().await = new_router;
+
+        // Rebind the separate /v1 LLM endpoint if the port changed.
+        let new_port = new_settings.llm.local_endpoint_port;
+        let mut endpoint = state.llm_endpoint.lock().await;
+        if endpoint.bound_port() != Some(new_port) {
+            if let Err(e) = endpoint.start_or_rebind(new_port, state.clone()).await {
+                tracing::warn!(port = new_port, error = %e, "Failed to rebind LLM endpoint");
+            }
+        }
     }
 
     Json(new_settings)

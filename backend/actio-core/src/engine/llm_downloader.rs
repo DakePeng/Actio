@@ -83,7 +83,13 @@ impl LlmDownloader {
                 .map_err(|e| LlmDownloadError::DiskWrite(e.to_string()))?;
         }
 
-        let response = reqwest::get(url)
+        let client = reqwest::Client::builder()
+            .user_agent("Actio/0.1")
+            .build()
+            .map_err(|e| LlmDownloadError::DownloadFailed(e.to_string()))?;
+
+        let response = client.get(url)
+            .send()
             .await
             .map_err(|e| LlmDownloadError::DownloadFailed(e.to_string()))?;
 

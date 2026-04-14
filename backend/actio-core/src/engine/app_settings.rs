@@ -70,7 +70,7 @@ pub struct RemoteLlmSettings {
 }
 
 fn default_local_endpoint_port() -> u16 {
-    3000
+    3001
 }
 
 /// Post-deserialization migration for legacy flat LlmSettings. If the
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(settings.llm.remote.api_key.as_deref(), Some("sk-legacy"));
         assert_eq!(settings.llm.remote.model.as_deref(), Some("gpt-4o-mini"));
         assert_eq!(settings.llm.selection, LlmSelection::Remote);
-        assert_eq!(settings.llm.local_endpoint_port, 3000);
+        assert_eq!(settings.llm.local_endpoint_port, 3001);
     }
 
     #[test]
@@ -309,7 +309,7 @@ mod tests {
         let json = r#"{"audio": {}}"#;
         let settings: AppSettings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.llm.selection, LlmSelection::Disabled);
-        assert_eq!(settings.llm.local_endpoint_port, 3000);
+        assert_eq!(settings.llm.local_endpoint_port, 3001);
         assert!(settings.llm.remote.base_url.is_none());
     }
 }

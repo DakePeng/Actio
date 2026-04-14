@@ -101,7 +101,7 @@ async function testLlm(): Promise<LlmTestResult> {
 export function LlmSettings() {
   const [selection, setSelection] = useState<LlmSelection>({ kind: 'disabled' });
   const [remote, setRemote] = useState<RemoteLlmSettings>({});
-  const [portInput, setPortInput] = useState('3000');
+  const [portInput, setPortInput] = useState('3001');
   const [portError, setPortError] = useState<string | null>(null);
   const [downloadSource, setDownloadSource] = useState<DownloadSource>('hugging_face');
   const [loadOnStartup, setLoadOnStartup] = useState(false);
@@ -160,9 +160,14 @@ export function LlmSettings() {
       await patchLlmSettings({ selection: sel });
       // If selecting a local model, trigger load then fetch real status
       if (sel.kind === 'local' && sel.id) {
+        // Immediately show loading state so the UI updates before the
+        // async backend call returns.
+        setLoadStatus({ state: 'loading', llm_id: sel.id });
         await startLlmLoad(sel.id);
         const status = await fetchLoadStatus();
         setLoadStatus(status);
+      } else {
+        setLoadStatus({ state: 'idle' });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save');
@@ -402,7 +407,7 @@ export function LlmSettings() {
                 max={65535}
                 value={portInput}
                 onChange={(e) => setPortInput(e.target.value)}
-                style={{ width: 80 }}
+                style={{ width: 120 }}
               />
               <button
                 type="button"
