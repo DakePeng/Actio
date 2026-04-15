@@ -32,6 +32,26 @@ interface CardProps {
 }
 
 export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: CardProps) {
+  // Skeleton variant — no interactivity, just shimmer bars
+  if (reminder.isExtracting) {
+    return (
+      <motion.div
+        layout
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
+      >
+        <article className="reminder-card card--skeleton">
+          <div className="reminder-accent" style={{ background: '#d4d4d8' }} />
+          <div className="card-shell">
+            <div className="skeleton-line skeleton-line--short" />
+            <div className="skeleton-line skeleton-line--long" />
+          </div>
+        </article>
+      </motion.div>
+    );
+  }
+
   const setFilter = useStore((s) => s.setFilter);
   const archiveReminder = useStore((s) => s.archiveReminder);
   const setPriority = useStore((s) => s.setPriority);
@@ -40,6 +60,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
   const allLabels = useStore((s) => s.labels);
   const setFeedback = useStore((s) => s.setFeedback);
   const highlightedCardId = useStore((s) => s.ui.highlightedCardId);
+  const clearAiGenerated = useStore((s) => s.clearAiGenerated);
 
   const { title, description, priority: p, labels, dueTime, transcript, context } = reminder;
   const displayLabels = labels.slice(0, 3);
@@ -150,7 +171,11 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
     >
       <article
         className={`reminder-card${isExpanded ? ' is-expanded' : ''}${isHighlighted ? ' is-highlighted' : ''}`}
-        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (reminder.isAiGenerated) clearAiGenerated(reminder.id);
+          onToggle();
+        }}
       >
         {/* Swipe-to-done overlay */}
         <motion.div
@@ -179,6 +204,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
               {priorityColors.label}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {reminder.isAiGenerated && <span className="mini-badge mini-badge--ai">AI</span>}
               {reminder.isNew && <span className="mini-badge">New</span>}
             </div>
           </div>

@@ -3922,3 +3922,50 @@ body.body--native-board .desktop-window {
 @keyframes actio-flow {
   to { --gradient-angle: 360deg; }
 }
+
+/* ── Skeleton shimmer ────────────────────────────────── */
+.card--skeleton {
+  pointer-events: none;
+}
+
+.card--skeleton .card-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 16px;
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-2, #e4e4e7) 0%,
+    var(--color-surface-3, #d4d4d8) 50%,
+    var(--color-surface-2, #e4e4e7) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-line--short {
+  width: 60%;
+}
+
+.skeleton-line--long {
+  width: 90%;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── AI badge ────────────────────────────────────────── */
+.mini-badge--ai {
+  background: linear-gradient(135deg, #818cf8, #a78bfa);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
