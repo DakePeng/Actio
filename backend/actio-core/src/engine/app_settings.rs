@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -12,6 +13,8 @@ pub struct AppSettings {
     pub llm: LlmSettings,
     #[serde(default)]
     pub audio: AudioSettings,
+    #[serde(default)]
+    pub keyboard: KeyboardSettings,
 }
 
 /// The legacy flat shape had `base_url`, `api_key`, `model` directly on
@@ -105,11 +108,46 @@ pub struct AudioSettings {
     pub download_source: DownloadSource,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyboardSettings {
+    #[serde(default = "default_shortcuts")]
+    pub shortcuts: HashMap<String, String>,
+}
+
+impl Default for KeyboardSettings {
+    fn default() -> Self {
+        Self {
+            shortcuts: default_shortcuts(),
+        }
+    }
+}
+
+fn default_shortcuts() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    // Global
+    m.insert("toggle_board_tray".into(), "Ctrl+\\".into());
+    m.insert("start_dictation".into(), "Ctrl+Shift+Space".into());
+    m.insert("new_todo".into(), "Ctrl+N".into());
+    // Tab navigation
+    m.insert("tab_board".into(), "Ctrl+1".into());
+    m.insert("tab_people".into(), "Ctrl+2".into());
+    m.insert("tab_recording".into(), "Ctrl+3".into());
+    m.insert("tab_archive".into(), "Ctrl+4".into());
+    m.insert("tab_settings".into(), "Ctrl+5".into());
+    // Card navigation
+    m.insert("card_up".into(), "ArrowUp".into());
+    m.insert("card_down".into(), "ArrowDown".into());
+    m.insert("card_expand".into(), "Enter".into());
+    m.insert("card_archive".into(), "Delete".into());
+    m
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             llm: LlmSettings::default(),
             audio: AudioSettings::default(),
+            keyboard: KeyboardSettings::default(),
         }
     }
 }
@@ -207,6 +245,13 @@ impl SettingsManager {
                 settings.audio.download_source = v;
             }
         }
+        if let Some(keyboard) = patch.keyboard {
+            if let Some(shortcuts) = keyboard.shortcuts {
+                for (k, v) in shortcuts {
+                    settings.keyboard.shortcuts.insert(k, v);
+                }
+            }
+        }
         // Save to disk
         if let Ok(json) = serde_json::to_string_pretty(&*settings) {
             if let Err(e) = std::fs::write(&self.path, json) {
@@ -221,6 +266,12 @@ impl SettingsManager {
 pub struct SettingsPatch {
     pub llm: Option<LlmSettingsPatch>,
     pub audio: Option<AudioSettingsPatch>,
+    pub keyboard: Option<KeyboardSettingsPatch>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct KeyboardSettingsPatch {
+    pub shortcuts: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
