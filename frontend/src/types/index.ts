@@ -29,6 +29,8 @@ export interface Reminder {
   context?: string;
   sourceTime?: string;
   isNew?: boolean;
+  isExtracting?: boolean;
+  isAiGenerated?: boolean;
   createdAt: string;
   archivedAt: string | null;
 }

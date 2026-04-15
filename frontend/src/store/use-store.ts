@@ -47,6 +47,8 @@ interface AppState {
   setFeedback: (message: string, tone?: 'neutral' | 'success') => void;
   clearFeedback: () => void;
   clearNewFlag: (id: string) => void;
+  extractReminders: (text: string) => Promise<void>;
+  clearAiGenerated: (id: string) => void;
   setProfile: (patch: Partial<Profile>) => void;
   setPreferences: (patch: Partial<Preferences>) => void;
   reset: () => void;
@@ -346,6 +348,50 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({
       reminders: state.reminders.map((reminder) =>
         reminder.id === id ? { ...reminder, isNew: false } : reminder,
+      ),
+    })),
+
+  extractReminders: async (text) => {
+    // Insert skeleton placeholders
+    const placeholderIds: string[] = [crypto.randomUUID(), crypto.randomUUID()];
+    const placeholders: Reminder[] = placeholderIds.map((id) => ({
+      id,
+      title: '',
+      description: '',
+      priority: 'medium' as Priority,
+      labels: [],
+      isExtracting: true,
+      createdAt: new Date().toISOString(),
+      archivedAt: null,
+    }));
+    set((state) => ({ reminders: [...placeholders, ...state.reminders] }));
+
+    try {
+      const extracted = await api.extractReminders(text);
+      set((state) => ({
+        reminders: [
+          ...extracted.map((r) => ({ ...r, isNew: true, isAiGenerated: true })),
+          ...state.reminders.filter((r) => !placeholderIds.includes(r.id)),
+        ],
+      }));
+      if (extracted.length === 0) {
+        pushFeedback(set, 'No action items found in your note');
+      } else {
+        pushFeedback(set, `Extracted ${extracted.length} reminder${extracted.length > 1 ? 's' : ''}`, 'success');
+      }
+    } catch {
+      // Remove placeholders on failure
+      set((state) => ({
+        reminders: state.reminders.filter((r) => !placeholderIds.includes(r.id)),
+      }));
+      pushFeedback(set, "Couldn't extract reminders");
+    }
+  },
+
+  clearAiGenerated: (id) =>
+    set((state) => ({
+      reminders: state.reminders.map((reminder) =>
+        reminder.id === id ? { ...reminder, isAiGenerated: false } : reminder,
       ),
     })),
 
