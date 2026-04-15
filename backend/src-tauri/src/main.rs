@@ -1,12 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{thread, time::Duration};
+use std::{thread, time::Duration, sync::Arc};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewWindow,
     utils::config::WindowEffectsConfig, window::Color,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
+use actio_core::engine::dictation::DictationService;
 
 const STANDBY_TRAY_WIDTH: f64 = 320.0;
 const STANDBY_TRAY_EXPANDED_WIDTH: f64 = 440.0;
@@ -431,6 +432,36 @@ fn sync_window_mode(
 }
 
 #[tauri::command]
+fn start_dictation(
+    app: tauri::AppHandle,
+    dictation: tauri::State<Arc<DictationService>>,
+) -> Result<(), String> {
+    dictation.start().map_err(|e| e.to_string())?;
+    let _ = app.emit("dictation-status", "listening");
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_dictation(
+    app: tauri::AppHandle,
+    dictation: tauri::State<Arc<DictationService>>,
+) -> Result<String, String> {
+    let transcript = dictation.stop().unwrap_or_default();
+    let _ = app.emit("dictation-status", "idle");
+    Ok(transcript)
+}
+
+#[tauri::command]
+fn paste_text(_text: String) -> Result<(), String> {
+    use enigo::{Enigo, Keyboard, Key, Direction, Settings};
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+    enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
+    enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
+    enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn reregister_shortcuts(
     app: tauri::AppHandle,
     shortcuts: std::collections::HashMap<String, String>,
@@ -467,8 +498,9 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds, reregister_shortcuts])
+        .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds, start_dictation, stop_dictation, paste_text, reregister_shortcuts])
         .setup(|app| {
+            app.manage(Arc::new(DictationService::new()));
             // Resolve app data directory for database and models
             let data_dir = app.path().app_data_dir()
                 .expect("failed to resolve app_data_dir");
