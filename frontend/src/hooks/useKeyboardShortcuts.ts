@@ -1,4 +1,6 @@
 import { useEffect, useCallback, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/use-store';
 import type { Tab } from '../types';
 
@@ -41,6 +43,8 @@ const DEFAULT_SHORTCUTS: ShortcutMap = {
   card_expand: 'Enter',
   card_archive: 'Delete',
 };
+
+const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export function useKeyboardShortcuts() {
   const [shortcuts, setShortcuts] = useState<ShortcutMap>(DEFAULT_SHORTCUTS);
@@ -135,6 +139,24 @@ export function useKeyboardShortcuts() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
+
+  // Listen for global shortcuts emitted from the Tauri backend
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+    listen<string>('shortcut-triggered', (event) => {
+      const action = event.payload;
+      if (action === 'toggle_board_tray') {
+        setBoardWindow(!ui.showBoardWindow);
+      } else if (action === 'new_todo') {
+        setBoardWindow(true);
+        setNewReminderBar(true);
+      } else if (action === 'start_dictation') {
+        invoke('start_dictation').catch(console.error);
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [ui.showBoardWindow, setBoardWindow, setNewReminderBar]);
 
   return { shortcuts, setShortcuts };
 }

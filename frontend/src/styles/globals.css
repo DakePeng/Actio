@@ -1108,6 +1108,31 @@ body.body--standby .tray--launcher:hover {
   line-height: 1;
 }
 
+.tray-soundwave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+}
+
+.tray-soundwave-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-accent, #4f46e5);
+  animation: soundwave 0.7s ease-in-out infinite alternate;
+}
+
+.tray-soundwave-bar:nth-child(1) { height: 6px; }
+.tray-soundwave-bar:nth-child(2) { height: 12px; }
+.tray-soundwave-bar:nth-child(3) { height: 18px; }
+.tray-soundwave-bar:nth-child(4) { height: 12px; }
+.tray-soundwave-bar:nth-child(5) { height: 6px; }
+
+@keyframes soundwave {
+  from { transform: scaleY(0.25); }
+  to   { transform: scaleY(1); }
+}
+
 .tray-brand-subtitle {
   margin-top: 2px;
   font-size: 0.68rem;

@@ -1,6 +1,7 @@
 import { createContext, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
@@ -24,6 +25,7 @@ export function StandbyTray() {
   const archiveReminder = useStore((s) => s.archiveReminder);
   const newCount = reminders.filter((r) => r.isNew && r.archivedAt === null).length;
   const [expanded, setExpanded] = useState(false);
+  const [isDictating, setIsDictating] = useState(false);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
   const topReminders = useMemo(() => {
@@ -57,6 +59,15 @@ export function StandbyTray() {
   // The mount-time run uses skipAnimation:true so the window is at the
   // correct size immediately (matching the initial framer-motion state
   // and avoiding a jump). Subsequent user toggles animate.
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+    listen<string>('dictation-status', (e) => {
+      setIsDictating(e.payload === 'listening');
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [isTauri]);
+
   const mountedRef = useRef(false);
   const prevShowBoardRef = useRef(showBoardWindow);
   useEffect(() => {
@@ -135,9 +146,17 @@ export function StandbyTray() {
             <div className="tray-brand">
               <span className="tray-brand-dot" aria-hidden="true" />
               <div>
-                <div className="tray-brand-name">actio</div>
+                {isDictating ? (
+                  <div className="tray-soundwave" aria-label="Listening">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <span key={i} className="tray-soundwave-bar" style={{ animationDelay: `${i * 0.1}s` }} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="tray-brand-name">actio</div>
+                )}
                 <div className="tray-brand-subtitle">
-                  {newCount > 0 ? `${newCount} fresh captures waiting` : 'Quiet queue, board ready'}
+                  {isDictating ? 'Listening...' : newCount > 0 ? `${newCount} fresh captures waiting` : 'Quiet queue, board ready'}
                 </div>
               </div>
             </div>
