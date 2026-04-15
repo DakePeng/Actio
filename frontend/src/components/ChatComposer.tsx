@@ -15,14 +15,6 @@ interface AttachedImage {
   sizeBytes: number;
 }
 
-/** Derive a card title from the first line of a free-text note. */
-function deriveTitle(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return 'Quick note';
-  const firstLine = trimmed.split('\n')[0]?.trim() ?? '';
-  if (!firstLine) return 'Quick note';
-  return firstLine.length > 60 ? `${firstLine.slice(0, 57)}…` : firstLine;
-}
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -34,7 +26,7 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 
 export function ChatComposer({ onClose }: ChatComposerProps) {
-  const addReminder = useStore((s) => s.addReminder);
+  const extractReminders = useStore((s) => s.extractReminders);
 
   const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
@@ -144,39 +136,18 @@ export function ChatComposer({ onClose }: ChatComposerProps) {
   const canSubmit = text.trim().length > 0 || images.length > 0;
 
   const handleSubmit = async () => {
-    if (!canSubmit || submitting) return;
+    const content = text.trim();
+    if (!content && images.length === 0) return;
     setSubmitting(true);
-    // Stop any active dictation before saving
     if (recording) stopRecording();
 
-    // Encode attached images into the `context` field as a JSON array of
-    // data URLs. This keeps the description field clean (just user text)
-    // and preserves image data alongside the reminder. The Card component
-    // doesn't yet render these — that's a follow-up.
-    const contextPayload =
-      images.length > 0
-        ? JSON.stringify({
-            kind: 'chat-attachments',
-            images: images.map((img) => ({ name: img.name, dataUrl: img.dataUrl })),
-          })
-        : undefined;
-
     try {
-      await addReminder({
-        title: deriveTitle(text),
-        description: text.trim(),
-        priority: 'medium',
-        labels: [],
-        context: contextPayload,
-        createdAt: new Date().toISOString(),
-        archivedAt: null,
-      });
+      if (content) {
+        void extractReminders(content);
+      }
       setText('');
       setImages([]);
       onClose();
-    } catch (e) {
-      console.error('[Actio] add reminder failed', e);
-      setError('Could not save the note');
     } finally {
       setSubmitting(false);
     }
