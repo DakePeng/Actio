@@ -141,3 +141,70 @@ pub async fn delete_reminder(
         Err(AppApiError("not found".into()))
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ExtractRemindersRequest {
+    pub text: String,
+}
+
+pub async fn extract_reminders(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ExtractRemindersRequest>,
+) -> Result<Json<Vec<Reminder>>, AppApiError> {
+    let text = req.text.trim().to_string();
+    if text.is_empty() {
+        return Err(AppApiError("text is required and must not be empty".into()));
+    }
+
+    let router = state.router.read().await;
+    if router.is_disabled() {
+        return Err(AppApiError("no LLM backend is configured".into()));
+    }
+
+    let todo_items = router
+        .generate_todos(&text)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "extract_reminders: LLM extraction failed");
+            AppApiError(format!("LLM extraction failed: {e}"))
+        })?;
+
+    let tenant_id = tenant_id_from_headers(&headers);
+    let mut created_reminders = Vec::new();
+
+    for item in todo_items {
+        let title_text = if item.description.len() > 60 {
+            format!("{}...", &item.description[..57])
+        } else {
+            item.description.clone()
+        };
+
+        let context = item.assigned_to.as_ref().map(|a| {
+            serde_json::json!({ "assigned_to": a }).to_string()
+        });
+
+        let new_reminder = NewReminder {
+            session_id: None,
+            tenant_id,
+            speaker_id: None,
+            assigned_to: item.assigned_to.clone(),
+            title: Some(title_text),
+            description: item.description,
+            priority: item.priority.clone(),
+            due_time: None,
+            transcript_excerpt: None,
+            context,
+            source_time: None,
+        };
+
+        match reminder_repo::create_reminder(&state.pool, &new_reminder, &[]).await {
+            Ok(reminder) => created_reminders.push(reminder),
+            Err(e) => {
+                tracing::warn!(error = %e, "extract_reminders: failed to persist one todo item");
+            }
+        }
+    }
+
+    Ok(Json(created_reminders))
+}

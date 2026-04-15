@@ -1,5 +1,6 @@
 pub mod app_settings;
 pub mod asr;
+pub mod dictation;
 pub mod audio_capture;
 pub mod diarization;
 pub mod inference_pipeline;
