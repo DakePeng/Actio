@@ -8,6 +8,7 @@ import { RecordingTab } from './RecordingTab';
 import { PeopleTab } from './PeopleTab';
 import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 // Dynamic greetings — picked randomly each time the board opens.
 // Each entry has a `text` and an optional `nameStyle`:
@@ -50,6 +51,8 @@ export function BoardWindow() {
   // Re-pick a greeting each time the board opens
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const greeting = useMemo(() => pickGreeting(profileName), [profileName, showBoardWindow]);
+
+  useKeyboardShortcuts();
 
   const windowRef = useRef<HTMLElement>(null);
   const [exitTarget, setExitTarget] = useState<ExitTarget>(null);
@@ -122,18 +125,6 @@ export function BoardWindow() {
       }, 280);
     }
   }
-
-  useEffect(() => {
-    if (!showBoardWindow) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        void triggerClose();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showBoardWindow]);
 
   // Reset exit target when we go back to shown
   useEffect(() => {
