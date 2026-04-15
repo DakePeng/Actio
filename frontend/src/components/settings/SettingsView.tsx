@@ -6,6 +6,7 @@ import { TraySection } from './TraySection';
 import { ModelSetup } from './ModelSetup';
 import { LlmSettings } from './LlmSettings';
 import { AudioSettings } from './AudioSettings';
+import { KeyboardSettings } from './KeyboardSettings';
 
 export function SettingsView() {
   return (
@@ -18,6 +19,10 @@ export function SettingsView() {
       {/* ── Board ── */}
       <h2 className="settings-group-title">Board</h2>
       <LabelManager />
+
+      {/* ── Keyboard ── */}
+      <h2 className="settings-group-title">Keyboard</h2>
+      <KeyboardSettings />
 
       {/* ── Transcription & AI ── */}
       <h2 className="settings-group-title">Transcription &amp; AI</h2>

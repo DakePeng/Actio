@@ -2,7 +2,7 @@
 
 use std::{thread, time::Duration};
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewWindow,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewWindow,
     utils::config::WindowEffectsConfig, window::Color,
 };
 use serde::{Deserialize, Serialize};
@@ -430,10 +430,44 @@ fn sync_window_mode(
     .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn reregister_shortcuts(
+    app: tauri::AppHandle,
+    shortcuts: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    // Unregister all existing global shortcuts
+    app.global_shortcut().unregister_all().map_err(|e| e.to_string())?;
+
+    // Re-register the global ones from the new map
+    let global_actions = ["toggle_board_tray", "start_dictation", "new_todo"];
+
+    for action in &global_actions {
+        if let Some(combo) = shortcuts.get(*action) {
+            if let Ok(shortcut) = combo.parse::<tauri_plugin_global_shortcut::Shortcut>() {
+                let action_str = action.to_string();
+                let app_clone = app.clone();
+                let _ = app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    if event.state == ShortcutState::Pressed {
+                        let _ = app_clone.emit("shortcut-triggered", &action_str);
+                    }
+                });
+            } else {
+                tracing::warn!(combo = %combo, action = %action, "reregister_shortcuts: failed to parse shortcut");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds])
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds, reregister_shortcuts])
         .setup(|app| {
             // Resolve app data directory for database and models
             let data_dir = app.path().app_data_dir()
