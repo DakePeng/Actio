@@ -43,6 +43,7 @@ interface AppState {
   highlightCard: (id: string | null) => void;
   setNewReminderBar: (show: boolean) => void;
   setHasSeenOnboarding: (seen: boolean) => void;
+  setFocusedCard: (index: number | null) => void;
   setFeedback: (message: string, tone?: 'neutral' | 'success') => void;
   clearFeedback: () => void;
   clearNewFlag: (id: string) => void;
@@ -80,6 +81,7 @@ const initialUI: UIState = {
   showNewReminderBar: false,
   hasSeenOnboarding: localStorage.getItem('actio-onboarded') === 'true',
   activeTab: 'board',
+  focusedCardIndex: null,
   feedback: null,
 };
 
@@ -297,6 +299,7 @@ export const useStore = create<AppState>((set) => ({
         activeTab: tab,
         expandedCardId: null,
         showNewReminderBar: false,
+        focusedCardIndex: null,
       },
     })),
 
@@ -317,6 +320,10 @@ export const useStore = create<AppState>((set) => ({
   },
 
   setNewReminderBar: (show) => set((state) => ({ ui: { ...state.ui, showNewReminderBar: show } })),
+
+  setFocusedCard: (index) => set((state) => ({
+    ui: { ...state.ui, focusedCardIndex: index },
+  })),
 
   setHasSeenOnboarding: (seen) => {
     localStorage.setItem('actio-onboarded', 'true');

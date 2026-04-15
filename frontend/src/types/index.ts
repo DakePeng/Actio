@@ -127,6 +127,7 @@ export interface UIState {
   showNewReminderBar: boolean;
   hasSeenOnboarding: boolean;
   activeTab: Tab;
+  focusedCardIndex: number | null;
   feedback: {
     message: string;
     tone: 'neutral' | 'success';
