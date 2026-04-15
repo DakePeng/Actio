@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react';
 import { useFilteredReminders, useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
 import { Card } from './Card';
@@ -20,6 +21,15 @@ export function Board() {
   const clearNewFlag = useStore((s) => s.clearNewFlag);
   const setFeedback = useStore((s) => s.setFeedback);
   const expandedCardId = useStore((s) => s.ui.expandedCardId);
+  const focusedCardIndex = useStore((s) => s.ui.focusedCardIndex);
+
+  const focusedRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (focusedRef.current) {
+      focusedRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [focusedCardIndex]);
 
   const sorted = [...filtered].sort(sortByPriority);
   const hasActiveFilters = Boolean(filter.priority || filter.label || filter.search);
@@ -105,20 +115,25 @@ export function Board() {
       ) : (
         <div className="board-grid">
           <AnimatePresence mode="popLayout">
-            {sorted.map((reminder) => (
-              <Card
-                key={reminder.id}
-                reminder={reminder}
-                isExpanded={reminder.id === expandedCardId}
-                onToggle={() => {
-                  const nextExpanded = reminder.id === expandedCardId ? null : reminder.id;
-                  setExpandedCard(nextExpanded);
-                  if (nextExpanded && reminder.isNew) {
-                    clearNewFlag(reminder.id);
-                  }
-                }}
-              />
-            ))}
+            {sorted.map((reminder, index) => {
+              const isFocused = focusedCardIndex === index;
+              return (
+                <Card
+                  key={reminder.id}
+                  reminder={reminder}
+                  isExpanded={reminder.id === expandedCardId}
+                  isFocused={isFocused}
+                  focusedRef={isFocused ? focusedRef : undefined}
+                  onToggle={() => {
+                    const nextExpanded = reminder.id === expandedCardId ? null : reminder.id;
+                    setExpandedCard(nextExpanded);
+                    if (nextExpanded && reminder.isNew) {
+                      clearNewFlag(reminder.id);
+                    }
+                  }}
+                />
+              );
+            })}
           </AnimatePresence>
         </div>
       )}

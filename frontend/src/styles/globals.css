@@ -590,6 +590,11 @@ body.body--standby .tray--launcher:hover {
   animation: cardSpotlight 1.2s ease-out;
 }
 
+.card-kb-focused .reminder-card {
+  outline: 2px solid var(--color-accent, #3b82f6);
+  outline-offset: -2px;
+}
+
 .reminder-accent {
   position: absolute;
   inset: 0 auto 0 0;

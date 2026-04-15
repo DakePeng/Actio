@@ -27,9 +27,11 @@ interface CardProps {
   reminder: Reminder;
   isExpanded: boolean;
   onToggle: () => void;
+  isFocused?: boolean;
+  focusedRef?: React.RefObject<HTMLDivElement>;
 }
 
-export function Card({ reminder, isExpanded, onToggle }: CardProps) {
+export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: CardProps) {
   const setFilter = useStore((s) => s.setFilter);
   const archiveReminder = useStore((s) => s.archiveReminder);
   const setPriority = useStore((s) => s.setPriority);
@@ -129,10 +131,12 @@ export function Card({ reminder, isExpanded, onToggle }: CardProps) {
 
   return (
     <motion.div
+      ref={focusedRef}
       layout
       initial={{ opacity: 0, y: 30 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
+      className={isFocused ? 'card-kb-focused' : undefined}
       style={{ x, rotate: rot, opacity: opac, cursor: 'grab' }}
       whileTap={{ cursor: 'grabbing' }}
       drag="x"
