@@ -28,7 +28,7 @@ interface CardProps {
   isExpanded: boolean;
   onToggle: () => void;
   isFocused?: boolean;
-  focusedRef?: React.RefObject<HTMLDivElement>;
+  focusedRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: CardProps) {
