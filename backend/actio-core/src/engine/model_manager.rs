@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -148,17 +148,13 @@ pub struct ModelPaths {
 struct ModelFile {
     url: &'static str,
     dest_name: &'static str,
-    extract_inner: Option<&'static str>,
 }
 
 /// Files shared by every language — downloaded first.
-const SHARED_FILES: &[ModelFile] = &[
-    ModelFile {
-        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
-        dest_name: "silero_vad.onnx",
-        extract_inner: None,
-    },
-];
+const SHARED_FILES: &[ModelFile] = &[ModelFile {
+    url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+    dest_name: "silero_vad.onnx",
+}];
 
 const SILERO_VAD_BYTES: &[u8] = include_bytes!("../../assets/silero_vad.onnx");
 
@@ -172,7 +168,6 @@ struct StreamingTransducerDef {
     id: &'static str,
     name: &'static str,
     languages: &'static str,
-    multilingual: bool,
     size_mb: u32,
     ram_mb: u32,
     cpu: &'static str,
@@ -191,169 +186,181 @@ const STREAMING_TRANSDUCERS: &[StreamingTransducerDef] = &[
         id: "zh_zipformer_14m",
         name: "Zipformer 14M (Chinese)",
         languages: "Chinese",
-        multilingual: false,
-        size_mb: 25, ram_mb: 200,
+        size_mb: 25,
+        ram_mb: 200,
         cpu: "Any modern CPU",
         description: "Real-time streaming Chinese ASR. 14M params, int8. Very low latency.",
         prefix: "zh",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/tokens.txt",
     },
     StreamingTransducerDef {
         id: "zh_conformer",
         name: "Conformer (Chinese)",
         languages: "Chinese",
-        multilingual: false,
-        size_mb: 183, ram_mb: 600,
+        size_mb: 183,
+        ram_mb: 600,
         cpu: "CPU with AVX2",
         description: "Streaming Chinese ASR using Conformer architecture. Higher accuracy than Zipformer 14M but larger.",
         prefix: "zh_conf",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-conformer-zh-2023-05-23/resolve/main/tokens.txt",
     },
     StreamingTransducerDef {
         id: "zh_lstm",
         name: "LSTM (Chinese)",
         languages: "Chinese",
-        multilingual: false,
-        size_mb: 99, ram_mb: 400,
+        size_mb: 99,
+        ram_mb: 400,
         cpu: "Any modern CPU",
         description: "Streaming Chinese ASR using LSTM-transducer. Lighter than Conformer, good balance of size and accuracy.",
         prefix: "zh_lstm",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/encoder-epoch-11-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/decoder-epoch-11-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/joiner-epoch-11-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/joiner-epoch-11-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-zh-2023-02-20/resolve/main/tokens.txt",
     },
     // ── Single-language: English ─────────────────────────────────────
     StreamingTransducerDef {
         id: "en_zipformer_20m",
         name: "Zipformer 20M (English)",
         languages: "English",
-        multilingual: false,
-        size_mb: 44, ram_mb: 250,
+        size_mb: 44,
+        ram_mb: 250,
         cpu: "Any modern CPU",
         description: "Real-time streaming English ASR. 20M params, int8. Very low latency.",
         prefix: "en",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main/tokens.txt",
     },
     StreamingTransducerDef {
         id: "en_zipformer",
         name: "Zipformer (English)",
         languages: "English",
-        multilingual: false,
-        size_mb: 73, ram_mb: 350,
+        size_mb: 73,
+        ram_mb: 350,
         cpu: "Any modern CPU",
         description: "Streaming English Zipformer transducer. Higher accuracy than the 20M variant.",
         prefix: "en_zip",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/tokens.txt",
     },
     StreamingTransducerDef {
         id: "en_zipformer_large",
         name: "Zipformer Large (English)",
         languages: "English",
-        multilingual: false,
-        size_mb: 189, ram_mb: 600,
+        size_mb: 189,
+        ram_mb: 600,
         cpu: "CPU with AVX2",
         description: "Large streaming English Zipformer. Best streaming English accuracy but heavy.",
         prefix: "en_lg",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21/resolve/main/tokens.txt",
     },
     StreamingTransducerDef {
         id: "en_zipformer_medium",
         name: "Zipformer Medium (English)",
         languages: "English",
-        multilingual: false,
-        size_mb: 128, ram_mb: 450,
+        size_mb: 128,
+        ram_mb: 450,
         cpu: "Any modern CPU",
         description: "Medium-sized streaming English Zipformer. Good accuracy/size balance.",
         prefix: "en_md",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-02-21/resolve/main/tokens.txt",
     },
     StreamingTransducerDef {
         id: "en_lstm",
         name: "LSTM (English)",
         languages: "English",
-        multilingual: false,
-        size_mb: 86, ram_mb: 350,
+        size_mb: 86,
+        ram_mb: 350,
         cpu: "Any modern CPU",
         description: "Streaming English LSTM-transducer. Compact and efficient.",
         prefix: "en_lstm",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-lstm-en-2023-02-17/resolve/main/tokens.txt",
     },
     // ── Single-language: Korean ──────────────────────────────────────
     StreamingTransducerDef {
         id: "ko_zipformer",
         name: "Zipformer (Korean)",
         languages: "Korean",
-        multilingual: false,
-        size_mb: 133, ram_mb: 500,
+        size_mb: 133,
+        ram_mb: 500,
         cpu: "CPU with AVX2",
         description: "Real-time streaming Korean ASR. int8 Zipformer transducer.",
         prefix: "ko",
         encoder_url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16/resolve/main/tokens.txt",
     },
     // ── Single-language: French ──────────────────────────────────────
     StreamingTransducerDef {
         id: "fr_zipformer",
         name: "Zipformer (French)",
         languages: "French",
-        multilingual: false,
-        size_mb: 129, ram_mb: 450,
+        size_mb: 129,
+        ram_mb: 450,
         cpu: "CPU with AVX2",
         description: "Streaming French ASR. int8 Zipformer transducer.",
         prefix: "fr",
         encoder_url: "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/encoder-epoch-29-avg-9-with-averaged-model.int8.onnx",
         decoder_url: "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/decoder-epoch-29-avg-9-with-averaged-model.int8.onnx",
-        joiner_url:  "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/joiner-epoch-29-avg-9-with-averaged-model.int8.onnx",
-        tokens_url:  "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/joiner-epoch-29-avg-9-with-averaged-model.int8.onnx",
+        tokens_url: "https://huggingface.co/shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14/resolve/main/tokens.txt",
     },
     // ── Multi-language ───────────────────────────────────────────────
     StreamingTransducerDef {
         id: "zhen_zipformer_bilingual",
         name: "Zipformer Bilingual (Chinese + English)",
         languages: "Chinese, English",
-        multilingual: true,
-        size_mb: 198, ram_mb: 650,
+        size_mb: 198,
+        ram_mb: 650,
         cpu: "CPU with AVX2",
         description: "Streaming bilingual Chinese+English ASR in a single model. No language switching needed.",
         prefix: "zhen",
         encoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
         decoder_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/decoder-epoch-99-avg-1.int8.onnx",
-        joiner_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
-        tokens_url:  "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/tokens.txt",
+        joiner_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/joiner-epoch-99-avg-1.int8.onnx",
+        tokens_url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/tokens.txt",
     },
 ];
 
 /// Build the 4 download ModelFile descriptors for a streaming transducer.
 fn transducer_model_files(def: &StreamingTransducerDef) -> Vec<ModelFile> {
     vec![
-        ModelFile { url: def.encoder_url, dest_name: Box::leak(format!("{}_encoder.int8.onnx", def.prefix).into_boxed_str()), extract_inner: None },
-        ModelFile { url: def.decoder_url, dest_name: Box::leak(format!("{}_decoder.int8.onnx", def.prefix).into_boxed_str()), extract_inner: None },
-        ModelFile { url: def.joiner_url,  dest_name: Box::leak(format!("{}_joiner.int8.onnx", def.prefix).into_boxed_str()), extract_inner: None },
-        ModelFile { url: def.tokens_url,  dest_name: Box::leak(format!("{}_tokens.txt", def.prefix).into_boxed_str()), extract_inner: None },
+        ModelFile {
+            url: def.encoder_url,
+            dest_name: Box::leak(format!("{}_encoder.int8.onnx", def.prefix).into_boxed_str()),
+        },
+        ModelFile {
+            url: def.decoder_url,
+            dest_name: Box::leak(format!("{}_decoder.int8.onnx", def.prefix).into_boxed_str()),
+        },
+        ModelFile {
+            url: def.joiner_url,
+            dest_name: Box::leak(format!("{}_joiner.int8.onnx", def.prefix).into_boxed_str()),
+        },
+        ModelFile {
+            url: def.tokens_url,
+            dest_name: Box::leak(format!("{}_tokens.txt", def.prefix).into_boxed_str()),
+        },
     ]
 }
 
@@ -370,17 +377,14 @@ const WHISPER_BASE_FILES: &[ModelFile] = &[
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/base-encoder.int8.onnx",
         dest_name: "whisper_base_encoder.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/base-decoder.int8.onnx",
         dest_name: "whisper_base_decoder.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/base-tokens.txt",
         dest_name: "whisper_base_tokens.txt",
-        extract_inner: None,
     },
 ];
 
@@ -390,17 +394,14 @@ const WHISPER_TURBO_FILES: &[ModelFile] = &[
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-encoder.int8.onnx",
         dest_name: "whisper_turbo_encoder.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-decoder.int8.onnx",
         dest_name: "whisper_turbo_decoder.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-tokens.txt",
         dest_name: "whisper_turbo_tokens.txt",
-        extract_inner: None,
     },
 ];
 
@@ -410,17 +411,14 @@ const ZIPFORMER_CTC_ZH_SMALL_FILES: &[ModelFile] = &[
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16/resolve/main/model.int8.onnx",
         dest_name: "zipformer_ctc_zh_small.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16/resolve/main/tokens.txt",
         dest_name: "zipformer_ctc_zh_small_tokens.txt",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16/resolve/main/bbpe.model",
         dest_name: "zipformer_ctc_zh_small_bbpe.model",
-        extract_inner: None,
     },
 ];
 
@@ -431,12 +429,10 @@ const PARAFORMER_ZH_SMALL_FILES: &[ModelFile] = &[
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/main/model.int8.onnx",
         dest_name: "paraformer_zh_small.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/main/tokens.txt",
         dest_name: "paraformer_zh_small_tokens.txt",
-        extract_inner: None,
     },
 ];
 
@@ -446,27 +442,22 @@ const MOONSHINE_TINY_EN_FILES: &[ModelFile] = &[
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main/preprocess.onnx",
         dest_name: "moonshine_tiny_en_preprocess.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main/encode.int8.onnx",
         dest_name: "moonshine_tiny_en_encode.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main/uncached_decode.int8.onnx",
         dest_name: "moonshine_tiny_en_uncached_decode.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main/cached_decode.int8.onnx",
         dest_name: "moonshine_tiny_en_cached_decode.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main/tokens.txt",
         dest_name: "moonshine_tiny_en_tokens.txt",
-        extract_inner: None,
     },
 ];
 
@@ -476,12 +467,10 @@ const SENSE_VOICE_MULTI_FILES: &[ModelFile] = &[
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx",
         dest_name: "sense_voice_multi.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt",
         dest_name: "sense_voice_multi_tokens.txt",
-        extract_inner: None,
     },
 ];
 
@@ -495,32 +484,26 @@ const FUNASR_NANO_FILES: &[ModelFile] = &[
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-funasr-nano-int8-2025-12-30/resolve/main/embedding.int8.onnx",
         dest_name: "funasr_nano_embedding.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-funasr-nano-int8-2025-12-30/resolve/main/encoder_adaptor.int8.onnx",
         dest_name: "funasr_nano_encoder_adaptor.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-funasr-nano-int8-2025-12-30/resolve/main/llm.int8.onnx",
         dest_name: "funasr_nano_llm.int8.onnx",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-funasr-nano-int8-2025-12-30/resolve/main/Qwen3-0.6B/tokenizer.json",
         dest_name: "funasr_nano_tokenizer/tokenizer.json",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-funasr-nano-int8-2025-12-30/resolve/main/Qwen3-0.6B/merges.txt",
         dest_name: "funasr_nano_tokenizer/merges.txt",
-        extract_inner: None,
     },
     ModelFile {
         url: "https://huggingface.co/csukuangfj/sherpa-onnx-funasr-nano-int8-2025-12-30/resolve/main/Qwen3-0.6B/vocab.json",
         dest_name: "funasr_nano_tokenizer/vocab.json",
-        extract_inner: None,
     },
 ];
 
@@ -556,7 +539,6 @@ fn model_downloaded(model_dir: &PathBuf, files: &[ModelFile]) -> bool {
         let p = model_dir.join(f.dest_name);
         p.exists() && std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false)
     })
-
 }
 
 /// Check whether a streaming transducer's files are present on disk.
@@ -632,7 +614,8 @@ impl ModelManager {
             id: "whisper_base".to_string(),
             name: "Whisper Base (Multilingual)".to_string(),
             languages: "99 languages (auto-detect)".to_string(),
-            size_mb: 161, ram_mb: 500,
+            size_mb: 161,
+            ram_mb: 500,
             recommended_cpu: "Any modern CPU".to_string(),
             streaming: false,
             description: "OpenAI Whisper base, int8. Offline multilingual ASR \
@@ -645,7 +628,8 @@ impl ModelManager {
             id: "whisper_turbo".to_string(),
             name: "Whisper Turbo (Multilingual)".to_string(),
             languages: "99 languages (auto-detect)".to_string(),
-            size_mb: 1037, ram_mb: 2500,
+            size_mb: 1037,
+            ram_mb: 2500,
             recommended_cpu: "CPU with AVX2, 8+ cores".to_string(),
             streaming: false,
             description: "OpenAI Whisper turbo, int8. Highest Whisper quality, \
@@ -658,7 +642,8 @@ impl ModelManager {
             id: "zipformer_ctc_zh_small".to_string(),
             name: "Zipformer CTC Small (Chinese)".to_string(),
             languages: "Chinese".to_string(),
-            size_mb: 63, ram_mb: 300,
+            size_mb: 63,
+            ram_mb: 300,
             recommended_cpu: "Any modern CPU".to_string(),
             streaming: false,
             description: "Offline Chinese ASR using Zipformer CTC. Small int8 model, \
@@ -671,7 +656,8 @@ impl ModelManager {
             id: "paraformer_zh_small".to_string(),
             name: "Paraformer Small (Chinese + English)".to_string(),
             languages: "Chinese, English".to_string(),
-            size_mb: 82, ram_mb: 400,
+            size_mb: 82,
+            ram_mb: 400,
             recommended_cpu: "Any modern CPU".to_string(),
             streaming: false,
             description: "Offline bilingual Paraformer. Much smaller than FunASR \
@@ -684,7 +670,8 @@ impl ModelManager {
             id: "moonshine_tiny_en".to_string(),
             name: "Moonshine Tiny (English)".to_string(),
             languages: "English".to_string(),
-            size_mb: 125, ram_mb: 500,
+            size_mb: 125,
+            ram_mb: 500,
             recommended_cpu: "CPU with AVX2".to_string(),
             streaming: false,
             description: "Offline English ASR from Useful Sensors. ~27M params, \
@@ -697,7 +684,8 @@ impl ModelManager {
             id: "sense_voice_multi".to_string(),
             name: "SenseVoice Multilingual".to_string(),
             languages: "Chinese, English, Japanese, Korean, Cantonese".to_string(),
-            size_mb: 239, ram_mb: 800,
+            size_mb: 239,
+            ram_mb: 800,
             recommended_cpu: "CPU with AVX2, 4+ cores".to_string(),
             streaming: false,
             description: "Offline multilingual ASR from FunAudioLLM. ~234M params, \
@@ -710,7 +698,8 @@ impl ModelManager {
             id: "funasr_nano".to_string(),
             name: "FunASR Nano (Qwen3 0.6B)".to_string(),
             languages: "Chinese, English".to_string(),
-            size_mb: 1010, ram_mb: 2000,
+            size_mb: 1010,
+            ram_mb: 2000,
             recommended_cpu: "CPU with AVX2, 8+ cores".to_string(),
             streaming: false,
             description: "LLM-powered ASR with Qwen3-0.6B decoder. Highest quality \
@@ -754,15 +743,12 @@ impl ModelManager {
         {
             let s = self.status.read().await;
             if matches!(&*s, ModelStatus::Downloading { .. }) {
-                return Err(anyhow!(
-                    "Cannot delete while a download is in progress"
-                ));
+                return Err(anyhow!("Cannot delete while a download is in progress"));
             }
         }
 
         let mut count: u32 = 0;
-        let mut subdirs: std::collections::HashSet<PathBuf> =
-            std::collections::HashSet::new();
+        let mut subdirs: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
         for f in files {
             let p = self.model_dir.join(f.dest_name);
@@ -927,7 +913,12 @@ fn build_transducer(model_dir: &PathBuf, prefix: &str) -> Option<TransducerFiles
     let join = p("joiner.int8.onnx");
     let tok = p("tokens.txt");
     if enc.exists() && dec.exists() && join.exists() && tok.exists() {
-        Some(TransducerFiles { encoder: enc, decoder: dec, joiner: join, tokens: tok })
+        Some(TransducerFiles {
+            encoder: enc,
+            decoder: dec,
+            joiner: join,
+            tokens: tok,
+        })
     } else {
         None
     }
@@ -1037,7 +1028,11 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
         let decoder = model_dir.join("whisper_base_decoder.int8.onnx");
         let tokens = model_dir.join("whisper_base_tokens.txt");
         if encoder.exists() && decoder.exists() && tokens.exists() {
-            Some(WhisperFiles { encoder, decoder, tokens })
+            Some(WhisperFiles {
+                encoder,
+                decoder,
+                tokens,
+            })
         } else {
             None
         }
@@ -1048,7 +1043,11 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
         let decoder = model_dir.join("whisper_turbo_decoder.int8.onnx");
         let tokens = model_dir.join("whisper_turbo_tokens.txt");
         if encoder.exists() && decoder.exists() && tokens.exists() {
-            Some(WhisperFiles { encoder, decoder, tokens })
+            Some(WhisperFiles {
+                encoder,
+                decoder,
+                tokens,
+            })
         } else {
             None
         }
@@ -1079,7 +1078,9 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
 fn rewrite_url(url: &str, source: DownloadSource) -> String {
     match source {
         DownloadSource::HuggingFace | DownloadSource::ModelScope => url.to_string(),
-        DownloadSource::HfMirror => url.replace("https://huggingface.co/", "https://hf-mirror.com/"),
+        DownloadSource::HfMirror => {
+            url.replace("https://huggingface.co/", "https://hf-mirror.com/")
+        }
     }
 }
 
@@ -1181,9 +1182,7 @@ async fn do_download(
         .await
         .with_context(|| format!("reading response body from {}", url))?;
 
-    // All current model files are plain downloads (no archive extraction
-    // needed). The extract_inner path is kept as a future extension point
-    // but not used via the rewritten-URL path.
+    // All current model files are plain downloads; no archive extraction is needed.
     let _ = dest_name;
     tokio::fs::write(dest, &bytes)
         .await
@@ -1211,10 +1210,7 @@ fn extract_bz2_tar(data: &[u8], inner_name: &str, dest: &PathBuf) -> Result<()> 
         let mut entry = entry?;
         let path = entry.path()?;
         // Match filename (any directory prefix is ignored)
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if file_name == inner_name {
             let mut out = std::fs::File::create(dest)
                 .with_context(|| format!("creating {}", dest.display()))?;

@@ -1,10 +1,10 @@
 use sqlx::SqlitePool;
-use tracing::{info, warn, error};
+use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::engine::llm_router::LlmRouter;
-use crate::repository::{speaker as speaker_repo, reminder as reminder_repo, transcript};
 use crate::domain::types::{NewReminder, Transcript};
+use crate::engine::llm_router::LlmRouter;
+use crate::repository::{reminder as reminder_repo, transcript};
 
 /// Maximum transcript length before truncation (in characters).
 /// gpt-4o-mini has 128K context, but we cap to control cost.
@@ -25,7 +25,10 @@ pub async fn generate_session_todos(
 
     let transcripts = transcript::get_final_transcripts_for_session(pool, session_id).await?;
     if transcripts.is_empty() {
-        info!(?session_id, "No transcripts found, skipping reminder generation");
+        info!(
+            ?session_id,
+            "No transcripts found, skipping reminder generation"
+        );
         return Ok(());
     }
 
@@ -88,19 +91,6 @@ pub fn truncate_transcript(text: &str) -> &str {
         return &text[..pos];
     }
     &text[..MAX_TRANSCRIPT_CHARS]
-}
-
-/// Resolve speaker name to UUID via case-insensitive display_name match.
-async fn resolve_speaker_id(
-    pool: &SqlitePool,
-    tenant_id: Uuid,
-    speaker_name: &str,
-) -> Result<Option<Uuid>, sqlx::Error> {
-    let speakers = speaker_repo::list_speakers(pool, tenant_id).await?;
-    Ok(speakers
-        .iter()
-        .find(|s| s.display_name.eq_ignore_ascii_case(speaker_name))
-        .and_then(|s| s.id.parse().ok()))
 }
 
 #[cfg(test)]

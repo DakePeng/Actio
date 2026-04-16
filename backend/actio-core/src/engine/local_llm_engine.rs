@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::engine::llm_catalog::{available_local_llms, DownloadSource, LocalLlmInfo};
+use crate::engine::llm_catalog::{DownloadSource, LocalLlmInfo, available_local_llms};
 use crate::engine::llm_prompt::ChatMessage;
 
 #[derive(Debug, thiserror::Error)]
@@ -90,7 +90,10 @@ pub struct LocalLlmEngine {
 impl LocalLlmEngine {
     /// Path where a model's GGUF file is stored.
     pub fn gguf_path(model_dir: &Path, info: &LocalLlmInfo) -> PathBuf {
-        model_dir.join("llms").join(&info.id).join(&info.gguf_filename)
+        model_dir
+            .join("llms")
+            .join(&info.id)
+            .join(&info.gguf_filename)
     }
 
     /// Check if a model's GGUF file exists on disk.
@@ -166,7 +169,10 @@ impl LocalLlmEngine {
         if priority == EnginePriority::External {
             let waiting = self.waiting_internal.load(Ordering::SeqCst);
             if waiting > 0 {
-                info!(waiting_internal = waiting, "chat_completion: waiting for internal requests to drain");
+                info!(
+                    waiting_internal = waiting,
+                    "chat_completion: waiting for internal requests to drain"
+                );
             }
             for _ in 0..5 {
                 if self.waiting_internal.load(Ordering::SeqCst) == 0 {
@@ -187,11 +193,12 @@ impl LocalLlmEngine {
         info!(model = %loaded_id, "chat_completion: sending to model");
         let t = std::time::Instant::now();
 
-        let content = tokio::task::spawn_blocking(move || {
-            run_inference(&model, &messages, &params)
-        })
-        .await
-        .map_err(|e| LocalLlmError::InferenceFailed(format!("spawn_blocking panicked: {e}")))??;
+        let content =
+            tokio::task::spawn_blocking(move || run_inference(&model, &messages, &params))
+                .await
+                .map_err(|e| {
+                    LocalLlmError::InferenceFailed(format!("spawn_blocking panicked: {e}"))
+                })??;
 
         info!(
             model = %self.loaded_id,
@@ -328,7 +335,10 @@ fn run_inference(
             }
             // Budget exceeded — force-inject </think>\n and stop counting thinking tokens
             else if thinking_tokens >= thinking_budget {
-                tracing::info!(thinking_tokens, "Thinking budget hit, force-closing think block");
+                tracing::info!(
+                    thinking_tokens,
+                    "Thinking budget hit, force-closing think block"
+                );
                 let close_tag = "</think>\n";
                 let close_tokens = model
                     .str_to_token(close_tag, llama_cpp_2::model::AddBos::Never)
@@ -338,8 +348,9 @@ fn run_inference(
                     let close_arr = [ct];
                     let mut close_batch = llama_cpp_2::llama_batch::LlamaBatch::get_one(&close_arr)
                         .map_err(|e| LocalLlmError::InferenceFailed(format!("batch error: {e}")))?;
-                    ctx.decode(&mut close_batch)
-                        .map_err(|e| LocalLlmError::InferenceFailed(format!("decode error: {e}")))?;
+                    ctx.decode(&mut close_batch).map_err(|e| {
+                        LocalLlmError::InferenceFailed(format!("decode error: {e}"))
+                    })?;
                 }
                 in_thinking = false;
                 sample_idx = 0;
@@ -379,11 +390,7 @@ fn rand_seed() -> u32 {
 }
 
 #[cfg(feature = "local-llm")]
-fn classify_load_error(
-    model_id: &str,
-    ram_mb: u32,
-    e: impl std::fmt::Display,
-) -> LocalLlmError {
+fn classify_load_error(model_id: &str, ram_mb: u32, e: impl std::fmt::Display) -> LocalLlmError {
     let msg = e.to_string();
     let lower = msg.to_lowercase();
     if lower.contains("out of memory") || lower.contains("oom") || lower.contains("allocation") {
@@ -393,7 +400,8 @@ fn classify_load_error(
         }
     } else if lower.contains("avx") || lower.contains("instruction") || lower.contains("cpu") {
         LocalLlmError::UnsupportedCpu(msg)
-    } else if lower.contains("magic") || lower.contains("invalid gguf") || lower.contains("truncat") {
+    } else if lower.contains("magic") || lower.contains("invalid gguf") || lower.contains("truncat")
+    {
         LocalLlmError::CorruptModelFile(msg)
     } else {
         LocalLlmError::LoadFailed(msg)
@@ -419,7 +427,10 @@ impl LocalLlmEngine {
         false
     }
 
-    pub async fn load_async(_model_dir: &Path, _info: &LocalLlmInfo) -> Result<Self, LocalLlmError> {
+    pub async fn load_async(
+        _model_dir: &Path,
+        _info: &LocalLlmInfo,
+    ) -> Result<Self, LocalLlmError> {
         Err(LocalLlmError::FeatureDisabled)
     }
 
@@ -452,12 +463,24 @@ use tokio::sync::RwLock;
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum LoadStatus {
     Idle,
-    Downloading { llm_id: String, progress: f32 },
+    Downloading {
+        llm_id: String,
+        progress: f32,
+    },
     /// Deprecated: kept for API compat. GGUF models are pre-quantized.
-    Quantizing { llm_id: String },
-    Loading { llm_id: String },
-    Loaded { llm_id: String },
-    Error { llm_id: String, message: String },
+    Quantizing {
+        llm_id: String,
+    },
+    Loading {
+        llm_id: String,
+    },
+    Loaded {
+        llm_id: String,
+    },
+    Error {
+        llm_id: String,
+        message: String,
+    },
 }
 
 pub struct EngineSlot {
@@ -465,8 +488,6 @@ pub struct EngineSlot {
     current: Mutex<Option<Arc<LocalLlmEngine>>>,
     load_status: Arc<RwLock<LoadStatus>>,
     load_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    /// Prevents overlapping model loads from consuming double RAM.
-    load_guard: tokio::sync::Notify,
 }
 
 impl EngineSlot {
@@ -476,7 +497,6 @@ impl EngineSlot {
             current: Mutex::new(None),
             load_status: Arc::new(RwLock::new(LoadStatus::Idle)),
             load_handle: Mutex::new(None),
-            load_guard: tokio::sync::Notify::new(),
         }
     }
 
@@ -484,7 +504,10 @@ impl EngineSlot {
         self.load_status.read().await.clone()
     }
 
-    pub async fn get_or_load(&self, desired_id: &str) -> Result<Arc<LocalLlmEngine>, LocalLlmError> {
+    pub async fn get_or_load(
+        &self,
+        desired_id: &str,
+    ) -> Result<Arc<LocalLlmEngine>, LocalLlmError> {
         info!(llm_id = %desired_id, "get_or_load: requested");
         let mut guard = self.current.lock().await;
         if let Some(engine) = guard.as_ref() {
@@ -516,7 +539,9 @@ impl EngineSlot {
         {
             info!(llm_id = %desired_id, "get_or_load: setting loading status");
             let mut s = self.load_status.write().await;
-            *s = LoadStatus::Loading { llm_id: desired_id.to_string() };
+            *s = LoadStatus::Loading {
+                llm_id: desired_id.to_string(),
+            };
         }
 
         let result = LocalLlmEngine::load_async(&self.model_dir, &info).await;
@@ -528,7 +553,9 @@ impl EngineSlot {
                 *guard = Some(Arc::clone(&engine));
                 {
                     let mut s = self.load_status.write().await;
-                    *s = LoadStatus::Loaded { llm_id: desired_id.to_string() };
+                    *s = LoadStatus::Loaded {
+                        llm_id: desired_id.to_string(),
+                    };
                 }
                 Ok(engine)
             }
@@ -634,7 +661,9 @@ impl EngineSlot {
         }
         let mut s = self.load_status.write().await;
         match &*s {
-            LoadStatus::Downloading { .. } | LoadStatus::Quantizing { .. } | LoadStatus::Loading { .. } => {
+            LoadStatus::Downloading { .. }
+            | LoadStatus::Quantizing { .. }
+            | LoadStatus::Loading { .. } => {
                 *s = LoadStatus::Idle;
                 tracing::info!("Model load cancelled");
             }
