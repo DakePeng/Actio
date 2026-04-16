@@ -1,6 +1,18 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useVoiceStore, pruneSegments } from '../use-voice-store';
 import type { Segment } from '../../types';
+
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  close = vi.fn();
+
+  constructor(public readonly url: string) {
+    MockWebSocket.instances.push(this);
+  }
+}
 
 function makeSegment(overrides: Partial<Segment> = {}): Segment {
   return {
@@ -56,13 +68,20 @@ describe('pruneSegments', () => {
 describe('useVoiceStore', () => {
   beforeEach(() => {
     localStorage.clear();
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
     useVoiceStore.setState({
       isRecording: false,
       currentSession: null,
       segments: [],
       people: [],
       clipInterval: 5,
+      _ws: null,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('starts with defaults', () => {
@@ -80,6 +99,7 @@ describe('useVoiceStore', () => {
     expect(s.isRecording).toBe(true);
     expect(s.currentSession).not.toBeNull();
     expect(s.currentSession!.liveTranscript).toBe('');
+    expect(MockWebSocket.instances[0].url).toBe('ws://127.0.0.1:3000/ws');
   });
 
   it('appendLiveTranscript appends text to currentSession', () => {
