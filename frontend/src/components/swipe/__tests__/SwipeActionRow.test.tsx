@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SwipeActionCoordinatorProvider } from '../SwipeActionCoordinator';
 import { SwipeActionRow } from '../SwipeActionRow';
@@ -27,13 +27,20 @@ function renderRow(onDelete = vi.fn(), onEdit = vi.fn()) {
 }
 
 describe('SwipeActionRow', () => {
-  it('reveals a left action and requires two clicks to execute it', () => {
+  it('reveals a left action and requires two clicks to execute it', async () => {
     const onDelete = vi.fn();
     renderRow(onDelete);
-    fireEvent.click(screen.getByRole('button', { name: 'Reveal delete action' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reveal delete action' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    });
     expect(screen.getByRole('button', { name: 'Tap again to confirm' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm' }));
+    });
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
@@ -80,12 +87,19 @@ describe('SwipeActionRow', () => {
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
   });
 
-  it('supports keyboard reveal and confirmation', () => {
+  it('supports keyboard reveal and confirmation', async () => {
     const onDelete = vi.fn();
     renderRow(onDelete);
-    fireEvent.keyDown(screen.getByText('row content'), { key: 'Delete' });
-    fireEvent.keyDown(screen.getByText('row content'), { key: 'Enter' });
-    fireEvent.keyDown(screen.getByText('row content'), { key: 'Enter' });
+
+    await act(async () => {
+      fireEvent.keyDown(screen.getByText('row content'), { key: 'Delete' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByText('row content'), { key: 'Enter' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByText('row content'), { key: 'Enter' });
+    });
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 });
