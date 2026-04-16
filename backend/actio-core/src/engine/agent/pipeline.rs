@@ -80,6 +80,7 @@ impl AgentPipeline {
                     max_tokens: config.max_tokens,
                     temperature: config.temperature,
                     json_mode: true,
+                    thinking_budget: None,
                 };
 
                 let raw = engine
@@ -99,6 +100,7 @@ impl AgentPipeline {
                     max_tokens: config.max_tokens,
                     temperature: config.temperature,
                     json_mode: true,
+                    thinking_budget: None,
                 };
 
                 let raw = client

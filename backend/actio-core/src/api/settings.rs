@@ -233,6 +233,7 @@ pub async fn test_llm(
                     max_tokens: 8,
                     temperature: 0.0,
                     json_mode: false,
+                    thinking_budget: None,
                 }, EnginePriority::Internal)
                 .await
             {

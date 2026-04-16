@@ -282,6 +282,7 @@ pub async fn openai_chat_completions(
         max_tokens: req.max_tokens.unwrap_or(2000),
         temperature: req.temperature.unwrap_or(0.7),
         json_mode,
+        thinking_budget: None,
     };
 
     let engine = match state.engine_slot.get_or_load(&loaded_id).await {

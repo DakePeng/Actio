@@ -32,6 +32,10 @@ pub struct GenerationParams {
     pub max_tokens: usize,
     pub temperature: f32,
     pub json_mode: bool,
+    /// If Some(n), inject `<think>\n` after the chat template to activate
+    /// Qwen3-style chain-of-thought. The model's thinking tokens count
+    /// against max_tokens, so we add this budget on top automatically.
+    pub thinking_budget: Option<usize>,
 }
 
 impl Default for GenerationParams {
@@ -40,6 +44,7 @@ impl Default for GenerationParams {
             max_tokens: 2000,
             temperature: 0.1,
             json_mode: false,
+            thinking_budget: None,
         }
     }
 }
@@ -240,9 +245,16 @@ fn run_inference(
         .chat_template(None)
         .map_err(|e| LocalLlmError::InferenceFailed(format!("chat template error: {e}")))?;
 
-    let prompt = model
+    let mut prompt = model
         .apply_chat_template(&template, &chat_messages, true)
         .map_err(|e| LocalLlmError::InferenceFailed(format!("apply template error: {e}")))?;
+
+    // Activate Qwen3 chain-of-thought by injecting <think> after the
+    // assistant generation prompt. The model continues inside the think
+    // block and closes it before emitting the final answer.
+    if params.thinking_budget.is_some() {
+        prompt.push_str("<think>\n");
+    }
 
     // 3. Tokenize
     let tokens = model
@@ -283,7 +295,16 @@ fn run_inference(
     let mut output_tokens = Vec::new();
     let mut sample_idx = (tokens.len() - 1) as i32;
 
-    for _ in 0..params.max_tokens {
+    let thinking_budget = params.thinking_budget.unwrap_or(0);
+    let token_limit = params.max_tokens + thinking_budget;
+    let mut in_thinking = params.thinking_budget.is_some(); // we injected <think>\n
+    let mut thinking_tokens: usize = 0;
+
+    // Live-decode buffer so we can detect </think> and cut thinking mid-stream
+    let mut live_decoder = encoding_rs::UTF_8.new_decoder();
+    let mut live_text = String::new();
+
+    for _ in 0..token_limit {
         let token = sampler.sample(&ctx, sample_idx);
         sampler.accept(token);
 
@@ -293,6 +314,38 @@ fn run_inference(
         }
 
         output_tokens.push(token);
+
+        // Live-decode for thinking detection
+        if in_thinking {
+            if let Ok(piece) = model.token_to_piece(token, &mut live_decoder, false, None) {
+                live_text.push_str(&piece);
+            }
+            thinking_tokens += 1;
+
+            // Check if model naturally closed thinking
+            if live_text.contains("</think>") {
+                in_thinking = false;
+            }
+            // Budget exceeded — force-inject </think>\n and stop counting thinking tokens
+            else if thinking_tokens >= thinking_budget {
+                tracing::info!(thinking_tokens, "Thinking budget hit, force-closing think block");
+                let close_tag = "</think>\n";
+                let close_tokens = model
+                    .str_to_token(close_tag, llama_cpp_2::model::AddBos::Never)
+                    .unwrap_or_default();
+                for &ct in &close_tokens {
+                    output_tokens.push(ct);
+                    let close_arr = [ct];
+                    let mut close_batch = llama_cpp_2::llama_batch::LlamaBatch::get_one(&close_arr)
+                        .map_err(|e| LocalLlmError::InferenceFailed(format!("batch error: {e}")))?;
+                    ctx.decode(&mut close_batch)
+                        .map_err(|e| LocalLlmError::InferenceFailed(format!("decode error: {e}")))?;
+                }
+                in_thinking = false;
+                sample_idx = 0;
+                continue;
+            }
+        }
 
         // Decode next token — single-token batch, logits at index 0
         let next_tokens = [token];

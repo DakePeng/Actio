@@ -37,10 +37,88 @@ pub struct LlmTodoResponse {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LlmTodoItem {
+    /// Short title (≤ 60 chars).
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Detailed description.
     pub description: String,
-    pub assigned_to: Option<String>,
     pub priority: Option<String>,
-    pub speaker_name: Option<String>,
+    /// Local datetime string (e.g. "2026-04-17T10:00") — no timezone suffix.
+    /// The backend converts to UTC using the system's local timezone.
+    pub due_time: Option<String>,
+    /// Label names picked from the available set fed in the prompt.
+    #[serde(default)]
+    pub labels: Vec<String>,
+}
+
+impl LlmTodoItem {
+    /// Normalize fields: convert model-output strings like "None", "null", "N/A"
+    /// to actual `None` so they aren't persisted as literal strings.
+    /// Normalize junk values, validate and fix each field.
+    pub fn validate_and_fix(mut self) -> Self {
+        let none_values = ["None", "none", "null", "N/A", "n/a", "unknown", ""];
+
+        // title: trim, clear junk
+        self.title = self.title
+            .filter(|v| !none_values.contains(&v.as_str()))
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+
+        // description: trim
+        self.description = self.description.trim().to_string();
+
+        // priority: normalize to lowercase, accept common variants
+        self.priority = self.priority
+            .filter(|v| !none_values.contains(&v.as_str()))
+            .and_then(|p| match p.trim().to_lowercase().as_str() {
+                "high" | "h" | "urgent" | "critical" => Some("high".into()),
+                "medium" | "med" | "m" | "normal" | "moderate" => Some("medium".into()),
+                "low" | "l" | "minor" => Some("low".into()),
+                _ => None,
+            });
+
+        // due_time: try multiple formats, keep only if parseable as NaiveDateTime
+        self.due_time = self.due_time
+            .filter(|v| !none_values.contains(&v.as_str()))
+            .and_then(|dt| {
+                let s = dt.trim();
+                let formats = [
+                    "%Y-%m-%dT%H:%M",
+                    "%Y-%m-%dT%H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%m/%d/%Y %H:%M",
+                    "%m/%d/%Y",
+                    "%Y-%m-%d",
+                ];
+                for fmt in &formats {
+                    if chrono::NaiveDateTime::parse_from_str(s, fmt).is_ok() {
+                        return Some(s.to_string());
+                    }
+                }
+                // Date-only → default to 09:00
+                if chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() {
+                    return Some(format!("{s}T09:00"));
+                }
+                if chrono::NaiveDate::parse_from_str(s, "%m/%d/%Y").is_ok() {
+                    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%m/%d/%Y") {
+                        return Some(d.format("%Y-%m-%dT09:00").to_string());
+                    }
+                }
+                None
+            });
+
+        // labels: trim, remove junk
+        self.labels.retain(|v| !none_values.contains(&v.trim()));
+        self.labels.iter_mut().for_each(|l| *l = l.trim().to_string());
+
+        self
+    }
+
+    /// A result is usable if it has a non-empty description.
+    pub fn is_usable(&self) -> bool {
+        !self.description.is_empty()
+    }
 }
 
 impl std::fmt::Display for LlmTodoItem {
@@ -67,10 +145,11 @@ impl RemoteLlmClient {
     pub async fn generate_todos(
         &self,
         transcript: &str,
+        label_names: &[String],
     ) -> Result<Vec<LlmTodoItem>, RemoteLlmError> {
         info!(transcript_len = transcript.len(), "Calling remote LLM for todo generation");
 
-        let messages = build_todo_messages(transcript);
+        let messages = build_todo_messages(transcript, label_names);
         let openai_messages: Vec<serde_json::Value> = messages
             .iter()
             .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
@@ -110,10 +189,12 @@ impl RemoteLlmClient {
                             let content = chat_resp.choices.first()
                                 .map(|c| &c.message.content)
                                 .ok_or(RemoteLlmError::InvalidResponse)?;
+                            tracing::info!(raw_json = %content, "Remote LLM raw response");
                             let todos: LlmTodoResponse = serde_json::from_str(content)
                                 .map_err(|e| RemoteLlmError::Parse(e.into()))?;
-                            info!(count = todos.todos.len(), "Remote LLM returned todo items");
-                            return Ok(todos.todos);
+                            let todos: Vec<_> = todos.todos.into_iter().map(|t| t.validate_and_fix()).collect();
+                            info!(count = todos.len(), "Remote LLM returned todo items");
+                            return Ok(todos);
                         }
                         Err(e) => {
                             error!(error = %e, "Failed to parse remote LLM response as JSON");

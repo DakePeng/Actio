@@ -4,8 +4,11 @@ import { BoardWindow } from './components/BoardWindow';
 import { FeedbackToast } from './components/FeedbackToast';
 import { StandbyTray } from './components/StandbyTray';
 import { OnboardingCard } from './components/OnboardingCard';
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 
 export default function App() {
+  useGlobalShortcuts();
+
   const hasSeenOnboarding = useStore((s) => s.ui.hasSeenOnboarding);
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
   const trayExpanded = useStore((s) => s.ui.trayExpanded);

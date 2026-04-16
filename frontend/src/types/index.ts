@@ -130,6 +130,9 @@ export interface UIState {
   hasSeenOnboarding: boolean;
   activeTab: Tab;
   focusedCardIndex: number | null;
+  isDictating: boolean;
+  isDictationTranscribing: boolean;
+  dictationTranscript: string;
   feedback: {
     message: string;
     tone: 'neutral' | 'success';

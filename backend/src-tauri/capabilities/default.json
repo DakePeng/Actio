@@ -8,7 +8,8 @@
     "notification:default",
     "core:window:allow-start-dragging",
     "core:event:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "clipboard-manager:default"
   ]
 }
 

@@ -1138,6 +1138,16 @@ body.body--standby .tray--launcher:hover {
   font-size: 0.68rem;
   color: var(--color-text-secondary);
   letter-spacing: 0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-brand-subtitle--live {
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
 }
 
 .tray-badge {
@@ -3965,9 +3975,9 @@ body.body--native-board .desktop-window {
   border-radius: 4px;
   background: linear-gradient(
     90deg,
-    var(--color-surface-2, #e4e4e7) 0%,
-    var(--color-surface-3, #d4d4d8) 50%,
-    var(--color-surface-2, #e4e4e7) 100%
+    var(--color-border, #e4e4e7) 0%,
+    var(--color-border-strong, #d4d4d8) 50%,
+    var(--color-border, #e4e4e7) 100%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;

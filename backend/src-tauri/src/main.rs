@@ -452,8 +452,17 @@ fn stop_dictation(
 }
 
 #[tauri::command]
-fn paste_text(_text: String) -> Result<(), String> {
+fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
     use enigo::{Enigo, Keyboard, Key, Direction, Settings};
+
+    // Write transcript to system clipboard
+    app.clipboard().write_text(&text).map_err(|e| e.to_string())?;
+
+    // Small delay to let the clipboard settle
+    thread::sleep(Duration::from_millis(50));
+
+    // Simulate Ctrl+V to paste into the focused input
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
     enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
     enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
@@ -497,6 +506,7 @@ fn reregister_shortcuts(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds, start_dictation, stop_dictation, paste_text, reregister_shortcuts])
         .setup(|app| {

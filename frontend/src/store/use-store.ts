@@ -44,6 +44,8 @@ interface AppState {
   setNewReminderBar: (show: boolean) => void;
   setHasSeenOnboarding: (seen: boolean) => void;
   setFocusedCard: (index: number | null) => void;
+  setDictating: (active: boolean) => void;
+  setDictationTranscript: (text: string) => void;
   setFeedback: (message: string, tone?: 'neutral' | 'success') => void;
   clearFeedback: () => void;
   clearNewFlag: (id: string) => void;
@@ -84,6 +86,9 @@ const initialUI: UIState = {
   hasSeenOnboarding: localStorage.getItem('actio-onboarded') === 'true',
   activeTab: 'board',
   focusedCardIndex: null,
+  isDictating: false,
+  isDictationTranscribing: false,
+  dictationTranscript: '',
   feedback: null,
 };
 
@@ -327,6 +332,14 @@ export const useStore = create<AppState>((set) => ({
     ui: { ...state.ui, focusedCardIndex: index },
   })),
 
+  setDictating: (active) => set((state) => ({
+    ui: { ...state.ui, isDictating: active, dictationTranscript: active ? '' : state.ui.dictationTranscript },
+  })),
+
+  setDictationTranscript: (text) => set((state) => ({
+    ui: { ...state.ui, dictationTranscript: text },
+  })),
+
   setHasSeenOnboarding: (seen) => {
     localStorage.setItem('actio-onboarded', 'true');
     set((state) => ({ ui: { ...state.ui, hasSeenOnboarding: seen } }));
@@ -353,7 +366,7 @@ export const useStore = create<AppState>((set) => ({
 
   extractReminders: async (text) => {
     // Insert skeleton placeholders
-    const placeholderIds: string[] = [crypto.randomUUID(), crypto.randomUUID()];
+    const placeholderIds: string[] = [crypto.randomUUID()];
     const placeholders: Reminder[] = placeholderIds.map((id) => ({
       id,
       title: '',

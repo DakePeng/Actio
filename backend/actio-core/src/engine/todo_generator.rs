@@ -33,7 +33,7 @@ pub async fn generate_session_todos(
     info!(chars = transcript_text.len(), "Built transcript string");
     let transcript_text = truncate_transcript(&transcript_text);
 
-    let llm_items = match router.generate_todos(transcript_text).await {
+    let llm_items = match router.generate_todos(transcript_text, &[]).await {
         Ok(items) => items,
         Err(e) => {
             error!(error = %e, "LLM router failed for reminder generation");
@@ -48,23 +48,11 @@ pub async fn generate_session_todos(
 
     let mut new_reminders = Vec::new();
     for item in &llm_items {
-        let speaker_id = if let Some(ref name) = item.speaker_name {
-            match resolve_speaker_id(pool, tenant_id, name).await {
-                Ok(id) => id,
-                Err(e) => {
-                    warn!(speaker_name = name, error = %e, "Failed to resolve speaker");
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
         new_reminders.push(NewReminder {
             session_id: Some(session_id),
             tenant_id,
-            speaker_id,
-            assigned_to: item.assigned_to.clone(),
+            speaker_id: None,
+            assigned_to: None,
             title: None,
             description: item.description.clone(),
             priority: item.priority.clone(),
