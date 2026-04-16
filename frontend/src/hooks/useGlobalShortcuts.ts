@@ -46,7 +46,7 @@ export function useGlobalShortcuts() {
   // Register default global shortcuts on mount
   useEffect(() => {
     if (!isTauri) return;
-    console.log('[Actio] Registering global shortcuts…');
+    console.log('[Actio] Registering global shortcuts...');
     invoke('reregister_shortcuts', { shortcuts: DEFAULT_GLOBAL_SHORTCUTS })
       .then(() => console.log('[Actio] Global shortcuts registered'))
       .catch((e) => console.error('[Actio] Failed to register global shortcuts:', e));
@@ -72,24 +72,24 @@ export function useGlobalShortcuts() {
       } else if (action === 'start_dictation') {
         const { isDictating, isDictationTranscribing } = useStore.getState().ui;
         if (isDictating || isDictationTranscribing) {
-          console.log('[Actio] Stopping dictation…');
+          console.log('[Actio] Stopping dictation...');
           invoke('stop_dictation').catch(console.error);
           // If we already have a transcript, paste immediately
           if (fullTranscriptRef.current) {
-            console.log('[Actio] Transcript ready — pasting now');
+            console.log('[Actio] Transcript ready, pasting now');
             finishDictation();
           } else {
-            // Enter "transcribing" phase — keep WS open to catch final result
+            // Enter "transcribing" phase; keep WS open to catch final result.
             useStore.setState((s) => ({
               ui: { ...s.ui, isDictating: false, isDictationTranscribing: true },
             }));
             transcribingTimerRef.current = window.setTimeout(() => {
-              console.log('[Actio] Transcribing timeout — pasting what we have');
+              console.log('[Actio] Transcribing timeout, pasting what we have');
               finishDictation();
             }, TRANSCRIBING_TIMEOUT);
           }
         } else {
-          console.log('[Actio] Starting dictation…');
+          console.log('[Actio] Starting dictation...');
           invoke('start_dictation').catch(console.error);
         }
       }
@@ -152,7 +152,7 @@ export function useGlobalShortcuts() {
         };
         ws.onerror = (err) => console.error('[Actio] Dictation WS error:', err);
       }
-      // Note: we don't close WS on 'idle' status — the shortcut handler
+      // Note: we don't close WS on 'idle' status; the shortcut handler
       // manages the transition to transcribing phase, which keeps WS open.
     }).then((fn) => {
       if (cancelled) { fn(); return; }

@@ -275,7 +275,7 @@ mod tests {
     #[tokio::test]
     async fn disabled_returns_empty_todos() {
         let router = LlmRouter::Disabled;
-        let todos = router.generate_todos("anything").await.unwrap();
+        let todos = router.generate_todos("anything", &[]).await.unwrap();
         assert!(todos.is_empty());
     }
 }
