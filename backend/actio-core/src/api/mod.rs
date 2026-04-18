@@ -15,6 +15,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api::segment::{
     AssignSegmentRequest, AssignSegmentResponse, NewSpeakerSpec, UnknownSegmentResponse,
+    VoiceprintCandidateResponse,
 };
 use crate::api::session::*;
 use crate::domain::types::*;
@@ -39,6 +40,7 @@ use std::sync::atomic::Ordering;
         enroll_speaker,
         segment::list_session_unknowns,
         segment::list_unknowns,
+        segment::list_candidates,
         segment::assign_segment,
         segment::unassign_segment,
     ),
@@ -50,6 +52,7 @@ use std::sync::atomic::Ordering;
         EnrolledEmbedding,
         EnrollResponse,
         UnknownSegmentResponse,
+        VoiceprintCandidateResponse,
         AssignSegmentRequest,
         AssignSegmentResponse,
         NewSpeakerSpec,
@@ -100,8 +103,12 @@ pub fn router(state: AppState) -> Router {
         .route("/speakers/:id", delete(session::delete_speaker))
         .route("/speakers/:id/enroll", post(session::enroll_speaker))
         // segment routes (unknown speakers + retroactive tagging)
-        .route("/sessions/:id/unknowns", get(segment::list_session_unknowns))
+        .route(
+            "/sessions/:id/unknowns",
+            get(segment::list_session_unknowns),
+        )
         .route("/unknowns", get(segment::list_unknowns))
+        .route("/candidates", get(segment::list_candidates))
         .route("/segments/:id/assign", post(segment::assign_segment))
         .route("/segments/:id/unassign", post(segment::unassign_segment))
         .route("/ws", get(ws::ws_session))

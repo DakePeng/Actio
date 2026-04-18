@@ -49,6 +49,27 @@ pub struct AssignSegmentResponse {
     pub speaker_id: String,
 }
 
+/// One cluster of voiceprint-candidate segments the user could be asked
+/// about. The `audio_ref` is the filename of the longest-duration member
+/// (relative to `AppState.clips_dir`) and serves as the audio preview.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VoiceprintCandidateResponse {
+    /// Stable id derived from the representative segment. Clients echo it
+    /// back when confirming/dismissing the prompt.
+    pub candidate_id: String,
+    pub representative_segment_id: String,
+    pub audio_ref: String,
+    pub session_id: String,
+    /// Number of segments in this cluster.
+    pub occurrences: usize,
+    /// Sum of segment durations in milliseconds.
+    pub total_duration_ms: i64,
+    pub earliest_ms: i64,
+    pub latest_ms: i64,
+    /// All member segment ids, newest-first.
+    pub member_segment_ids: Vec<String>,
+}
+
 fn to_response(r: crate::repository::segment::UnknownSegmentRow) -> UnknownSegmentResponse {
     UnknownSegmentResponse {
         segment_id: r.id,
@@ -160,6 +181,87 @@ pub async fn assign_segment(
         segment_id: segment_id.to_string(),
         speaker_id: target_speaker_id.to_string(),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListCandidatesQuery {
+    pub session_id: Option<Uuid>,
+    #[serde(default = "default_candidate_limit")]
+    pub limit: i64,
+}
+fn default_candidate_limit() -> i64 {
+    200
+}
+
+/// Phase B: cluster retained voiceprint-candidate segments and return one
+/// entry per distinct unknown voice. Clusters are ordered by `occurrences`
+/// descending so the UI can prompt about the most-heard voice first.
+///
+/// This is computed on-demand rather than materialised — input volume is
+/// small (retention caps it to a few days' worth of quality-gated segments)
+/// and clusters would otherwise need maintenance as the underlying rows
+/// get added or pruned.
+#[utoipa::path(
+    get,
+    path = "/candidates",
+    tag = "segments",
+    responses(
+        (status = 200, description = "Clustered voiceprint candidates", body = Vec<VoiceprintCandidateResponse>),
+        (status = 500, description = "Internal server error", body = AppApiError),
+    ),
+)]
+pub async fn list_candidates(
+    State(state): State<AppState>,
+    Query(params): Query<ListCandidatesQuery>,
+) -> Result<Json<Vec<VoiceprintCandidateResponse>>, AppApiError> {
+    let rows = crate::repository::segment::list_retained_candidates(
+        &state.pool,
+        params.session_id,
+        params.limit,
+    )
+    .await
+    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+    // Decode BLOBs → f32 embeddings, skip any that the align-check rejects
+    // so a corrupt row can't poison the whole request.
+    let segments: Vec<crate::engine::voiceprint_clustering::CandidateSegment> = rows
+        .into_iter()
+        .filter_map(|r| {
+            let emb = bytemuck::try_cast_slice::<u8, f32>(&r.embedding)
+                .ok()
+                .map(|s| s.to_vec())?;
+            Some(crate::engine::voiceprint_clustering::CandidateSegment {
+                id: r.id,
+                session_id: r.session_id,
+                audio_ref: r.audio_ref,
+                start_ms: r.start_ms,
+                end_ms: r.end_ms,
+                embedding: emb,
+            })
+        })
+        .collect();
+
+    let clusters = crate::engine::voiceprint_clustering::cluster_candidates(
+        segments,
+        crate::engine::voiceprint_clustering::DEFAULT_CLUSTER_THRESHOLD,
+    );
+
+    let out: Vec<VoiceprintCandidateResponse> = clusters
+        .into_iter()
+        .map(|c| VoiceprintCandidateResponse {
+            candidate_id: format!("cand_{}", c.representative.id),
+            representative_segment_id: c.representative.id.clone(),
+            audio_ref: c.representative.audio_ref.clone(),
+            session_id: c.representative.session_id.clone(),
+            occurrences: c.occurrences,
+            total_duration_ms: c.total_duration_ms,
+            earliest_ms: c.earliest_ms,
+            latest_ms: c.latest_ms,
+            member_segment_ids: c.member_ids,
+        })
+        .collect();
+
+    Ok(Json(out))
 }
 
 #[utoipa::path(

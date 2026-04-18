@@ -39,6 +39,49 @@ pub async fn list_unknown_segments(
     }
 }
 
+/// Row shape for Phase-B clustering: only segments with a retained WAV on
+/// disk AND a populated embedding can be surfaced as voiceprint candidates.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RetainedCandidateRow {
+    pub id: String,
+    pub session_id: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub audio_ref: String,
+    pub embedding: Vec<u8>,
+}
+
+pub async fn list_retained_candidates(
+    pool: &SqlitePool,
+    session_id: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<RetainedCandidateRow>, sqlx::Error> {
+    if let Some(sid) = session_id {
+        sqlx::query_as::<_, RetainedCandidateRow>(
+            "SELECT id, session_id, start_ms, end_ms, audio_ref, embedding \
+             FROM audio_segments \
+             WHERE session_id = ?1 AND speaker_id IS NULL \
+               AND audio_ref IS NOT NULL AND embedding IS NOT NULL \
+             ORDER BY start_ms DESC LIMIT ?2",
+        )
+        .bind(sid.to_string())
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query_as::<_, RetainedCandidateRow>(
+            "SELECT id, session_id, start_ms, end_ms, audio_ref, embedding \
+             FROM audio_segments \
+             WHERE speaker_id IS NULL \
+               AND audio_ref IS NOT NULL AND embedding IS NOT NULL \
+             ORDER BY start_ms DESC LIMIT ?1",
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    }
+}
+
 /// Label-only assignment: sets `audio_segments.speaker_id` so past
 /// transcripts render the right name. Does NOT promote the segment's
 /// embedding to a voiceprint — voiceprints come exclusively from curated
