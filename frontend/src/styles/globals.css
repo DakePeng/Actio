@@ -4490,3 +4490,91 @@ button.voiceprint-recorder__chip.is-done.is-playing {
 .person-row__confirm-cancel:hover {
   opacity: 1;
 }
+
+/* Pending voiceprint-candidates (People tab section) */
+.pending-voices {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+.pending-voices summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  padding: 0.25rem 0;
+}
+.pending-voices summary::-webkit-details-marker {
+  display: none;
+}
+.pending-voices__list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.pending-voice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+}
+.pending-voice__header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.pending-voice__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.15);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+.pending-voice__meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.pending-voice__title {
+  font-weight: 600;
+}
+.pending-voice__stats {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+.pending-voice__audio {
+  width: 100%;
+  min-height: 40px;
+}
+.pending-voice__audio--loading {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+.pending-voice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.pending-voice__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pending-voice__error {
+  color: #c0392b;
+  font-size: 0.85rem;
+  margin: 0;
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useCandidatePrompt } from '../hooks/use-candidate-prompt';
 import { useVoiceStore } from '../store/use-voice-store';
 import { candidateClipUrl } from '../api/speakers';
@@ -16,7 +16,7 @@ const PRESET_COLORS = [
   '#FF8A65',
 ];
 
-function formatMinutes(ms: number): string {
+function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.floor((ms % 60_000) / 1000);
   if (minutes === 0) return `${seconds}s`;
@@ -24,16 +24,14 @@ function formatMinutes(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-function CandidateBody({
+function CandidateRow({
   candidate,
   onConfirm,
   onDismiss,
-  onSnooze,
 }: {
   candidate: VoiceprintCandidate;
   onConfirm: (input: { display_name: string; color: string }) => Promise<void>;
   onDismiss: () => Promise<void>;
-  onSnooze: () => void;
 }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
@@ -63,7 +61,6 @@ function CandidateBody({
       setError((e as Error).message);
       setBusy(false);
     }
-    // On success the hook refreshes and the modal unmounts — no cleanup needed.
   }
 
   async function handleDismiss() {
@@ -78,28 +75,40 @@ function CandidateBody({
   }
 
   return (
-    <div className="candidate-modal__card">
-      <h2 className="candidate-modal__title">I've been hearing a new voice</h2>
-      <p className="candidate-modal__meta">
-        {candidate.occurrences}{' '}
-        {candidate.occurrences === 1 ? 'time' : 'times'} ·{' '}
-        {formatMinutes(candidate.total_duration_ms)} of speech
-      </p>
+    <motion.li
+      className="pending-voice"
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, x: -16, transition: { duration: 0.15 } }}
+    >
+      <div className="pending-voice__header">
+        <div className="pending-voice__avatar" aria-hidden="true">?</div>
+        <div className="pending-voice__meta">
+          <span className="pending-voice__title">New voice</span>
+          <span className="pending-voice__stats">
+            heard {candidate.occurrences}{' '}
+            {candidate.occurrences === 1 ? 'time' : 'times'} ·{' '}
+            {formatDuration(candidate.total_duration_ms)}
+          </span>
+        </div>
+      </div>
+
       {audioUrl ? (
         <audio
-          className="candidate-modal__audio"
+          className="pending-voice__audio"
           controls
           src={audioUrl}
           preload="metadata"
         />
       ) : (
-        <div className="candidate-modal__audio candidate-modal__audio--loading">
+        <div className="pending-voice__audio pending-voice__audio--loading">
           Loading preview…
         </div>
       )}
 
       {!naming ? (
-        <div className="candidate-modal__actions">
+        <div className="pending-voice__actions">
           <button
             type="button"
             className="primary-button"
@@ -116,17 +125,9 @@ function CandidateBody({
           >
             Not a person
           </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onSnooze}
-            disabled={busy}
-          >
-            Ask me later
-          </button>
         </div>
       ) : (
-        <div className="candidate-modal__form">
+        <div className="pending-voice__form">
           <input
             type="text"
             className="person-form__name-input"
@@ -152,7 +153,7 @@ function CandidateBody({
               />
             ))}
           </div>
-          <div className="candidate-modal__actions">
+          <div className="pending-voice__actions">
             <button
               type="button"
               className="primary-button"
@@ -173,48 +174,42 @@ function CandidateBody({
         </div>
       )}
 
-      {error && <p className="candidate-modal__error">{error}</p>}
-    </div>
+      {error && <p className="pending-voice__error">{error}</p>}
+    </motion.li>
   );
 }
 
 /**
- * Phase C: surfaces a modal when the backend reports a voiceprint candidate
- * that has cleared the evidence bar. Mounted once at the app root.
+ * Pending voiceprint-candidates — shown as a collapsible section in the
+ * People tab. Replaces the earlier auto-popping modal so the user can
+ * deal with candidates on their own time.
  */
-export function CandidatePromptModal() {
-  const { activeCandidate, confirm, dismiss, snooze } = useCandidatePrompt();
+export function PendingVoicesPanel() {
+  const { candidates, confirm, dismiss } = useCandidatePrompt();
   const fetchSpeakers = useVoiceStore((s) => s.fetchSpeakers);
 
+  if (candidates.length === 0) return null;
+
   return (
-    <AnimatePresence>
-      {activeCandidate && (
-        <motion.div
-          className="candidate-modal__backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <motion.div
-            className="candidate-modal"
-            initial={{ scale: 0.94, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.94, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-          >
-            <CandidateBody
-              candidate={activeCandidate}
+    <details className="pending-voices" open>
+      <summary>
+        New voices to identify ({candidates.length})
+      </summary>
+      <ul className="pending-voices__list">
+        <AnimatePresence initial={false}>
+          {candidates.map((c) => (
+            <CandidateRow
+              key={c.candidate_id}
+              candidate={c}
               onConfirm={async (input) => {
-                await confirm(activeCandidate, input);
+                await confirm(c, input);
                 void fetchSpeakers();
               }}
-              onDismiss={() => dismiss(activeCandidate)}
-              onSnooze={() => snooze(activeCandidate.candidate_id)}
+              onDismiss={() => dismiss(c)}
             />
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+          ))}
+        </AnimatePresence>
+      </ul>
+    </details>
   );
 }

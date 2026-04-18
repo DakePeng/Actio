@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
 import { UnknownSpeakerPanel } from './UnknownSpeakerPanel';
+import { PendingVoicesPanel } from './PendingVoicesPanel';
 import type { Speaker } from '../types/speaker';
 
 const PRESET_COLORS = [
@@ -323,6 +324,7 @@ export function PeopleTab() {
         </AnimatePresence>
       </div>
 
+      <PendingVoicesPanel />
       <UnknownSpeakerPanel />
     </div>
   );
