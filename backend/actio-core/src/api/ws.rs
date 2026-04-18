@@ -25,6 +25,15 @@ struct WsTranscriptEvent {
     speaker_id: Option<Uuid>,
 }
 
+#[derive(Serialize)]
+struct WsSpeakerResolvedEvent {
+    kind: &'static str,
+    segment_id: String,
+    start_ms: i64,
+    end_ms: i64,
+    speaker_id: Option<String>,
+}
+
 #[derive(Deserialize, Clone, Default)]
 pub struct WsSessionParams {
     pub session_id: Option<Uuid>,
@@ -72,6 +81,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
     // doesn't exist yet. Transcript events will be pushed once ASR is integrated.
 
     let aggregator_rx = state.aggregator.subscribe();
+    let speaker_rx = state.aggregator.subscribe_speaker();
     let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
@@ -84,8 +94,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
         }
     });
 
-    // Send transcript events and heartbeats
+    // Send transcript + speaker-resolved events and heartbeats
     let mut transcript_rx = aggregator_rx;
+    let mut speaker_rx = speaker_rx;
     let send_task = tokio::spawn(async move {
         let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
         heartbeat.tick().await;
@@ -115,6 +126,31 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             warn!(skipped = n, "WebSocket send lagged behind transcript events");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                event = speaker_rx.recv() => {
+                    match event {
+                        Ok(sr) => {
+                            let msg = WsSpeakerResolvedEvent {
+                                kind: "speaker_resolved",
+                                segment_id: sr.segment_id,
+                                start_ms: sr.start_ms,
+                                end_ms: sr.end_ms,
+                                speaker_id: sr.speaker_id,
+                            };
+                            match serde_json::to_string(&msg) {
+                                Ok(json) => {
+                                    if sender.send(Message::Text(json.into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(e) => warn!(error = %e, "Failed to serialize speaker event"),
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(skipped = n, "WebSocket send lagged behind speaker events");
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }

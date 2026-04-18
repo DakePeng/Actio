@@ -1,10 +1,15 @@
 use std::path::Path;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
+use uuid::Uuid;
 
 /// A detected speech segment with its audio data
 #[derive(Debug, Clone)]
 pub struct SpeechSegment {
+    /// Unique id assigned when the VAD finalises this segment. Lets the
+    /// downstream speaker-id task publish a `speaker_resolved` event that
+    /// the frontend can match back to transcript lines.
+    pub segment_id: Uuid,
     pub start_sample: usize,
     pub end_sample: usize,
     pub audio: Vec<f32>,
@@ -127,6 +132,7 @@ pub fn start_vad(
                             let samples = seg.samples().to_vec();
                             let end = start + samples.len();
                             let segment = SpeechSegment {
+                                segment_id: Uuid::new_v4(),
                                 start_sample: start,
                                 end_sample: end,
                                 audio: samples,

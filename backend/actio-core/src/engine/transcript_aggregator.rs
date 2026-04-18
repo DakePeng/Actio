@@ -13,20 +13,52 @@ pub struct AggregatedTranscript {
     pub is_final: bool,
 }
 
+/// Emitted after per-segment speaker identification resolves. The frontend
+/// correlates these back to transcript lines by overlapping time range —
+/// streaming ASR doesn't carry a segment_id on its chunks so a strict id
+/// join isn't possible. Unresolved segments still publish (with
+/// `speaker_id = None`) so the UI can drop the "identifying…" placeholder.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SpeakerResolvedEvent {
+    pub segment_id: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub speaker_id: Option<String>,
+}
+
 pub struct TranscriptAggregator {
     pool: sqlx::SqlitePool,
     events: tokio::sync::broadcast::Sender<AggregatedTranscript>,
+    speaker_events: tokio::sync::broadcast::Sender<SpeakerResolvedEvent>,
 }
 
 impl TranscriptAggregator {
     pub fn new(pool: sqlx::SqlitePool) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(256);
-        Self { pool, events }
+        let (speaker_events, _) = tokio::sync::broadcast::channel(256);
+        Self {
+            pool,
+            events,
+            speaker_events,
+        }
     }
 
     /// Subscribe to transcript events for WebSocket push.
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<AggregatedTranscript> {
         self.events.subscribe()
+    }
+
+    /// Subscribe to speaker-resolved events — pushed after the per-segment
+    /// identification task finishes, so the WS client can fill in speaker
+    /// labels on transcript lines that were emitted a beat earlier.
+    pub fn subscribe_speaker(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<SpeakerResolvedEvent> {
+        self.speaker_events.subscribe()
+    }
+
+    pub fn publish_speaker_resolved(&self, event: SpeakerResolvedEvent) {
+        let _ = self.speaker_events.send(event);
     }
 
     /// Shared handle to the underlying pool. Used by out-of-band writers like

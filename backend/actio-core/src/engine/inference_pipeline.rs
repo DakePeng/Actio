@@ -65,10 +65,11 @@ impl InferencePipeline {
 
         // Helper: start VAD, then fan each speech segment into (a) a per-segment
         // speaker-identification task and (b) the downstream offline ASR
-        // consumer. Streaming ASR paths do not go through this helper — they
-        // consume raw audio directly and skip per-segment identification.
+        // consumer. Streaming ASR paths use the parallel-VAD variant below
+        // so they still get speaker attribution.
         let embedding_model = model_paths.speaker_embedding.clone();
         let pool = aggregator.pool();
+        let aggregator_for_hooks = aggregator.clone();
         let start_vad_pipeline = |audio_rx: mpsc::Receiver<Vec<f32>>| -> anyhow::Result<_> {
             if !model_paths.silero_vad.exists() {
                 return Err(anyhow::anyhow!(
@@ -85,12 +86,43 @@ impl InferencePipeline {
                 embedding_model.clone(),
                 clips_dir.clone(),
                 live_enrollment.clone(),
+                aggregator_for_hooks.clone(),
             ))
         };
 
+        // Helper for streaming ASR: tee the audio stream. Half feeds the
+        // streaming recognizer as before; the other half feeds a VAD chain
+        // whose sole job is to emit segments for the speaker-id task, so
+        // streaming-mode sessions still get speaker_resolved events.
+        let start_parallel_speaker_vad =
+            |audio_rx: mpsc::Receiver<Vec<f32>>| -> anyhow::Result<()> {
+                if !model_paths.silero_vad.exists() {
+                    warn!("Silero VAD missing — streaming mode will have no speaker attribution");
+                    return Ok(());
+                }
+                let upstream = vad::start_vad(
+                    &model_paths.silero_vad,
+                    VadConfig::default(),
+                    audio_rx,
+                )?;
+                spawn_speaker_id_only(
+                    upstream,
+                    session_id,
+                    Uuid::nil(),
+                    pool.clone(),
+                    embedding_model.clone(),
+                    clips_dir.clone(),
+                    live_enrollment.clone(),
+                    aggregator_for_hooks.clone(),
+                );
+                Ok(())
+            };
+
         let transcript_rx = if let Some(files) = model_paths.transducers.get(chosen) {
             // ── Streaming transducer (any model in the table) ────────
-            asr::start_streaming_asr(files, audio_rx)?
+            let (audio_for_asr, audio_for_vad) = tee_audio(audio_rx);
+            start_parallel_speaker_vad(audio_for_vad)?;
+            asr::start_streaming_asr(files, audio_for_asr)?
         } else {
             match chosen {
                 // ── Offline models (individual routing) ──────────────
@@ -155,7 +187,9 @@ impl InferencePipeline {
                     let files = model_paths.transducers.values().next().ok_or_else(|| {
                         anyhow::anyhow!("No streaming transducer model available for '{}'", chosen)
                     })?;
-                    asr::start_streaming_asr(files, audio_rx)?
+                    let (audio_for_asr, audio_for_vad) = tee_audio(audio_rx);
+                    start_parallel_speaker_vad(audio_for_vad)?;
+                    asr::start_streaming_asr(files, audio_for_asr)?
                 }
             }
         };
@@ -246,35 +280,21 @@ fn split_segments_for_speaker_id(
     embedding_model: Option<PathBuf>,
     clips_dir: PathBuf,
     live_enrollment: LiveEnrollment,
+    aggregator: Arc<TranscriptAggregator>,
 ) -> mpsc::Receiver<SpeechSegment> {
     let (tx, rx) = mpsc::channel::<SpeechSegment>(32);
     tokio::spawn(async move {
         while let Some(seg) = upstream.recv().await {
-            let start_ms = (seg.start_sample as i64 * 1000) / 16000;
-            let end_ms = (seg.end_sample as i64 * 1000) / 16000;
-            let audio_clone = seg.audio.clone();
-            let pool_c = pool.clone();
-            let emb_c = embedding_model.clone();
-            let clips_dir_c = clips_dir.clone();
-            let enroll_c = live_enrollment.clone();
-
-            tokio::spawn(async move {
-                if let Err(e) = handle_segment_embedding(
-                    &pool_c,
-                    emb_c,
-                    session_id,
-                    tenant_id,
-                    start_ms,
-                    end_ms,
-                    audio_clone,
-                    &clips_dir_c,
-                    &enroll_c,
-                )
-                .await
-                {
-                    warn!(%session_id, error = %e, "segment speaker-id hook failed");
-                }
-            });
+            spawn_segment_hook(
+                seg.clone(),
+                session_id,
+                tenant_id,
+                pool.clone(),
+                embedding_model.clone(),
+                clips_dir.clone(),
+                live_enrollment.clone(),
+                aggregator.clone(),
+            );
 
             if tx.send(seg).await.is_err() {
                 break; // downstream ASR consumer went away
@@ -282,6 +302,91 @@ fn split_segments_for_speaker_id(
         }
     });
     rx
+}
+
+/// Streaming-mode variant: runs speaker-id over VAD segments but does NOT
+/// forward them anywhere (there's no downstream ASR — the streaming
+/// recognizer is consuming the raw audio in parallel).
+fn spawn_speaker_id_only(
+    mut upstream: mpsc::Receiver<SpeechSegment>,
+    session_id: Uuid,
+    tenant_id: Uuid,
+    pool: sqlx::SqlitePool,
+    embedding_model: Option<PathBuf>,
+    clips_dir: PathBuf,
+    live_enrollment: LiveEnrollment,
+    aggregator: Arc<TranscriptAggregator>,
+) {
+    tokio::spawn(async move {
+        while let Some(seg) = upstream.recv().await {
+            spawn_segment_hook(
+                seg,
+                session_id,
+                tenant_id,
+                pool.clone(),
+                embedding_model.clone(),
+                clips_dir.clone(),
+                live_enrollment.clone(),
+                aggregator.clone(),
+            );
+        }
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_segment_hook(
+    seg: SpeechSegment,
+    session_id: Uuid,
+    tenant_id: Uuid,
+    pool: sqlx::SqlitePool,
+    embedding_model: Option<PathBuf>,
+    clips_dir: PathBuf,
+    live_enrollment: LiveEnrollment,
+    aggregator: Arc<TranscriptAggregator>,
+) {
+    let start_ms = (seg.start_sample as i64 * 1000) / 16000;
+    let end_ms = (seg.end_sample as i64 * 1000) / 16000;
+    let segment_id = seg.segment_id;
+    let audio = seg.audio;
+
+    tokio::spawn(async move {
+        if let Err(e) = handle_segment_embedding(
+            &pool,
+            embedding_model,
+            session_id,
+            tenant_id,
+            segment_id,
+            start_ms,
+            end_ms,
+            audio,
+            &clips_dir,
+            &live_enrollment,
+            &aggregator,
+        )
+        .await
+        {
+            warn!(%session_id, error = %e, "segment speaker-id hook failed");
+        }
+    });
+}
+
+/// Tee a single audio stream into two independent receivers. Used when the
+/// streaming recognizer needs the raw samples AND a parallel VAD chain
+/// needs them for speaker identification.
+fn tee_audio(
+    mut rx: mpsc::Receiver<Vec<f32>>,
+) -> (mpsc::Receiver<Vec<f32>>, mpsc::Receiver<Vec<f32>>) {
+    let (tx_a, rx_a) = mpsc::channel::<Vec<f32>>(64);
+    let (tx_b, rx_b) = mpsc::channel::<Vec<f32>>(64);
+    tokio::spawn(async move {
+        while let Some(chunk) = rx.recv().await {
+            // Best-effort send to both consumers. If one has disconnected,
+            // keep feeding the other so the surviving path stays live.
+            let _ = tx_a.send(chunk.clone()).await;
+            let _ = tx_b.send(chunk).await;
+        }
+    });
+    (rx_a, rx_b)
 }
 
 /// Minimum quality score for an unknown segment to be retained as a
@@ -303,22 +408,37 @@ const VOICEPRINT_CANDIDATE_QUALITY: f32 = 0.6;
 ///    quality bar, also retain the raw audio on disk so the app can later
 ///    prompt the user to identify who was speaking (Phase A). A `sha` of
 ///    the resulting file name is stored in `audio_segments.audio_ref`.
+#[allow(clippy::too_many_arguments)]
 async fn handle_segment_embedding(
     pool: &sqlx::SqlitePool,
     embedding_model: Option<PathBuf>,
     session_id: Uuid,
     tenant_id: Uuid,
+    segment_id: Uuid,
     start_ms: i64,
     end_ms: i64,
     audio: Vec<f32>,
     clips_dir: &Path,
     live_enrollment: &LiveEnrollment,
+    aggregator: &Arc<TranscriptAggregator>,
 ) -> anyhow::Result<Option<String>> {
+    let publish = |speaker_id: Option<String>| {
+        aggregator.publish_speaker_resolved(
+            crate::engine::transcript_aggregator::SpeakerResolvedEvent {
+                segment_id: segment_id.to_string(),
+                start_ms,
+                end_ms,
+                speaker_id,
+            },
+        );
+    };
+
     let Some(model_path) = embedding_model else {
         crate::repository::segment::insert_segment(
             pool, session_id, start_ms, end_ms, None, None, None, None,
         )
         .await?;
+        publish(None);
         return Ok(None);
     };
 
@@ -330,6 +450,7 @@ async fn handle_segment_embedding(
                 pool, session_id, start_ms, end_ms, None, None, None, None,
             )
             .await?;
+            publish(None);
             return Ok(None);
         }
     };
@@ -360,6 +481,7 @@ async fn handle_segment_embedding(
             None,
         )
         .await?;
+        publish(Some(enrolled_speaker.clone()));
         return Ok(Some(enrolled_speaker));
     }
 
@@ -411,5 +533,6 @@ async fn handle_segment_embedding(
     )
     .await?;
 
+    publish(result.speaker_id.clone());
     Ok(result.speaker_id)
 }
