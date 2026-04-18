@@ -97,8 +97,6 @@ export function RecordingTab() {
   const currentSession = useVoiceStore((s) => s.currentSession);
   const startRecording = useVoiceStore((s) => s.startRecording);
   const stopRecording = useVoiceStore((s) => s.stopRecording);
-  const unknowns = useVoiceStore((s) => s.unknowns);
-  const fetchUnknowns = useVoiceStore((s) => s.fetchUnknowns);
 
   const [elapsed, setElapsed] = useState(0);
   const [warmupState, setWarmupState] = useState<WarmupState>('idle');
@@ -171,19 +169,6 @@ export function RecordingTab() {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
   }, [currentSession?.liveTranscript, currentSession?.pendingPartial]);
-
-  // While recording, periodically check for newly-detected UNKNOWN segments so
-  // we can surface a hint in-line. The per-line speaker chip (plan §6.6 full
-  // variant) requires threading segment_id through the transcript stream,
-  // which is deferred — this is the pragmatic v1.
-  useEffect(() => {
-    if (!isRecording) return;
-    void fetchUnknowns();
-    const timer = window.setInterval(() => {
-      void fetchUnknowns();
-    }, 10_000);
-    return () => window.clearInterval(timer);
-  }, [isRecording, fetchUnknowns]);
 
   const hintContent = (() => {
     if (warming) {
@@ -324,17 +309,6 @@ export function RecordingTab() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {isRecording && unknowns.length > 0 && (
-        <div
-          className="recording-tab__unknowns-hint"
-          role="status"
-          aria-live="polite"
-        >
-          {unknowns.length} unidentified{' '}
-          {unknowns.length === 1 ? 'voice' : 'voices'} — tag in the People tab.
-        </div>
-      )}
     </div>
   );
 }

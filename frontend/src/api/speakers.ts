@@ -1,9 +1,6 @@
 import type {
-  AssignSegmentResult,
-  AssignTarget,
   EnrollResponse,
   Speaker,
-  UnknownSegment,
   VoiceprintCandidate,
 } from '../types/speaker';
 import { getApiUrl } from './backend-url';
@@ -78,33 +75,6 @@ export async function enrollSpeaker(
     throw new Error(`Enroll failed (${response.status}): ${text || response.statusText}`);
   }
   return (await response.json()) as EnrollResponse;
-}
-
-export async function listUnknowns(limit = 50): Promise<UnknownSegment[]> {
-  return requestJson<UnknownSegment[]>(`/unknowns?limit=${limit}`);
-}
-
-export async function listSessionUnknowns(
-  sessionId: string,
-  limit = 50,
-): Promise<UnknownSegment[]> {
-  return requestJson<UnknownSegment[]>(
-    `/sessions/${sessionId}/unknowns?limit=${limit}`,
-  );
-}
-
-export async function assignSegment(
-  segmentId: string,
-  target: AssignTarget,
-): Promise<AssignSegmentResult> {
-  return requestJson<AssignSegmentResult>(`/segments/${segmentId}/assign`, {
-    method: 'POST',
-    body: JSON.stringify(target),
-  });
-}
-
-export async function unassignSegment(segmentId: string): Promise<void> {
-  await requestJson<void>(`/segments/${segmentId}/unassign`, { method: 'POST' });
 }
 
 /** Phase-C: clusters of retained unknown-voice clips ready to be named. */

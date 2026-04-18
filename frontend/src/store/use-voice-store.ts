@@ -1,10 +1,6 @@
 import { create } from 'zustand';
 import type { Segment } from '../types';
-import type {
-  Speaker,
-  UnknownSegment,
-  AssignTarget,
-} from '../types/speaker';
+import type { Speaker } from '../types/speaker';
 import { getWsUrl } from '../api/backend-url';
 import * as speakerApi from '../api/speakers';
 
@@ -36,11 +32,6 @@ interface VoiceState {
   speakersStatus: SpeakersStatus;
   speakersError: string | null;
 
-  // Retroactive tagging — unknown segments to assign.
-  unknowns: UnknownSegment[];
-  /** Client-side soft-hide — survives session lifetime but not reload. */
-  dismissedUnknowns: Set<string>;
-
   /** Internal — not serialised to localStorage */
   _ws: WebSocket | null;
 
@@ -59,11 +50,6 @@ interface VoiceState {
   createSpeaker: (input: { display_name: string; color: string }) => Promise<Speaker>;
   updateSpeaker: (id: string, patch: { display_name?: string; color?: string }) => Promise<void>;
   deleteSpeaker: (id: string) => Promise<void>;
-
-  // Unknown-segment actions.
-  fetchUnknowns: () => Promise<void>;
-  assignSegment: (segmentId: string, target: AssignTarget) => Promise<void>;
-  dismissUnknown: (segmentId: string) => void;
 }
 
 const MAX_UNSTARRED = 30;
@@ -115,9 +101,6 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   speakers: [],
   speakersStatus: 'idle',
   speakersError: null,
-
-  unknowns: [],
-  dismissedUnknowns: new Set<string>(),
 
   _ws: null,
 
@@ -295,40 +278,5 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       set({ speakers: prev });
       throw e;
     }
-  },
-
-  // --- Unknown segments ---
-
-  fetchUnknowns: async () => {
-    const list = await speakerApi.listUnknowns(50);
-    const dismissed = get().dismissedUnknowns;
-    set({ unknowns: list.filter((u) => !dismissed.has(u.segment_id)) });
-  },
-
-  assignSegment: async (segmentId, target) => {
-    const prev = get().unknowns;
-    // Optimistic removal.
-    set({ unknowns: prev.filter((u) => u.segment_id !== segmentId) });
-    try {
-      await speakerApi.assignSegment(segmentId, target);
-      // Refresh speakers if we just created a new one inline.
-      if ('new_speaker' in target) {
-        void get().fetchSpeakers();
-      }
-    } catch (e) {
-      set({ unknowns: prev });
-      throw e;
-    }
-  },
-
-  dismissUnknown: (segmentId) => {
-    set((state) => {
-      const dismissed = new Set(state.dismissedUnknowns);
-      dismissed.add(segmentId);
-      return {
-        dismissedUnknowns: dismissed,
-        unknowns: state.unknowns.filter((u) => u.segment_id !== segmentId),
-      };
-    });
   },
 }));

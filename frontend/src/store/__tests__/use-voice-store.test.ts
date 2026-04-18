@@ -81,8 +81,6 @@ describe('useVoiceStore', () => {
       speakers: [],
       speakersStatus: 'idle',
       speakersError: null,
-      unknowns: [],
-      dismissedUnknowns: new Set<string>(),
       _ws: null,
     });
   });
@@ -102,7 +100,6 @@ describe('useVoiceStore', () => {
     expect(s.currentSession).toBeNull();
     expect(s.segments).toHaveLength(0);
     expect(s.speakers).toHaveLength(0);
-    expect(s.unknowns).toHaveLength(0);
     expect(s.speakersStatus).toBe('idle');
     expect(s.clipInterval).toBe(5);
   });
@@ -192,16 +189,4 @@ describe('useVoiceStore', () => {
     expect(stored.segments[0].text).toBe('Persisted text.');
   });
 
-  it('dismissUnknown soft-hides an unknown and remembers it', () => {
-    useVoiceStore.setState({
-      unknowns: [
-        { segment_id: 'seg-a', session_id: 's', start_ms: 0, end_ms: 1000 },
-        { segment_id: 'seg-b', session_id: 's', start_ms: 2000, end_ms: 3000 },
-      ],
-    });
-    useVoiceStore.getState().dismissUnknown('seg-a');
-    const s = useVoiceStore.getState();
-    expect(s.unknowns.map((u) => u.segment_id)).toEqual(['seg-b']);
-    expect(s.dismissedUnknowns.has('seg-a')).toBe(true);
-  });
 });

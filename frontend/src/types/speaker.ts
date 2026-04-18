@@ -20,25 +20,9 @@ export interface EnrollResponse {
   warnings: string[];
 }
 
-export interface UnknownSegment {
-  segment_id: string;
-  session_id: string;
-  start_ms: number;
-  end_ms: number;
-}
-
-export type AssignTarget =
-  | { speaker_id: string }
-  | { new_speaker: { display_name: string; color: string } };
-
-export interface AssignSegmentResult {
-  segment_id: string;
-  speaker_id: string;
-}
-
 /** Phase-C voiceprint-candidate: one cluster of retained unknown-voice clips
  *  that has cleared the evidence bar (≥5 occurrences, ≥60 s cumulative,
- *  ≥2 distinct sessions). Drives the "who was this?" prompt modal. */
+ *  ≥2 distinct sessions). Drives the Pending Voices panel in PeopleTab. */
 export interface VoiceprintCandidate {
   candidate_id: string;
   representative_segment_id: string;
