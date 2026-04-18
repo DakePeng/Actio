@@ -4309,17 +4309,33 @@ body.body--native-board .desktop-window {
   gap: 0.5rem;
 }
 .voiceprint-recorder__chip {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.08);
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
 }
-.voiceprint-recorder__chip.is-done {
+button.voiceprint-recorder__chip.is-done {
+  cursor: pointer;
   background: var(--accent, #64b5f6);
   color: #fff;
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+button.voiceprint-recorder__chip.is-done:hover:not(:disabled) {
+  transform: scale(1.08);
+}
+button.voiceprint-recorder__chip.is-done:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+button.voiceprint-recorder__chip.is-done.is-playing {
+  background: #2e7d32;
 }
 .voiceprint-recorder__error {
   color: #c0392b;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMediaRecorder } from '../hooks/use-media-recorder';
 import { useVoiceStore } from '../store/use-voice-store';
 
@@ -24,10 +24,36 @@ export function VoiceprintRecorder({
   const [clips, setClips] = useState<Blob[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [playingIdx, setPlayingIdx] = useState<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const rec = useMediaRecorder();
 
   const idx = clips.length;
   const done = idx >= 3;
+
+  // Object URLs for playback. Revoked when the set of clips changes or on
+  // unmount, so we don't leak blobs into the document's URL table.
+  const clipUrls = useMemo(() => clips.map((b) => URL.createObjectURL(b)), [clips]);
+  useEffect(
+    () => () => {
+      clipUrls.forEach((u) => URL.revokeObjectURL(u));
+    },
+    [clipUrls],
+  );
+
+  const playClip = useCallback(
+    (i: number) => {
+      // Stop any in-flight playback before starting a new one.
+      audioRef.current?.pause();
+      const audio = new Audio(clipUrls[i]);
+      audioRef.current = audio;
+      setPlayingIdx(i);
+      audio.addEventListener('ended', () => setPlayingIdx(null));
+      audio.addEventListener('error', () => setPlayingIdx(null));
+      void audio.play().catch(() => setPlayingIdx(null));
+    },
+    [clipUrls],
+  );
 
   const toggle = useCallback(async () => {
     if (!rec.recording) {
@@ -89,15 +115,29 @@ export function VoiceprintRecorder({
         </div>
       )}
       <div className="voiceprint-recorder__captured">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className={`voiceprint-recorder__chip${i < clips.length ? ' is-done' : ''}`}
-            aria-label={i < clips.length ? 'clip captured' : 'clip pending'}
-          >
-            {i < clips.length ? '✓' : '·'}
-          </span>
-        ))}
+        {[0, 1, 2].map((i) =>
+          i < clips.length ? (
+            <button
+              key={i}
+              type="button"
+              className={`voiceprint-recorder__chip is-done${playingIdx === i ? ' is-playing' : ''}`}
+              onClick={() => playClip(i)}
+              aria-label={`Play clip ${i + 1}`}
+              title={`Play clip ${i + 1}`}
+              disabled={rec.recording}
+            >
+              {playingIdx === i ? '▶' : '♪'}
+            </button>
+          ) : (
+            <span
+              key={i}
+              className="voiceprint-recorder__chip"
+              aria-label={`Clip ${i + 1} pending`}
+            >
+              ·
+            </span>
+          ),
+        )}
       </div>
       {rec.error && <p className="voiceprint-recorder__error">{rec.error}</p>}
       {submitError && <p className="voiceprint-recorder__error">{submitError}</p>}
