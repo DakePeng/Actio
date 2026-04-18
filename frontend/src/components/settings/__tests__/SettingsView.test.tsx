@@ -31,7 +31,7 @@ describe('SettingsView', () => {
     expect(screen.getByRole('tab', { name: 'AI' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'false');
     expect(await screen.findByText('stub-llm')).toBeInTheDocument();
-    expect(await screen.findByText('stub-model-setup')).toBeInTheDocument();
+    expect(screen.queryByText('stub-model-setup')).not.toBeInTheDocument();
     expect(screen.queryByText('stub-profile')).not.toBeInTheDocument();
   });
 

@@ -33,8 +33,8 @@ export function SettingsView() {
   const panelContent: Record<SettingsTab, React.ReactNode> = {
     general: <><ProfileSection /><PreferencesSection /><TraySection /></>,
     board: <LabelManager />,
-    voice: <><AudioSettings /><RecordingSection /></>,
-    ai: <><LlmSettings /><ModelSetup /></>,
+    voice: <><AudioSettings /><RecordingSection /><ModelSetup /></>,
+    ai: <><LlmSettings /></>,
     shortcuts: <KeyboardSettings />,
   };
 
