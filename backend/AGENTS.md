@@ -1,67 +1,65 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-04-10 | Updated: 2026-04-10 -->
+<!-- Generated: 2026-04-10 | Updated: 2026-04-17 -->
 
 # backend
 
 ## Purpose
-The Rust backend is the core server for Actio. It exposes a REST + WebSocket API on port 3000, manages PostgreSQL persistence via SQLx, orchestrates the Python gRPC inference worker, and optionally generates todos/reminders using an LLM at session end.
+The Rust backend is the core server for Actio. It exposes a REST + WebSocket API on port 3000, manages SQLite persistence via SQLx, runs all ML inference in-process via `sherpa-onnx` (VAD, ASR, speaker embedding, diarization), and optionally generates reminders from transcripts using a local (llama.cpp) or remote (OpenAI-compatible) LLM at session end. There is no Python worker and no gRPC.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `Cargo.toml` | Rust workspace/crate manifest; main binary is `actio-asr` |
+| `Cargo.toml` | Workspace manifest (members: `actio-core`, `src-tauri`) |
 | `Cargo.lock` | Pinned dependency versions |
-| `build.rs` | Build script (proto compilation) |
-| `docker-compose.yml` | Starts local PostgreSQL on port 5433 |
-| `.env.example` | Template for required environment variables |
+| `README.md` | Backend-specific quick-start and API reference |
+| `design.md` | Current architecture and design notes |
+| `.env.example` | Template for optional LLM environment variables |
 | `.env` | Local secrets — never commit real values |
-| `design.md` | Architecture and design notes |
-| `README.md` | Backend-specific quick-start |
 
 ## Subdirectories
 
 | Directory | Purpose |
 |-----------|---------|
-| `src/` | Main Rust crate: API, engine, repository, domain, gRPC (see `src/AGENTS.md`) |
+| `actio-core/` | Main library crate: api, engine, repository, domain (binary: `actio-asr`) |
 | `src-tauri/` | Tauri desktop shell crate (see `src-tauri/AGENTS.md`) |
-| `proto/` | gRPC protobuf definitions for the inference worker (see `proto/AGENTS.md`) |
 | `migrations/` | Ordered SQL schema migrations applied at startup (see `migrations/AGENTS.md`) |
-| `python-worker/` | Python gRPC ML inference worker: ASR, VAD, speaker embedding (see `python-worker/AGENTS.md`) |
 | `tests/` | Rust integration tests (see `tests/AGENTS.md`) |
-| `docs/` | Planning documents and design specs |
+| `docs/` | Planning documents and historical design specs |
 
 ## For AI Agents
 
 ### Working In This Directory
 - Run all `cargo` commands from `backend/`, not the repo root.
-- Start Postgres before running tests: `docker compose up -d postgres`
-- Environment is loaded from `.env` via `dotenvy`; copy `.env.example` if missing.
-- The binary entry point is `src/main.rs`; `AppState` wires together all engine components.
-- `LLM_BASE_URL` / `LLM_API_KEY` are optional — omitting them disables todo generation silently.
+- SQLite database file is created next to the binary on first run — no external DB setup required.
+- Environment is loaded from `.env` via `dotenvy`; it is optional.
+- The binary entry point is in `actio-core` with `AppState` wiring engine components.
+- `LLM_BASE_URL` / `LLM_API_KEY` are optional — omitting them disables remote reminder extraction silently; the default `local-llm` Cargo feature bundles llama.cpp for on-device inference.
 
 ### Testing Requirements
-- `cargo test` — runs unit + integration tests
+- `cargo test` — runs unit + integration tests (no external services required)
 - `cargo fmt` — format before review
-- Verify migrations apply cleanly: `cargo run --bin actio-asr` against a fresh DB
+- `cargo clippy` — lint
 
 ### Common Patterns
 - Axum handlers receive `State<AppState>` — never pass mutable state via function arguments.
-- All DB operations go through `repository/` using the `PgPool` stored in `AppState`.
-- Circuit breaker (`engine/circuit_breaker.rs`) guards gRPC calls to the Python worker.
-- `inference_router` in `AppState` is `Option<Arc<InferenceRouter>>` — always check for `None` (worker may be unavailable).
+- All DB operations go through `repository/` using a `SqlitePool` stored in `AppState`.
+- `sherpa-onnx` types like `OnlineRecognizer` and `VoiceActivityDetector` hold raw pointers and are `!Send` — wrap their entire lifecycle in a single `tokio::task::spawn_blocking` and bridge with `crossbeam_channel`.
+- Speaker embeddings are 512-dim (3D-Speaker). Any hardcoded `192` in the code is stale from the earlier CAM++ design and should be fixed as you encounter it.
 
 ## Dependencies
 
 ### Internal
-- `src/` depends on all other subdirectories
-- `src-tauri/` depends on the HTTP API exposed by `src/`
+- `actio-core/` depends on nothing else in the workspace
+- `src-tauri/` depends on the HTTP API exposed by `actio-core/`
 
 ### External
 - `axum` — HTTP framework
-- `sqlx` — async PostgreSQL driver with compile-time query checks
+- `sqlx` (SQLite feature) — async database driver
 - `tokio` — async runtime
-- `tonic` — gRPC client
+- `sherpa-onnx` — embedded ONNX Runtime for VAD/ASR/speaker/diarization
+- `llama-cpp-2` (optional, default feature) — local GGUF LLM inference
+- `reqwest` — HTTP client for remote LLM + model downloads
 - `utoipa` + `utoipa-swagger-ui` — OpenAPI docs at `/docs`
 - `tracing` / `tracing-subscriber` — structured logging
 
