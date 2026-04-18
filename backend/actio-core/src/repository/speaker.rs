@@ -9,7 +9,7 @@ pub async fn create_speaker(
 ) -> Result<Speaker, sqlx::Error> {
     let id = Uuid::new_v4().to_string();
     sqlx::query_as::<_, Speaker>(
-        "INSERT INTO speakers (id, display_name, tenant_id) VALUES (?1, ?2, ?3) RETURNING *"
+        "INSERT INTO speakers (id, display_name, tenant_id) VALUES (?1, ?2, ?3) RETURNING *",
     )
     .bind(&id)
     .bind(display_name)
@@ -25,7 +25,10 @@ pub async fn get_speaker(pool: &SqlitePool, id: Uuid) -> Result<Speaker, sqlx::E
         .await
 }
 
-pub async fn list_speakers(pool: &SqlitePool, tenant_id: Uuid) -> Result<Vec<Speaker>, sqlx::Error> {
+pub async fn list_speakers(
+    pool: &SqlitePool,
+    tenant_id: Uuid,
+) -> Result<Vec<Speaker>, sqlx::Error> {
     sqlx::query_as::<_, Speaker>(
         "SELECT * FROM speakers WHERE tenant_id = ?1 AND status = 'active' ORDER BY created_at DESC"
     )
@@ -39,13 +42,11 @@ pub async fn update_speaker(
     id: Uuid,
     display_name: &str,
 ) -> Result<Option<Speaker>, sqlx::Error> {
-    sqlx::query_as::<_, Speaker>(
-        "UPDATE speakers SET display_name = ?1 WHERE id = ?2 RETURNING *",
-    )
-    .bind(display_name)
-    .bind(id.to_string())
-    .fetch_optional(pool)
-    .await
+    sqlx::query_as::<_, Speaker>("UPDATE speakers SET display_name = ?1 WHERE id = ?2 RETURNING *")
+        .bind(display_name)
+        .bind(id.to_string())
+        .fetch_optional(pool)
+        .await
 }
 
 pub async fn soft_delete_speaker(pool: &SqlitePool, id: Uuid) -> Result<bool, sqlx::Error> {

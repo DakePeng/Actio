@@ -28,9 +28,7 @@ pub fn build_todo_messages(transcript: &str, label_names: &[String]) -> Vec<Chat
     } else {
         label_names.join(", ")
     };
-    let system = format!(
-        "Today: {today}\nLabels: [{labels_str}]\n\n{SYSTEM_PROMPT}"
-    );
+    let system = format!("Today: {today}\nLabels: [{labels_str}]\n\n{SYSTEM_PROMPT}");
     vec![
         ChatMessage {
             role: "system".into(),

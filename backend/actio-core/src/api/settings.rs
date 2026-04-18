@@ -4,11 +4,11 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
-use crate::AppState;
 use crate::api::session::AppApiError;
 use crate::engine::app_settings::{AppSettings, SettingsPatch};
 use crate::engine::audio_capture::{self, AudioDeviceInfo};
 use crate::engine::model_manager::{AsrModelInfo, DownloadTarget, ModelStatus};
+use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct DownloadRequest {
@@ -24,9 +24,7 @@ pub async fn get_model_status(
 }
 
 /// GET /settings/models/available — lists ASR models and their download status.
-pub async fn get_available_models(
-    State(state): State<AppState>,
-) -> Json<Vec<AsrModelInfo>> {
+pub async fn get_available_models(State(state): State<AppState>) -> Json<Vec<AsrModelInfo>> {
     Json(state.model_manager.available_asr_models())
 }
 
@@ -194,11 +192,9 @@ pub struct LlmTestResult {
 }
 
 /// POST /settings/llm/test — test the active LLM backend with a tiny prompt.
-pub async fn test_llm(
-    State(state): State<AppState>,
-) -> Result<Json<LlmTestResult>, StatusCode> {
-    use crate::engine::llm_router::LlmSelection;
+pub async fn test_llm(State(state): State<AppState>) -> Result<Json<LlmTestResult>, StatusCode> {
     use crate::engine::llm_prompt::ChatMessage;
+    use crate::engine::llm_router::LlmSelection;
     use crate::engine::local_llm_engine::{EnginePriority, GenerationParams};
 
     let settings = state.settings_manager.get().await;
@@ -221,20 +217,22 @@ pub async fn test_llm(
                     }));
                 }
             };
-            let messages = vec![
-                ChatMessage {
-                    role: "user".into(),
-                    content: "Reply with the single word 'ok' and nothing else.".into(),
-                },
-            ];
+            let messages = vec![ChatMessage {
+                role: "user".into(),
+                content: "Reply with the single word 'ok' and nothing else.".into(),
+            }];
             tracing::info!(llm_id = %id, "test_llm: sending test prompt");
             match engine
-                .chat_completion(messages, GenerationParams {
-                    max_tokens: 8,
-                    temperature: 0.0,
-                    json_mode: false,
-                    thinking_budget: None,
-                }, EnginePriority::Internal)
+                .chat_completion(
+                    messages,
+                    GenerationParams {
+                        max_tokens: 8,
+                        temperature: 0.0,
+                        json_mode: false,
+                        thinking_budget: None,
+                    },
+                    EnginePriority::Internal,
+                )
                 .await
             {
                 Ok(resp) => {
@@ -271,7 +269,12 @@ pub async fn test_llm(
                     message: "Remote selected but no API key configured".into(),
                 }));
             };
-            let model = settings.llm.remote.model.as_deref().unwrap_or("gpt-4o-mini");
+            let model = settings
+                .llm
+                .remote
+                .model
+                .as_deref()
+                .unwrap_or("gpt-4o-mini");
             let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
             let client = reqwest::Client::new();
 

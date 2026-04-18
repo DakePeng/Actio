@@ -133,10 +133,13 @@ export function createActioApiClient() {
     async deleteLabel(id: string) {
       await request<void>(`/labels/${id}`, { method: 'DELETE' });
     },
-    async extractReminders(text: string) {
+    async extractReminders(text: string, imageDataUrls: string[] = []) {
       const reminders = await request<BackendReminderDto[]>('/reminders/extract', {
         method: 'POST',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          images: imageDataUrls.map((url) => ({ data_url: url })),
+        }),
       });
       return reminders.map(mapBackendReminder);
     },

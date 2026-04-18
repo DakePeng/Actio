@@ -88,7 +88,8 @@ impl LlmDownloader {
             .build()
             .map_err(|e| LlmDownloadError::DownloadFailed(e.to_string()))?;
 
-        let response = client.get(url)
+        let response = client
+            .get(url)
             .send()
             .await
             .map_err(|e| LlmDownloadError::DownloadFailed(e.to_string()))?;
@@ -103,7 +104,11 @@ impl LlmDownloader {
 
         let total_size = response.content_length().unwrap_or(0);
         let expected_size = info.size_mb as u64 * 1_000_000;
-        let size_for_progress = if total_size > 0 { total_size } else { expected_size };
+        let size_for_progress = if total_size > 0 {
+            total_size
+        } else {
+            expected_size
+        };
 
         // Stream to a temporary file, then rename on success
         let tmp_dest = dest.with_extension("gguf.part");

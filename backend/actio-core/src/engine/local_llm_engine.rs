@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::engine::llm_catalog::{DownloadSource, LocalLlmInfo, available_local_llms};
+use crate::engine::llm_catalog::{available_local_llms, DownloadSource, LocalLlmInfo};
 use crate::engine::llm_prompt::ChatMessage;
 
 #[derive(Debug, thiserror::Error)]

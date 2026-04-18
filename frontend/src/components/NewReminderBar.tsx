@@ -128,6 +128,18 @@ export function NewReminderBar() {
                     {mode === 'chat' ? 'Switch to form' : 'Switch to chat'}
                   </button>
                   <div className="active-pill">Cmd/Ctrl + Enter to save</div>
+                  <button
+                    type="button"
+                    className="quick-add__close"
+                    onClick={handleClose}
+                    aria-label="Close"
+                    title="Close (Esc)"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18" />
+                      <path d="m6 6 12 12" />
+                    </svg>
+                  </button>
                 </div>
               </div>
 

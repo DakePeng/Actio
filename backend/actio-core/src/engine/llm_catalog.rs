@@ -134,8 +134,14 @@ mod tests {
             hf_mirror: "https://mirror.example.com/model.gguf".into(),
             model_scope: "https://ms.example.com/model.gguf".into(),
         };
-        assert!(DownloadSource::HuggingFace.resolve_url(&sources).contains("hf.example.com"));
-        assert!(DownloadSource::HfMirror.resolve_url(&sources).contains("mirror.example.com"));
-        assert!(DownloadSource::ModelScope.resolve_url(&sources).contains("ms.example.com"));
+        assert!(DownloadSource::HuggingFace
+            .resolve_url(&sources)
+            .contains("hf.example.com"));
+        assert!(DownloadSource::HfMirror
+            .resolve_url(&sources)
+            .contains("mirror.example.com"));
+        assert!(DownloadSource::ModelScope
+            .resolve_url(&sources)
+            .contains("ms.example.com"));
     }
 }

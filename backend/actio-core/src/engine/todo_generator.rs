@@ -36,7 +36,7 @@ pub async fn generate_session_todos(
     info!(chars = transcript_text.len(), "Built transcript string");
     let transcript_text = truncate_transcript(&transcript_text);
 
-    let llm_items = match router.generate_todos(transcript_text, &[]).await {
+    let llm_items = match router.generate_todos(transcript_text, &[], &[]).await {
         Ok(items) => items,
         Err(e) => {
             error!(error = %e, "LLM router failed for reminder generation");

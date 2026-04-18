@@ -5,17 +5,17 @@ pub mod session;
 pub mod settings;
 pub mod ws;
 
-use axum::routing::{delete, get, patch, post};
-use axum::Router;
-use axum::Json;
 use axum::extract::State;
+use axum::routing::{delete, get, patch, post};
+use axum::Json;
+use axum::Router;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::AppState;
 use crate::api::session::*;
 use crate::domain::types::*;
 use crate::engine::metrics::HealthSummary;
+use crate::AppState;
 use std::sync::atomic::Ordering;
 
 #[derive(OpenApi)]
@@ -51,7 +51,7 @@ use std::sync::atomic::Ordering;
         PatchLabelRequest,
         PatchReminderRequest,
         AppApiError,
-    )),
+    ))
 )]
 struct ApiDoc;
 
@@ -91,9 +91,18 @@ pub fn router(state: AppState) -> Router {
         .route("/settings/llm/test", post(settings::test_llm))
         // settings / models
         .route("/settings/models", get(settings::get_model_status))
-        .route("/settings/models/available", get(settings::get_available_models))
-        .route("/settings/models/download", post(settings::start_model_download))
-        .route("/settings/models/cancel-download", post(settings::cancel_model_download))
+        .route(
+            "/settings/models/available",
+            get(settings::get_available_models),
+        )
+        .route(
+            "/settings/models/download",
+            post(settings::start_model_download),
+        )
+        .route(
+            "/settings/models/cancel-download",
+            post(settings::cancel_model_download),
+        )
         .route("/settings/models/warmup", post(settings::warmup_models))
         .route("/settings/models/:id", delete(settings::delete_model))
         .route("/settings/audio-devices", get(settings::list_audio_devices))
@@ -120,5 +129,3 @@ async fn health(State(state): State<AppState>) -> Json<HealthSummary> {
         unknown_speaker_count: state.metrics.unknown_speaker_count.load(Ordering::Relaxed),
     })
 }
-
-

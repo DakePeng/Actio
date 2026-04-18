@@ -213,9 +213,8 @@ pub fn start_paraformer_offline_asr(
 
     let config_builder = move || {
         let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
-        config.model_config.paraformer = sherpa_onnx::OfflineParaformerModelConfig {
-            model: Some(model),
-        };
+        config.model_config.paraformer =
+            sherpa_onnx::OfflineParaformerModelConfig { model: Some(model) };
         config.model_config.tokens = Some(tokens);
         config.model_config.num_threads = 2;
         config.model_config.provider = Some("cpu".to_string());
@@ -232,13 +231,15 @@ pub fn start_zipformer_ctc_asr(
 ) -> anyhow::Result<mpsc::Receiver<TranscriptResult>> {
     let model = files.model.to_string_lossy().to_string();
     let tokens = files.tokens.to_string_lossy().to_string();
-    let bpe_vocab = files.bpe_vocab.as_ref().map(|p| p.to_string_lossy().to_string());
+    let bpe_vocab = files
+        .bpe_vocab
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string());
 
     let config_builder = move || {
         let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
-        config.model_config.zipformer_ctc = sherpa_onnx::OfflineZipformerCtcModelConfig {
-            model: Some(model),
-        };
+        config.model_config.zipformer_ctc =
+            sherpa_onnx::OfflineZipformerCtcModelConfig { model: Some(model) };
         config.model_config.tokens = Some(tokens);
         if let Some(bpe) = bpe_vocab {
             config.model_config.bpe_vocab = Some(bpe);
@@ -358,7 +359,10 @@ fn spawn_offline_asr_loop(
         let recognizer = match sherpa_onnx::OfflineRecognizer::create(&config) {
             Some(r) => r,
             None => {
-                warn!(model = model_name, "Failed to create OfflineRecognizer — check model files");
+                warn!(
+                    model = model_name,
+                    "Failed to create OfflineRecognizer — check model files"
+                );
                 return;
             }
         };
@@ -385,7 +389,10 @@ fn spawn_offline_asr_loop(
                                 end_sample,
                             };
                             if result_cb_tx.send(t).is_err() {
-                                info!(model = model_name, "Offline ASR thread ended — result consumer dropped");
+                                info!(
+                                    model = model_name,
+                                    "Offline ASR thread ended — result consumer dropped"
+                                );
                                 return;
                             }
                         }

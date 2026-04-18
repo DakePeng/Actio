@@ -1,6 +1,6 @@
-use std::time::Instant;
-use std::sync::atomic::{AtomicU32, AtomicU64};
 use serde::Serialize;
+use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::time::Instant;
 
 pub struct Metrics {
     pub active_sessions: AtomicU32,

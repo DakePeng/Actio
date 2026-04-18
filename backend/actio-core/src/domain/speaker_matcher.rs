@@ -30,7 +30,11 @@ pub async fn identify_speaker(
         });
     }
 
-    let emb_str: String = embedding.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+    let emb_str: String = embedding
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let raw_results: Vec<(Uuid, f64)> = sqlx::query_as(
         "SELECT e.speaker_id, 1.0 - (e.embedding_distance) AS similarity \
          FROM speaker_embeddings e \
@@ -86,7 +90,11 @@ pub async fn save_embedding(
     quality_score: f64,
     is_primary: bool,
 ) -> Result<Uuid, sqlx::Error> {
-    let emb_str: String = embedding.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+    let emb_str: String = embedding
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let vector_str = format!("[{}]", emb_str);
     let id = uuid::Uuid::new_v4().to_string();
 

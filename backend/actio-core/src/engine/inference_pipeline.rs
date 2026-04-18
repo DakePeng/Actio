@@ -2,8 +2,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::engine::audio_capture::{self, AudioCaptureHandle};
 use crate::engine::asr;
+use crate::engine::audio_capture::{self, AudioCaptureHandle};
 use crate::engine::model_manager::ModelPaths;
 use crate::engine::transcript_aggregator::TranscriptAggregator;
 use crate::engine::vad::{self, VadConfig};
@@ -50,12 +50,15 @@ impl InferencePipeline {
         info!(model = chosen, "Selected ASR model");
 
         // Helper: start VAD → offline ASR pipeline (shared by all offline models).
-        let start_vad_pipeline = |audio_rx: tokio::sync::mpsc::Receiver<Vec<f32>>| -> anyhow::Result<_> {
-            if !model_paths.silero_vad.exists() {
-                return Err(anyhow::anyhow!("Silero VAD not found — required for offline models"));
-            }
-            vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)
-        };
+        let start_vad_pipeline =
+            |audio_rx: tokio::sync::mpsc::Receiver<Vec<f32>>| -> anyhow::Result<_> {
+                if !model_paths.silero_vad.exists() {
+                    return Err(anyhow::anyhow!(
+                        "Silero VAD not found — required for offline models"
+                    ));
+                }
+                vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)
+            };
 
         let transcript_rx = if let Some(files) = model_paths.transducers.get(chosen) {
             // ── Streaming transducer (any model in the table) ────────
@@ -64,53 +67,66 @@ impl InferencePipeline {
             match chosen {
                 // ── Offline models (individual routing) ──────────────
                 "whisper_base" => {
-                    let files = model_paths.whisper_base.as_ref()
+                    let files = model_paths
+                        .whisper_base
+                        .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("Whisper base model not downloaded"))?;
                     let seg_rx = start_vad_pipeline(audio_rx)?;
                     asr::start_whisper_asr(files, seg_rx)?
                 }
                 "whisper_turbo" => {
-                    let files = model_paths.whisper_turbo.as_ref()
+                    let files = model_paths
+                        .whisper_turbo
+                        .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("Whisper turbo model not downloaded"))?;
                     let seg_rx = start_vad_pipeline(audio_rx)?;
                     asr::start_whisper_asr(files, seg_rx)?
                 }
                 "zipformer_ctc_zh_small" => {
-                    let files = model_paths.zipformer_ctc_zh_small.as_ref()
+                    let files = model_paths
+                        .zipformer_ctc_zh_small
+                        .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("Zipformer CTC zh-small not downloaded"))?;
                     let seg_rx = start_vad_pipeline(audio_rx)?;
                     asr::start_zipformer_ctc_asr(files, seg_rx)?
                 }
                 "paraformer_zh_small" => {
-                    let files = model_paths.paraformer_zh_small.as_ref()
+                    let files = model_paths
+                        .paraformer_zh_small
+                        .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("Paraformer zh-small not downloaded"))?;
                     let seg_rx = start_vad_pipeline(audio_rx)?;
                     asr::start_paraformer_offline_asr(files, seg_rx)?
                 }
                 "sense_voice_multi" => {
-                    let files = model_paths.sense_voice.as_ref()
+                    let files = model_paths
+                        .sense_voice
+                        .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("SenseVoice not downloaded"))?;
                     let seg_rx = start_vad_pipeline(audio_rx)?;
                     asr::start_sense_voice_asr(files, seg_rx)?
                 }
                 "moonshine_tiny_en" => {
-                    let files = model_paths.moonshine_en.as_ref()
+                    let files = model_paths
+                        .moonshine_en
+                        .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("Moonshine not downloaded"))?;
                     let seg_rx = start_vad_pipeline(audio_rx)?;
                     asr::start_moonshine_asr(files, seg_rx)?
                 }
                 "funasr_nano" => {
-                    let files = model_paths.funasr_nano.as_ref()
+                    let files = model_paths
+                        .funasr_nano
+                        .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("FunASR Nano not downloaded"))?;
                     let seg_rx = start_vad_pipeline(audio_rx)?;
                     asr::start_funasr_nano_asr(files, seg_rx)?
                 }
                 // ── Fallback: first available streaming transducer ───
                 _ => {
-                    let files = model_paths.transducers.values().next()
-                        .ok_or_else(|| anyhow::anyhow!(
-                            "No streaming transducer model available for '{}'", chosen
-                        ))?;
+                    let files = model_paths.transducers.values().next().ok_or_else(|| {
+                        anyhow::anyhow!("No streaming transducer model available for '{}'", chosen)
+                    })?;
                     asr::start_streaming_asr(files, audio_rx)?
                 }
             }

@@ -139,18 +139,26 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     // cached UQFF file, start loading it in the background.
     // If no UQFF exists, skip — don't trigger a download at startup.
     if initial_settings.llm.load_on_startup {
-        if let crate::engine::llm_router::LlmSelection::Local { ref id } = initial_settings.llm.selection {
+        if let crate::engine::llm_router::LlmSelection::Local { ref id } =
+            initial_settings.llm.selection
+        {
             let info = crate::engine::llm_catalog::available_local_llms()
                 .into_iter()
                 .find(|m| m.id == *id);
             if let Some(info) = info {
-                if crate::engine::local_llm_engine::LocalLlmEngine::has_gguf(&config.model_dir, &info) {
+                if crate::engine::local_llm_engine::LocalLlmEngine::has_gguf(
+                    &config.model_dir,
+                    &info,
+                ) {
                     info!(llm_id = %id, "Loading cached local LLM at startup");
-                    state.engine_slot.start_load(
-                        id.clone(),
-                        initial_settings.llm.download_source,
-                        &state.llm_downloader,
-                    ).await;
+                    state
+                        .engine_slot
+                        .start_load(
+                            id.clone(),
+                            initial_settings.llm.download_source,
+                            &state.llm_downloader,
+                        )
+                        .await;
                 } else {
                     info!(llm_id = %id, "Skipping startup load — no cached GGUF, model needs download first");
                 }
@@ -212,7 +220,11 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     }
 
     if bound_port.is_none() {
-        anyhow::bail!("Could not bind to any port in range {}-{}", config.http_port, config.http_port + 9);
+        anyhow::bail!(
+            "Could not bind to any port in range {}-{}",
+            config.http_port,
+            config.http_port + 9
+        );
     }
 
     Ok(())
@@ -238,7 +250,11 @@ pub fn build_router_from_settings(
                 let cfg = crate::config::LlmConfig {
                     base_url: base_url.into(),
                     api_key: api_key.into(),
-                    model: llm.remote.model.clone().unwrap_or_else(|| "gpt-4o-mini".into()),
+                    model: llm
+                        .remote
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| "gpt-4o-mini".into()),
                 };
                 LlmRouter::Remote(Arc::new(RemoteLlmClient::new(cfg)))
             } else if let Some(env_client) = remote_envseed {
@@ -287,13 +303,9 @@ async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
     let tenant_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")
         .expect("hardcoded uuid must parse");
 
-    let session = repository::session::create_session(
-        &state.pool,
-        tenant_id,
-        "microphone",
-        "always_on",
-    )
-    .await?;
+    let session =
+        repository::session::create_session(&state.pool, tenant_id, "microphone", "always_on")
+            .await?;
     let session_id = session.id.parse::<uuid::Uuid>()?;
 
     {

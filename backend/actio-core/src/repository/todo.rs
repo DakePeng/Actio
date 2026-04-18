@@ -1,18 +1,17 @@
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use crate::domain::types::TodoItem;
 use crate::domain::types::NewTodo;
+use crate::domain::types::TodoItem;
 
 /// Check if any reminders already exist for a session (idempotency guard).
 #[allow(dead_code)]
 pub async fn has_todos(pool: &SqlitePool, session_id: Uuid) -> Result<bool, sqlx::Error> {
-    let row: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM reminders WHERE session_id = ?1)"
-    )
-    .bind(session_id.to_string())
-    .fetch_one(pool)
-    .await?;
+    let row: (bool,) =
+        sqlx::query_as("SELECT EXISTS(SELECT 1 FROM reminders WHERE session_id = ?1)")
+            .bind(session_id.to_string())
+            .fetch_one(pool)
+            .await?;
     Ok(row.0)
 }
 
@@ -59,7 +58,7 @@ pub async fn get_todos_for_session(
     session_id: Uuid,
 ) -> Result<Vec<TodoItem>, sqlx::Error> {
     sqlx::query_as::<_, TodoItem>(
-        "SELECT * FROM reminders WHERE session_id = ?1 ORDER BY created_at ASC"
+        "SELECT * FROM reminders WHERE session_id = ?1 ORDER BY created_at ASC",
     )
     .bind(session_id.to_string())
     .fetch_all(pool)

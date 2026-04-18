@@ -49,7 +49,7 @@ interface AppState {
   setFeedback: (message: string, tone?: 'neutral' | 'success') => void;
   clearFeedback: () => void;
   clearNewFlag: (id: string) => void;
-  extractReminders: (text: string) => Promise<void>;
+  extractReminders: (text: string, imageDataUrls?: string[]) => Promise<void>;
   clearAiGenerated: (id: string) => void;
   setProfile: (patch: Partial<Profile>) => void;
   setPreferences: (patch: Partial<Preferences>) => void;
@@ -364,7 +364,7 @@ export const useStore = create<AppState>((set) => ({
       ),
     })),
 
-  extractReminders: async (text) => {
+  extractReminders: async (text, imageDataUrls = []) => {
     // Insert skeleton placeholders
     const placeholderIds: string[] = [crypto.randomUUID()];
     const placeholders: Reminder[] = placeholderIds.map((id) => ({
@@ -380,7 +380,7 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({ reminders: [...placeholders, ...state.reminders] }));
 
     try {
-      const extracted = await api.extractReminders(text);
+      const extracted = await api.extractReminders(text, imageDataUrls);
       set((state) => ({
         reminders: [
           ...extracted.map((r) => ({ ...r, isNew: true, isAiGenerated: true })),

@@ -1,5 +1,5 @@
 use std::path::Path;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 /// Result of diarizing a chunk of audio
 #[derive(Debug, Clone)]
@@ -23,7 +23,7 @@ pub struct SpeakerEmbedding {
 pub async fn diarize_audio(
     segmentation_model: &Path,
     embedding_model: &Path,
-    audio: &[f32], // 16kHz mono f32
+    audio: &[f32],             // 16kHz mono f32
     num_speakers: Option<i32>, // None = auto-detect
 ) -> anyhow::Result<Vec<DiarizedSegment>> {
     // Guard: too short for diarization
@@ -84,7 +84,9 @@ pub async fn diarize_audio(
         let result = match sd.process(&audio) {
             Some(r) => r,
             None => {
-                return Err(anyhow::anyhow!("OfflineSpeakerDiarization::process returned None"));
+                return Err(anyhow::anyhow!(
+                    "OfflineSpeakerDiarization::process returned None"
+                ));
             }
         };
 

@@ -62,14 +62,22 @@ export function useGlobalShortcuts() {
     listen<string>('shortcut-triggered', (event) => {
       if (cancelled) return;
       const action = event.payload;
+      console.log('[Actio] shortcut-triggered:', action, 'showNewReminderBar:', useStore.getState().ui.showNewReminderBar);
 
       if (action === 'toggle_board_tray') {
         const current = useStore.getState().ui.showBoardWindow;
         setBoardWindow(!current);
       } else if (action === 'new_todo') {
-        setBoardWindow(true);
-        setNewReminderBar(true);
+        const current = useStore.getState().ui.showNewReminderBar;
+        setNewReminderBar(!current);
       } else if (action === 'start_dictation') {
+        // If the new-item window is open, route dictation to the composer's
+        // mic button instead of the global paste pipeline.
+        if (useStore.getState().ui.showNewReminderBar) {
+          console.log('[Actio] Routing dictation to composer mic');
+          window.dispatchEvent(new CustomEvent('actio-toggle-composer-dictation'));
+          return;
+        }
         const { isDictating, isDictationTranscribing } = useStore.getState().ui;
         if (isDictating || isDictationTranscribing) {
           console.log('[Actio] Stopping dictation...');

@@ -30,7 +30,8 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
         Some(today + Duration::days(2))
     } else if lower.contains("tomorrow") {
         Some(today + Duration::days(1))
-    } else if lower.contains("tonight") || lower.contains("today") || lower.contains("this evening") {
+    } else if lower.contains("tonight") || lower.contains("today") || lower.contains("this evening")
+    {
         Some(today)
     } else if lower.contains("this weekend") {
         Some(next_weekday(today, Weekday::Sat))
@@ -85,13 +86,27 @@ fn next_weekday(from: NaiveDate, target: Weekday) -> NaiveDate {
 /// Parse weekday name references: "monday", "next tuesday", "this fri", etc.
 fn parse_weekday_ref(input: &str) -> Option<Weekday> {
     let pairs = [
-        ("monday", Weekday::Mon), ("mon ", Weekday::Mon), ("mon,", Weekday::Mon),
-        ("tuesday", Weekday::Tue), ("tues", Weekday::Tue), ("tue ", Weekday::Tue),
-        ("wednesday", Weekday::Wed), ("wed ", Weekday::Wed), ("wed,", Weekday::Wed),
-        ("thursday", Weekday::Thu), ("thurs", Weekday::Thu), ("thu ", Weekday::Thu),
-        ("friday", Weekday::Fri), ("fri ", Weekday::Fri), ("fri,", Weekday::Fri),
-        ("saturday", Weekday::Sat), ("sat ", Weekday::Sat), ("sat,", Weekday::Sat),
-        ("sunday", Weekday::Sun), ("sun ", Weekday::Sun), ("sun,", Weekday::Sun),
+        ("monday", Weekday::Mon),
+        ("mon ", Weekday::Mon),
+        ("mon,", Weekday::Mon),
+        ("tuesday", Weekday::Tue),
+        ("tues", Weekday::Tue),
+        ("tue ", Weekday::Tue),
+        ("wednesday", Weekday::Wed),
+        ("wed ", Weekday::Wed),
+        ("wed,", Weekday::Wed),
+        ("thursday", Weekday::Thu),
+        ("thurs", Weekday::Thu),
+        ("thu ", Weekday::Thu),
+        ("friday", Weekday::Fri),
+        ("fri ", Weekday::Fri),
+        ("fri,", Weekday::Fri),
+        ("saturday", Weekday::Sat),
+        ("sat ", Weekday::Sat),
+        ("sat,", Weekday::Sat),
+        ("sunday", Weekday::Sun),
+        ("sun ", Weekday::Sun),
+        ("sun,", Weekday::Sun),
     ];
     // Pad input so partial matches at the end still work
     let padded = format!("{input} ");
@@ -178,11 +193,15 @@ fn find_bare_time(input: &str) -> Option<&str> {
     for (i, _) in input.match_indices(|c: char| c.is_ascii_digit()) {
         let rest = &input[i..];
         // Check if this digit sequence is followed by am/pm
-        let num_end = rest.find(|c: char| !c.is_ascii_digit() && c != ':').unwrap_or(rest.len());
+        let num_end = rest
+            .find(|c: char| !c.is_ascii_digit() && c != ':')
+            .unwrap_or(rest.len());
         if num_end < rest.len() {
             let suffix = &rest[num_end..];
-            if suffix.starts_with("am") || suffix.starts_with("pm")
-                || suffix.starts_with("a.m") || suffix.starts_with("p.m")
+            if suffix.starts_with("am")
+                || suffix.starts_with("pm")
+                || suffix.starts_with("a.m")
+                || suffix.starts_with("p.m")
             {
                 return Some(rest);
             }
@@ -219,9 +238,13 @@ fn parse_time_str(s: &str) -> Option<NaiveTime> {
     // am/pm
     let suffix = s[rest_start..].trim().to_lowercase();
     if suffix.starts_with("pm") || suffix.starts_with("p.m") {
-        if hour < 12 { hour += 12; }
+        if hour < 12 {
+            hour += 12;
+        }
     } else if suffix.starts_with("am") || suffix.starts_with("a.m") {
-        if hour == 12 { hour = 0; }
+        if hour == 12 {
+            hour = 0;
+        }
     }
 
     NaiveTime::from_hms_opt(hour, min, 0)
@@ -261,12 +284,29 @@ fn parse_absolute_date(input: &str, today: NaiveDate) -> Option<NaiveDate> {
 
     // English month names: "May 18", "January 3rd"
     let months = [
-        ("january", 1), ("february", 2), ("march", 3), ("april", 4),
-        ("may", 5), ("june", 6), ("july", 7), ("august", 8),
-        ("september", 9), ("october", 10), ("november", 11), ("december", 12),
-        ("jan", 1), ("feb", 2), ("mar", 3), ("apr", 4),
-        ("jun", 6), ("jul", 7), ("aug", 8), ("sep", 9),
-        ("oct", 10), ("nov", 11), ("dec", 12),
+        ("january", 1),
+        ("february", 2),
+        ("march", 3),
+        ("april", 4),
+        ("may", 5),
+        ("june", 6),
+        ("july", 7),
+        ("august", 8),
+        ("september", 9),
+        ("october", 10),
+        ("november", 11),
+        ("december", 12),
+        ("jan", 1),
+        ("feb", 2),
+        ("mar", 3),
+        ("apr", 4),
+        ("jun", 6),
+        ("jul", 7),
+        ("aug", 8),
+        ("sep", 9),
+        ("oct", 10),
+        ("nov", 11),
+        ("dec", 12),
     ];
     for (name, month) in &months {
         if let Some(pos) = lower.find(name) {
@@ -275,7 +315,11 @@ fn parse_absolute_date(input: &str, today: NaiveDate) -> Option<NaiveDate> {
             if let Ok(day) = day_str.parse::<u32>() {
                 if let Some(d) = NaiveDate::from_ymd_opt(year, *month, day) {
                     // If the date is in the past, assume next year
-                    return Some(if d < today { NaiveDate::from_ymd_opt(year + 1, *month, day).unwrap_or(d) } else { d });
+                    return Some(if d < today {
+                        NaiveDate::from_ymd_opt(year + 1, *month, day).unwrap_or(d)
+                    } else {
+                        d
+                    });
                 }
             }
         }
@@ -298,11 +342,21 @@ fn parse_absolute_date(input: &str, today: NaiveDate) -> Option<NaiveDate> {
 fn parse_chinese_date(input: &str, year: i32) -> Option<NaiveDate> {
     let month_pos = input.find('月')?;
     let before_month = &input[..month_pos];
-    let month_str: String = before_month.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>().chars().rev().collect();
+    let month_str: String = before_month
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
     let month: u32 = month_str.parse().ok()?;
 
     let after_month = &input[month_pos + '月'.len_utf8()..];
-    let day_str: String = after_month.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let day_str: String = after_month
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     let day: u32 = day_str.parse().ok()?;
 
     NaiveDate::from_ymd_opt(year, month, day)
@@ -314,13 +368,24 @@ fn parse_slash_date(input: &str, today: NaiveDate) -> Option<NaiveDate> {
     for (i, _) in input.match_indices('/') {
         // Look backwards for month digits
         let before = &input[..i];
-        let month_str: String = before.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>().chars().rev().collect();
-        if month_str.is_empty() { continue; }
+        let month_str: String = before
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        if month_str.is_empty() {
+            continue;
+        }
 
         // Look forwards for day digits
         let after = &input[i + 1..];
         let day_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if day_str.is_empty() { continue; }
+        if day_str.is_empty() {
+            continue;
+        }
 
         let month: u32 = month_str.parse().ok()?;
         let day: u32 = day_str.parse().ok()?;
@@ -328,7 +393,10 @@ fn parse_slash_date(input: &str, today: NaiveDate) -> Option<NaiveDate> {
         // Check for /YYYY after day
         let after_day = &after[day_str.len()..];
         let year = if after_day.starts_with('/') {
-            let year_str: String = after_day[1..].chars().take_while(|c| c.is_ascii_digit()).collect();
+            let year_str: String = after_day[1..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
             year_str.parse::<i32>().unwrap_or(today.year())
         } else {
             today.year()
@@ -477,6 +545,14 @@ pub async fn delete_reminder(
 #[derive(Debug, Deserialize)]
 pub struct ExtractRemindersRequest {
     pub text: String,
+    #[serde(default)]
+    pub images: Vec<ImageInput>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImageInput {
+    /// Full data URL, e.g. "data:image/png;base64,...."
+    pub data_url: String,
 }
 
 pub async fn extract_reminders(
@@ -485,8 +561,8 @@ pub async fn extract_reminders(
     Json(req): Json<ExtractRemindersRequest>,
 ) -> Result<Json<Vec<Reminder>>, AppApiError> {
     let text = req.text.trim().to_string();
-    if text.is_empty() {
-        return Err(AppApiError("text is required and must not be empty".into()));
+    if text.is_empty() && req.images.is_empty() {
+        return Err(AppApiError("text or at least one image is required".into()));
     }
 
     let tenant_id = tenant_id_from_headers(&headers);
@@ -502,8 +578,9 @@ pub async fn extract_reminders(
         .unwrap_or_default();
     let label_names: Vec<String> = db_labels.iter().map(|l| l.name.clone()).collect();
 
+    let image_urls: Vec<String> = req.images.into_iter().map(|i| i.data_url).collect();
     let todo_items = router
-        .generate_todos(&text, &label_names)
+        .generate_todos(&text, &label_names, &image_urls)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "extract_reminders: LLM extraction failed");
@@ -532,25 +609,32 @@ pub async fn extract_reminders(
             "due_time resolution"
         );
         let resolved_naive = resolved_naive.or_else(|| {
-                // Fallback to model's output if we didn't detect a reference
-                item.due_time.as_deref().and_then(|s| {
-                    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M")
-                        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
-                        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M"))
-                        .ok()
-                })
-            });
+            // Fallback to model's output if we didn't detect a reference
+            item.due_time.as_deref().and_then(|s| {
+                NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M")
+                    .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+                    .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M"))
+                    .ok()
+            })
+        });
         let due_time = resolved_naive.and_then(|naive| {
-            chrono::Local.from_local_datetime(&naive).single()
+            chrono::Local
+                .from_local_datetime(&naive)
+                .single()
                 .map(|local| local.with_timezone(&chrono::Utc))
         });
 
         // Resolve label names → UUIDs by case-insensitive match.
-        let label_ids: Vec<Uuid> = item.labels.iter().filter_map(|name| {
-            db_labels.iter()
-                .find(|l| l.name.eq_ignore_ascii_case(name))
-                .and_then(|l| l.id.parse().ok())
-        }).collect();
+        let label_ids: Vec<Uuid> = item
+            .labels
+            .iter()
+            .filter_map(|name| {
+                db_labels
+                    .iter()
+                    .find(|l| l.name.eq_ignore_ascii_case(name))
+                    .and_then(|l| l.id.parse().ok())
+            })
+            .collect();
 
         let new_reminder = NewReminder {
             session_id: None,

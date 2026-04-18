@@ -2,9 +2,13 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::llm_prompt::{build_todo_messages, build_retry_messages};
-use crate::engine::local_llm_engine::{EngineSlot, EnginePriority, GenerationParams, LocalLlmError};
-use crate::engine::remote_llm_client::{LlmTodoItem, LlmTodoResponse, RemoteLlmClient, RemoteLlmError};
+use crate::engine::llm_prompt::{build_retry_messages, build_todo_messages};
+use crate::engine::local_llm_engine::{
+    EnginePriority, EngineSlot, GenerationParams, LocalLlmError,
+};
+use crate::engine::remote_llm_client::{
+    LlmTodoItem, LlmTodoResponse, RemoteLlmClient, RemoteLlmError,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -54,12 +58,13 @@ impl LlmRouter {
         &self,
         transcript: &str,
         label_names: &[String],
+        image_data_urls: &[String],
     ) -> Result<Vec<LlmTodoItem>, LlmRouterError> {
         match self {
             LlmRouter::Disabled => Ok(vec![]),
             LlmRouter::Remote(client) => {
                 let items = client
-                    .generate_todos(transcript, label_names)
+                    .generate_todos(transcript, label_names, image_data_urls)
                     .await
                     .map_err(LlmRouterError::Remote)?;
                 Ok(items.into_iter().map(|t| t.validate_and_fix()).collect())
@@ -275,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn disabled_returns_empty_todos() {
         let router = LlmRouter::Disabled;
-        let todos = router.generate_todos("anything", &[]).await.unwrap();
+        let todos = router.generate_todos("anything", &[], &[]).await.unwrap();
         assert!(todos.is_empty());
     }
 }

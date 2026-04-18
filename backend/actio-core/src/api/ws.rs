@@ -1,15 +1,18 @@
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Query, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Query, State,
+    },
     response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use tracing::{info, warn};
 use std::sync::atomic::Ordering;
+use tracing::{info, warn};
+use uuid::Uuid;
 
-use crate::AppState;
 use crate::repository::session;
+use crate::AppState;
 
 #[derive(Serialize)]
 struct WsTranscriptEvent {
@@ -57,7 +60,10 @@ pub async fn ws_session(
 
 async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
     info!(%session_id, "WebSocket session started");
-    state.metrics.active_sessions.fetch_add(1, Ordering::Relaxed);
+    state
+        .metrics
+        .active_sessions
+        .fetch_add(1, Ordering::Relaxed);
 
     let (mut sender, mut receiver) = socket.split();
 
@@ -127,6 +133,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
         _ = send_task => warn!(%session_id, "WebSocket sender closed"),
     }
 
-    state.metrics.active_sessions.fetch_sub(1, Ordering::Relaxed);
+    state
+        .metrics
+        .active_sessions
+        .fetch_sub(1, Ordering::Relaxed);
     info!(%session_id, "WebSocket session ended");
 }

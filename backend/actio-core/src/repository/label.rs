@@ -22,10 +22,7 @@ pub const DEFAULT_LABELS: &[(&str, &str, &str)] = &[
 /// unconditionally on every startup.
 ///
 /// Returns the number of rows actually inserted (0 if skipped).
-pub async fn seed_default_labels(
-    pool: &SqlitePool,
-    tenant_id: Uuid,
-) -> Result<u64, sqlx::Error> {
+pub async fn seed_default_labels(pool: &SqlitePool, tenant_id: Uuid) -> Result<u64, sqlx::Error> {
     let tenant = tenant_id.to_string();
 
     // Skip if any labels already exist for this tenant.
@@ -57,12 +54,10 @@ pub async fn seed_default_labels(
 }
 
 pub async fn list_labels(pool: &SqlitePool, tenant_id: Uuid) -> Result<Vec<Label>, sqlx::Error> {
-    sqlx::query_as::<_, Label>(
-        "SELECT * FROM labels WHERE tenant_id = ?1 ORDER BY name ASC",
-    )
-    .bind(tenant_id.to_string())
-    .fetch_all(pool)
-    .await
+    sqlx::query_as::<_, Label>("SELECT * FROM labels WHERE tenant_id = ?1 ORDER BY name ASC")
+        .bind(tenant_id.to_string())
+        .fetch_all(pool)
+        .await
 }
 
 pub async fn create_label(

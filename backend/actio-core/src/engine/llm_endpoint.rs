@@ -35,7 +35,9 @@ impl LocalLlmEndpoint {
         }
         self.stop().await;
 
-        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().expect("valid socket addr");
+        let addr: SocketAddr = format!("127.0.0.1:{port}")
+            .parse()
+            .expect("valid socket addr");
         let listener = tokio::net::TcpListener::bind(addr).await?;
         info!(%addr, "Local LLM endpoint listener bound");
 

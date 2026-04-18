@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use crate::domain::types::{NewReminder, PatchReminderRequest, Reminder, ReminderFilter, ReminderRow};
+use crate::domain::types::{
+    NewReminder, PatchReminderRequest, Reminder, ReminderFilter, ReminderRow,
+};
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -11,9 +13,9 @@ use crate::domain::types::{NewReminder, PatchReminderRequest, Reminder, Reminder
 /// Returns Some(true) = set now(), Some(false) = clear, None = no change.
 pub fn archived_at_for_status(old_status: &str, new_status: &str) -> Option<bool> {
     match (old_status, new_status) {
-        (s, "archived") if s != "archived" => Some(true),  // set now()
-        (_, "open") | (_, "completed") => Some(false),     // clear
-        _ => None,                                          // no change
+        (s, "archived") if s != "archived" => Some(true), // set now()
+        (_, "open") | (_, "completed") => Some(false),    // clear
+        _ => None,                                        // no change
     }
 }
 
@@ -47,10 +49,7 @@ pub async fn fetch_label_ids(
 
     let mut map: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
     for (rid_str, lid_str) in rows {
-        if let (Ok(rid), Ok(lid)) = (
-            Uuid::parse_str(&rid_str),
-            Uuid::parse_str(&lid_str),
-        ) {
+        if let (Ok(rid), Ok(lid)) = (Uuid::parse_str(&rid_str), Uuid::parse_str(&lid_str)) {
             map.entry(rid).or_default().push(lid);
         }
     }
@@ -164,11 +163,10 @@ pub async fn create_reminder(
 }
 
 pub async fn get_reminder(pool: &SqlitePool, id: Uuid) -> Result<Option<Reminder>, sqlx::Error> {
-    let row: Option<ReminderRow> =
-        sqlx::query_as("SELECT * FROM reminders WHERE id = ?1")
-            .bind(id.to_string())
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<ReminderRow> = sqlx::query_as("SELECT * FROM reminders WHERE id = ?1")
+        .bind(id.to_string())
+        .fetch_optional(pool)
+        .await?;
 
     match row {
         None => Ok(None),
@@ -187,11 +185,10 @@ pub async fn patch_reminder(
     patch: &PatchReminderRequest,
 ) -> Result<Option<Reminder>, sqlx::Error> {
     // Fetch current status for archived_at transition logic
-    let current: Option<(String,)> =
-        sqlx::query_as("SELECT status FROM reminders WHERE id = ?1")
-            .bind(id.to_string())
-            .fetch_optional(pool)
-            .await?;
+    let current: Option<(String,)> = sqlx::query_as("SELECT status FROM reminders WHERE id = ?1")
+        .bind(id.to_string())
+        .fetch_optional(pool)
+        .await?;
 
     let current_status = match current {
         None => return Ok(None),
@@ -265,12 +262,11 @@ pub async fn delete_reminder(pool: &SqlitePool, id: Uuid) -> Result<bool, sqlx::
 
 /// Idempotency check used by todo_generator.
 pub async fn has_reminders(pool: &SqlitePool, session_id: Uuid) -> Result<bool, sqlx::Error> {
-    let row: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM reminders WHERE session_id = ?1)",
-    )
-    .bind(session_id.to_string())
-    .fetch_one(pool)
-    .await?;
+    let row: (bool,) =
+        sqlx::query_as("SELECT EXISTS(SELECT 1 FROM reminders WHERE session_id = ?1)")
+            .bind(session_id.to_string())
+            .fetch_one(pool)
+            .await?;
     Ok(row.0)
 }
 

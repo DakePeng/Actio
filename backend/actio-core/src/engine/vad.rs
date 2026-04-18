@@ -1,6 +1,6 @@
 use std::path::Path;
 use tokio::sync::mpsc;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// A detected speech segment with its audio data
 #[derive(Debug, Clone)]

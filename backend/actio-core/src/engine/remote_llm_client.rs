@@ -59,7 +59,8 @@ impl LlmTodoItem {
         let none_values = ["None", "none", "null", "N/A", "n/a", "unknown", ""];
 
         // title: trim, clear junk
-        self.title = self.title
+        self.title = self
+            .title
             .filter(|v| !none_values.contains(&v.as_str()))
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty());
@@ -68,7 +69,8 @@ impl LlmTodoItem {
         self.description = self.description.trim().to_string();
 
         // priority: normalize to lowercase, accept common variants
-        self.priority = self.priority
+        self.priority = self
+            .priority
             .filter(|v| !none_values.contains(&v.as_str()))
             .and_then(|p| match p.trim().to_lowercase().as_str() {
                 "high" | "h" | "urgent" | "critical" => Some("high".into()),
@@ -78,7 +80,8 @@ impl LlmTodoItem {
             });
 
         // due_time: try multiple formats, keep only if parseable as NaiveDateTime
-        self.due_time = self.due_time
+        self.due_time = self
+            .due_time
             .filter(|v| !none_values.contains(&v.as_str()))
             .and_then(|dt| {
                 let s = dt.trim();
@@ -110,7 +113,9 @@ impl LlmTodoItem {
 
         // labels: trim, remove junk
         self.labels.retain(|v| !none_values.contains(&v.trim()));
-        self.labels.iter_mut().for_each(|l| *l = l.trim().to_string());
+        self.labels
+            .iter_mut()
+            .for_each(|l| *l = l.trim().to_string());
 
         self
     }
@@ -146,13 +151,35 @@ impl RemoteLlmClient {
         &self,
         transcript: &str,
         label_names: &[String],
+        image_data_urls: &[String],
     ) -> Result<Vec<LlmTodoItem>, RemoteLlmError> {
-        info!(transcript_len = transcript.len(), "Calling remote LLM for todo generation");
+        info!(
+            transcript_len = transcript.len(),
+            image_count = image_data_urls.len(),
+            "Calling remote LLM for todo generation"
+        );
 
         let messages = build_todo_messages(transcript, label_names);
         let openai_messages: Vec<serde_json::Value> = messages
             .iter()
-            .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+            .enumerate()
+            .map(|(idx, m)| {
+                // Attach images to the user message (the last one, which carries the transcript).
+                let is_last_user = m.role == "user" && idx == messages.len() - 1;
+                if is_last_user && !image_data_urls.is_empty() {
+                    let mut parts: Vec<serde_json::Value> =
+                        vec![serde_json::json!({"type": "text", "text": m.content})];
+                    for url in image_data_urls {
+                        parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": { "url": url },
+                        }));
+                    }
+                    serde_json::json!({"role": m.role, "content": parts})
+                } else {
+                    serde_json::json!({"role": m.role, "content": m.content})
+                }
+            })
             .collect();
 
         let payload = serde_json::json!({
@@ -171,7 +198,8 @@ impl RemoteLlmClient {
 
         loop {
             attempt += 1;
-            match self.client
+            match self
+                .client
                 .post(&url)
                 .bearer_auth(&self.config.api_key)
                 .json(&payload)
@@ -186,13 +214,19 @@ impl RemoteLlmClient {
                     }
                     match resp.json::<LlmChatResponse>().await {
                         Ok(chat_resp) => {
-                            let content = chat_resp.choices.first()
+                            let content = chat_resp
+                                .choices
+                                .first()
                                 .map(|c| &c.message.content)
                                 .ok_or(RemoteLlmError::InvalidResponse)?;
                             tracing::info!(raw_json = %content, "Remote LLM raw response");
                             let todos: LlmTodoResponse = serde_json::from_str(content)
                                 .map_err(|e| RemoteLlmError::Parse(e.into()))?;
-                            let todos: Vec<_> = todos.todos.into_iter().map(|t| t.validate_and_fix()).collect();
+                            let todos: Vec<_> = todos
+                                .todos
+                                .into_iter()
+                                .map(|t| t.validate_and_fix())
+                                .collect();
                             info!(count = todos.len(), "Remote LLM returned todo items");
                             return Ok(todos);
                         }

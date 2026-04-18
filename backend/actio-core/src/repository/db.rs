@@ -12,10 +12,18 @@ pub async fn create_pool(database_url: &str) -> anyhow::Result<SqlitePool> {
         .context("Failed to connect to SQLite database")?;
 
     // Set SQLite pragmas for desktop app usage
-    sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await?;
-    sqlx::query("PRAGMA busy_timeout = 5000;").execute(&pool).await?;
-    sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
-    sqlx::query("PRAGMA synchronous = NORMAL;").execute(&pool).await?;
+    sqlx::query("PRAGMA journal_mode = WAL;")
+        .execute(&pool)
+        .await?;
+    sqlx::query("PRAGMA busy_timeout = 5000;")
+        .execute(&pool)
+        .await?;
+    sqlx::query("PRAGMA foreign_keys = ON;")
+        .execute(&pool)
+        .await?;
+    sqlx::query("PRAGMA synchronous = NORMAL;")
+        .execute(&pool)
+        .await?;
 
     info!("SQLite database connected with WAL mode");
     Ok(pool)

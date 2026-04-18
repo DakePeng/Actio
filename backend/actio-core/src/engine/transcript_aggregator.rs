@@ -63,13 +63,7 @@ impl TranscriptAggregator {
         segment_id: Option<Uuid>,
     ) -> Result<AggregatedTranscript, sqlx::Error> {
         let t = transcript::create_transcript(
-            &self.pool,
-            session_id,
-            text,
-            start_ms,
-            end_ms,
-            false,
-            segment_id,
+            &self.pool, session_id, text, start_ms, end_ms, false, segment_id,
         )
         .await?;
 
@@ -94,13 +88,7 @@ impl TranscriptAggregator {
         segment_id: Option<Uuid>,
     ) -> Result<AggregatedTranscript, sqlx::Error> {
         let t = transcript::create_transcript(
-            &self.pool,
-            session_id,
-            text,
-            start_ms,
-            end_ms,
-            true,
-            segment_id,
+            &self.pool, session_id, text, start_ms, end_ms, true, segment_id,
         )
         .await?;
 
@@ -122,7 +110,8 @@ impl TranscriptAggregator {
         final_text: &str,
         speaker_id: Option<Uuid>,
     ) -> Result<AggregatedTranscript, sqlx::Error> {
-        let updated = transcript::finalize_transcript(&self.pool, transcript_id, final_text).await?;
+        let updated =
+            transcript::finalize_transcript(&self.pool, transcript_id, final_text).await?;
 
         let display_text = match &speaker_id {
             Some(sid) => {
@@ -155,12 +144,10 @@ impl TranscriptAggregator {
         transcript_id: Uuid,
         speaker_id: Uuid,
     ) -> Result<AggregatedTranscript, sqlx::Error> {
-        let row: (String,) = sqlx::query_as(
-            "SELECT text FROM transcripts WHERE id = ?1"
-        )
-        .bind(transcript_id.to_string())
-        .fetch_one(&self.pool)
-        .await?;
+        let row: (String,) = sqlx::query_as("SELECT text FROM transcripts WHERE id = ?1")
+            .bind(transcript_id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
 
         self.finalize(transcript_id, &row.0, Some(speaker_id)).await
     }

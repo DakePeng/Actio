@@ -7,9 +7,9 @@ use tracing::{info, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::AppState;
-use crate::repository::{session, speaker, transcript, todo};
 use crate::domain::types::{AudioSession, ListSessionsParams, Speaker, TodoItem, Transcript};
+use crate::repository::{session, speaker, todo, transcript};
+use crate::AppState;
 
 #[derive(Serialize, ToSchema)]
 pub struct TodoListResponse {
@@ -59,7 +59,13 @@ pub async fn create_session(
         if !pipeline.is_running() {
             let settings = state.settings_manager.get().await;
             let asr_model = settings.audio.asr_model.as_deref();
-            if let Err(e) = pipeline.start_session(s.id.parse::<Uuid>().unwrap_or_default(), &model_paths, state.aggregator.clone(), None, asr_model) {
+            if let Err(e) = pipeline.start_session(
+                s.id.parse::<Uuid>().unwrap_or_default(),
+                &model_paths,
+                state.aggregator.clone(),
+                None,
+                asr_model,
+            ) {
                 warn!(session_id = %s.id, error = %e, "Failed to start inference pipeline — CRUD-only mode");
             }
         }
@@ -191,7 +197,10 @@ pub async fn get_todo_items(
     let todos = todo::get_todos_for_session(&state.pool, id)
         .await
         .map_err(|e| AppApiError(e.to_string()))?;
-    Ok(Json(TodoListResponse { todos, generated: true }))
+    Ok(Json(TodoListResponse {
+        todos,
+        generated: true,
+    }))
 }
 
 // --- Speaker ---

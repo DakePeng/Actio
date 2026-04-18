@@ -4,6 +4,7 @@ import { BoardWindow } from './components/BoardWindow';
 import { FeedbackToast } from './components/FeedbackToast';
 import { StandbyTray } from './components/StandbyTray';
 import { OnboardingCard } from './components/OnboardingCard';
+import { NewReminderBar } from './components/NewReminderBar';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 
 export default function App() {
@@ -11,10 +12,14 @@ export default function App() {
 
   const hasSeenOnboarding = useStore((s) => s.ui.hasSeenOnboarding);
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
+  const showNewReminderBar = useStore((s) => s.ui.showNewReminderBar);
   const trayExpanded = useStore((s) => s.ui.trayExpanded);
   const reminders = useStore((s) => s.reminders);
   const loadBoard = useStore((s) => s.loadBoard);
   const theme = useStore((s) => s.preferences.theme);
+
+  // Quick-add-only mode: reminder bar is open but board isn't
+  const quickAddOnly = showNewReminderBar && !showBoardWindow;
 
   useEffect(() => {
     void loadBoard();
@@ -82,6 +87,41 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount only
 
+  // Size window for quick-add-only mode (Ctrl+N from tray).
+  // When the reminder bar opens without the board, grow to a compact centered
+  // window; when it closes (still no board), shrink back to the tray.
+  useEffect(() => {
+    const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (!isTauri) return;
+    if (showBoardWindow) return; // board mode owns window sizing
+
+    let cancelled = false;
+    void (async () => {
+      const { invoke } = await import('@tauri-apps/api/core');
+      if (cancelled) return;
+      if (quickAddOnly) {
+        document.body.classList.add('body--quickadd');
+        document.body.classList.remove('body--standby');
+        await invoke('show_quickadd_window').catch((e) =>
+          console.warn('[Actio] show_quickadd_window failed', e),
+        );
+      } else {
+        document.body.classList.remove('body--quickadd');
+        document.body.classList.add('body--standby');
+        await invoke('sync_window_mode', {
+          showBoard: false,
+          trayExpanded: useStore.getState().ui.trayExpanded,
+          reminderCount: useStore.getState().reminders.length,
+          skipAnimation: true,
+        }).catch((e) => console.warn('[Actio] sync_window_mode failed', e));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [quickAddOnly, showBoardWindow]);
+
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'system') {
@@ -92,9 +132,10 @@ export default function App() {
   }, [theme]);
 
   return (
-    <div className={`app-shell${showBoardWindow ? '' : ' app-shell--standby'}`}>
-      <StandbyTray />
+    <div className={`app-shell${showBoardWindow ? '' : ' app-shell--standby'}${quickAddOnly ? ' app-shell--quickadd' : ''}`}>
+      {!quickAddOnly && <StandbyTray />}
       <BoardWindow />
+      {quickAddOnly && <NewReminderBar />}
       <FeedbackToast />
       {showBoardWindow && !hasSeenOnboarding && <OnboardingCard />}
     </div>

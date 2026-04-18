@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -927,7 +927,11 @@ fn build_transducer(model_dir: &PathBuf, prefix: &str) -> Option<TransducerFiles
 fn build_paths(model_dir: &PathBuf) -> ModelPaths {
     let opt = |name: &str| {
         let path = model_dir.join(name);
-        if path.exists() { Some(path) } else { None }
+        if path.exists() {
+            Some(path)
+        } else {
+            None
+        }
     };
 
     let sense_voice = {

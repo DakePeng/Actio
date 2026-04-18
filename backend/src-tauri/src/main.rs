@@ -1,13 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{thread, time::Duration, sync::Arc};
-use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewWindow,
-    utils::config::WindowEffectsConfig, window::Color,
-};
+use actio_core::engine::dictation::DictationService;
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
-use actio_core::engine::dictation::DictationService;
+use std::{sync::Arc, thread, time::Duration};
+use tauri::{
+    utils::config::WindowEffectsConfig, window::Color, AppHandle, Emitter, LogicalPosition,
+    LogicalSize, Manager, WebviewWindow,
+};
 
 const STANDBY_TRAY_WIDTH: f64 = 320.0;
 const STANDBY_TRAY_EXPANDED_WIDTH: f64 = 440.0;
@@ -247,7 +247,9 @@ fn apply_window_mode(
         if skip_animation {
             window.set_size(LogicalSize::new(next_width, next_height))?;
             window.set_position(LogicalPosition::new(standby_x, standby_y))?;
-        } else if let (Some(current_size), Some(current_position)) = (current_size, current_position) {
+        } else if let (Some(current_size), Some(current_position)) =
+            (current_size, current_position)
+        {
             let start_width = current_size.width as f64 / scale_factor;
             let start_height = current_size.height as f64 / scale_factor;
             let start_x = current_position.x as f64 / scale_factor;
@@ -432,6 +434,49 @@ fn sync_window_mode(
 }
 
 #[tauri::command]
+fn show_quickadd_window(window: WebviewWindow) -> Result<(), String> {
+    const QUICKADD_WIDTH: f64 = 640.0;
+    const QUICKADD_HEIGHT: f64 = 380.0;
+
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .ok_or("no monitor found")?;
+
+    let work_area = monitor.work_area();
+    let scale_factor = monitor.scale_factor();
+    let work_x = work_area.position.x as f64 / scale_factor;
+    let work_y = work_area.position.y as f64 / scale_factor;
+    let work_width = work_area.size.width as f64 / scale_factor;
+    let work_height = work_area.size.height as f64 / scale_factor;
+
+    window
+        .set_min_size(None::<LogicalSize<f64>>)
+        .map_err(|e| e.to_string())?;
+    window
+        .set_max_size(None::<LogicalSize<f64>>)
+        .map_err(|e| e.to_string())?;
+    window.set_always_on_top(true).map_err(|e| e.to_string())?;
+    window.set_skip_taskbar(true).map_err(|e| e.to_string())?;
+    window.set_decorations(false).map_err(|e| e.to_string())?;
+    set_window_background_transparent(&window).map_err(|e| e.to_string())?;
+
+    // Anchor near the bottom-center of the work area so it slides in from below.
+    let x = work_x + (work_width - QUICKADD_WIDTH) / 2.0;
+    let y = work_y + work_height - QUICKADD_HEIGHT - 32.0;
+    window
+        .set_size(LogicalSize::new(QUICKADD_WIDTH, QUICKADD_HEIGHT))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_position(LogicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn start_dictation(
     app: tauri::AppHandle,
     dictation: tauri::State<Arc<DictationService>>,
@@ -453,20 +498,28 @@ fn stop_dictation(
 
 #[tauri::command]
 fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     use tauri_plugin_clipboard_manager::ClipboardExt;
-    use enigo::{Enigo, Keyboard, Key, Direction, Settings};
 
     // Write transcript to system clipboard
-    app.clipboard().write_text(&text).map_err(|e| e.to_string())?;
+    app.clipboard()
+        .write_text(&text)
+        .map_err(|e| e.to_string())?;
 
     // Small delay to let the clipboard settle
     thread::sleep(Duration::from_millis(50));
 
     // Simulate Ctrl+V to paste into the focused input
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-    enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
-    enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
-    enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
+    enigo
+        .key(Key::Control, Direction::Press)
+        .map_err(|e| e.to_string())?;
+    enigo
+        .key(Key::Unicode('v'), Direction::Click)
+        .map_err(|e| e.to_string())?;
+    enigo
+        .key(Key::Control, Direction::Release)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -478,7 +531,9 @@ fn reregister_shortcuts(
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
     // Unregister all existing global shortcuts
-    app.global_shortcut().unregister_all().map_err(|e| e.to_string())?;
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|e| e.to_string())?;
 
     // Re-register the global ones from the new map
     let global_actions = ["toggle_board_tray", "start_dictation", "new_todo"];
@@ -488,12 +543,14 @@ fn reregister_shortcuts(
             if let Ok(shortcut) = combo.parse::<tauri_plugin_global_shortcut::Shortcut>() {
                 let action_str = action.to_string();
                 let app_clone = app.clone();
-                let _ = app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
-                    use tauri_plugin_global_shortcut::ShortcutState;
-                    if event.state == ShortcutState::Pressed {
-                        let _ = app_clone.emit("shortcut-triggered", &action_str);
-                    }
-                });
+                let _ =
+                    app.global_shortcut()
+                        .on_shortcut(shortcut, move |_app, _shortcut, event| {
+                            use tauri_plugin_global_shortcut::ShortcutState;
+                            if event.state == ShortcutState::Pressed {
+                                let _ = app_clone.emit("shortcut-triggered", &action_str);
+                            }
+                        });
             } else {
                 tracing::warn!(combo = %combo, action = %action, "reregister_shortcuts: failed to parse shortcut");
             }
@@ -508,14 +565,25 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![sync_window_mode, save_tray_position, reset_tray_position, get_tray_bounds, start_dictation, stop_dictation, paste_text, reregister_shortcuts])
+        .invoke_handler(tauri::generate_handler![
+            sync_window_mode,
+            save_tray_position,
+            reset_tray_position,
+            get_tray_bounds,
+            show_quickadd_window,
+            start_dictation,
+            stop_dictation,
+            paste_text,
+            reregister_shortcuts
+        ])
         .setup(|app| {
             app.manage(Arc::new(DictationService::new()));
             // Resolve app data directory for database and models
-            let data_dir = app.path().app_data_dir()
+            let data_dir = app
+                .path()
+                .app_data_dir()
                 .expect("failed to resolve app_data_dir");
-            std::fs::create_dir_all(&data_dir)
-                .expect("failed to create app_data_dir");
+            std::fs::create_dir_all(&data_dir).expect("failed to create app_data_dir");
 
             eprintln!("[actio] data_dir = {}", data_dir.display());
             eprintln!("[actio] model_dir = {}", data_dir.join("models").display());

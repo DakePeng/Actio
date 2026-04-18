@@ -22,10 +22,7 @@ impl DictationService {
     }
 
     pub fn is_active(&self) -> bool {
-        matches!(
-            *self.state.lock().unwrap(),
-            DictationState::Listening
-        )
+        matches!(*self.state.lock().unwrap(), DictationState::Listening)
     }
 
     /// Start a dictation session. Returns Ok if session started, Err if already active.

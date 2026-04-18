@@ -13,8 +13,7 @@ impl LlmConfig {
         Some(Self {
             base_url,
             api_key,
-            model: std::env::var("LLM_MODEL")
-                .unwrap_or_else(|_| "gpt-4o-mini".into()),
+            model: std::env::var("LLM_MODEL").unwrap_or_else(|_| "gpt-4o-mini".into()),
         })
     }
 }

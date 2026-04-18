@@ -28,22 +28,21 @@ pub async fn start_llm_load(
     Json(req): Json<LoadLlmRequest>,
 ) -> Result<StatusCode, AppApiError> {
     let source = state.settings_manager.get().await.llm.download_source;
-    state.engine_slot.start_load(req.llm_id, source, &state.llm_downloader).await;
+    state
+        .engine_slot
+        .start_load(req.llm_id, source, &state.llm_downloader)
+        .await;
     Ok(StatusCode::ACCEPTED)
 }
 
 /// POST /settings/llm/cancel-load — cancel an in-progress load.
-pub async fn cancel_llm_load(
-    State(state): State<AppState>,
-) -> StatusCode {
+pub async fn cancel_llm_load(State(state): State<AppState>) -> StatusCode {
     state.engine_slot.cancel_load().await;
     StatusCode::OK
 }
 
 /// GET /settings/llm/load-status — current loading state.
-pub async fn llm_load_status(
-    State(state): State<AppState>,
-) -> Json<LoadStatus> {
+pub async fn llm_load_status(State(state): State<AppState>) -> Json<LoadStatus> {
     Json(state.engine_slot.load_status().await)
 }
 
@@ -200,10 +199,10 @@ pub async fn openai_chat_completions(
     State(state): State<AppState>,
     Json(req): Json<OpenAiChatRequest>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
     use crate::engine::llm_prompt::ChatMessage;
     use crate::engine::llm_router::LlmSelection;
     use crate::engine::local_llm_engine::{EnginePriority, GenerationParams};
+    use axum::response::IntoResponse;
 
     // Determine the target model: check loaded engine first, then fall
     // back to the configured selection for lazy cold-start.
@@ -212,23 +211,21 @@ pub async fn openai_chat_completions(
         None => {
             let settings = state.settings_manager.get().await;
             match &settings.llm.selection {
-                LlmSelection::Local { id } => {
-                    match state.engine_slot.get_or_load(id).await {
-                        Ok(engine) => engine.loaded_id().to_string(),
-                        Err(e) => {
-                            return (
-                                StatusCode::SERVICE_UNAVAILABLE,
-                                Json(OpenAiErrorEnvelope {
-                                    error: OpenAiErrorBody {
-                                        message: format!("failed to load local model: {e}"),
-                                        kind: "engine_load_failed",
-                                    },
-                                }),
-                            )
-                                .into_response();
-                        }
+                LlmSelection::Local { id } => match state.engine_slot.get_or_load(id).await {
+                    Ok(engine) => engine.loaded_id().to_string(),
+                    Err(e) => {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(OpenAiErrorEnvelope {
+                                error: OpenAiErrorBody {
+                                    message: format!("failed to load local model: {e}"),
+                                    kind: "engine_load_failed",
+                                },
+                            }),
+                        )
+                            .into_response();
                     }
-                }
+                },
                 _ => {
                     return (
                         StatusCode::SERVICE_UNAVAILABLE,
@@ -303,7 +300,10 @@ pub async fn openai_chat_completions(
 
     let is_stream = req.stream.unwrap_or(false);
 
-    match engine.chat_completion(messages, params, EnginePriority::External).await {
+    match engine
+        .chat_completion(messages, params, EnginePriority::External)
+        .await
+    {
         Ok(content) => {
             let id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
             let created = std::time::SystemTime::now()

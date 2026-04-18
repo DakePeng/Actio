@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -316,7 +316,10 @@ mod tests {
         }"#;
         let mut settings: AppSettings = serde_json::from_str(json).unwrap();
         migrate_legacy_selection(&mut settings.llm);
-        assert_eq!(settings.llm.remote.base_url.as_deref(), Some("https://api.openai.com/v1"));
+        assert_eq!(
+            settings.llm.remote.base_url.as_deref(),
+            Some("https://api.openai.com/v1")
+        );
         assert_eq!(settings.llm.remote.api_key.as_deref(), Some("sk-legacy"));
         assert_eq!(settings.llm.remote.model.as_deref(), Some("gpt-4o-mini"));
         assert_eq!(settings.llm.selection, LlmSelection::Remote);
@@ -352,7 +355,10 @@ mod tests {
             LlmSelection::Local { ref id } if id == "qwen3.5-0.8b"
         ));
         assert_eq!(settings.llm.local_endpoint_port, 11434);
-        assert_eq!(settings.llm.remote.base_url.as_deref(), Some("https://example.com/v1"));
+        assert_eq!(
+            settings.llm.remote.base_url.as_deref(),
+            Some("https://example.com/v1")
+        );
     }
 
     #[test]

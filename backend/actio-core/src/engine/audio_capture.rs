@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use crossbeam_channel::{bounded, Sender, Receiver};
+use crossbeam_channel::{bounded, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -15,18 +15,19 @@ pub struct AudioDeviceInfo {
 /// Lists available audio input devices
 pub fn list_devices() -> Vec<AudioDeviceInfo> {
     let host = cpal::default_host();
-    let default_name = host.default_input_device()
-        .and_then(|d| d.name().ok());
+    let default_name = host.default_input_device().and_then(|d| d.name().ok());
 
     host.input_devices()
         .map(|devices| {
-            devices.filter_map(|d| {
-                let name = d.name().ok()?;
-                Some(AudioDeviceInfo {
-                    is_default: default_name.as_deref() == Some(&name),
-                    name,
+            devices
+                .filter_map(|d| {
+                    let name = d.name().ok()?;
+                    Some(AudioDeviceInfo {
+                        is_default: default_name.as_deref() == Some(&name),
+                        name,
+                    })
                 })
-            }).collect()
+                .collect()
         })
         .unwrap_or_default()
 }
@@ -74,14 +75,18 @@ fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 ///
 /// The device is opened at its native sample rate and channel count.
 /// Audio is downmixed to mono and resampled to 16kHz in the callback.
-pub fn start_capture(device_name: Option<&str>) -> anyhow::Result<(AudioCaptureHandle, mpsc::Receiver<Vec<f32>>)> {
+pub fn start_capture(
+    device_name: Option<&str>,
+) -> anyhow::Result<(AudioCaptureHandle, mpsc::Receiver<Vec<f32>>)> {
     let host = cpal::default_host();
 
     let device = match device_name {
-        Some(name) => host.input_devices()?
+        Some(name) => host
+            .input_devices()?
             .find(|d| d.name().ok().as_deref() == Some(name))
             .ok_or_else(|| anyhow::anyhow!("Audio device not found: {}", name))?,
-        None => host.default_input_device()
+        None => host
+            .default_input_device()
             .ok_or_else(|| anyhow::anyhow!("No default audio input device"))?,
     };
 
@@ -139,7 +144,9 @@ pub fn start_capture(device_name: Option<&str>) -> anyhow::Result<(AudioCaptureH
                 mono
             };
 
-            metrics_cb.frames_captured.fetch_add(resampled.len() as u64, Ordering::Relaxed);
+            metrics_cb
+                .frames_captured
+                .fetch_add(resampled.len() as u64, Ordering::Relaxed);
             if cb_tx.try_send(resampled).is_err() {
                 metrics_cb.frames_dropped.fetch_add(1, Ordering::Relaxed);
             }
@@ -151,7 +158,10 @@ pub fn start_capture(device_name: Option<&str>) -> anyhow::Result<(AudioCaptureH
     )?;
 
     stream.play()?;
-    info!(target_rate = 16000, "Audio capture started (resampling from {}Hz)", device_rate);
+    info!(
+        target_rate = 16000,
+        "Audio capture started (resampling from {}Hz)", device_rate
+    );
 
     // Bridge: crossbeam sync channel → tokio mpsc async channel
     let (tx, rx) = mpsc::channel::<Vec<f32>>(8000);
@@ -173,8 +183,16 @@ pub fn start_capture(device_name: Option<&str>) -> anyhow::Result<(AudioCaptureH
                     sample_count += chunk.len() as u64;
                     chunk_count += 1;
                     if chunk_count % 150 == 0 {
-                        let rms = if sample_count > 0 { (rms_sum / sample_count as f64).sqrt() } else { 0.0 };
-                        info!(rms = format!("{rms:.6}"), samples = sample_count, "Audio level check");
+                        let rms = if sample_count > 0 {
+                            (rms_sum / sample_count as f64).sqrt()
+                        } else {
+                            0.0
+                        };
+                        info!(
+                            rms = format!("{rms:.6}"),
+                            samples = sample_count,
+                            "Audio level check"
+                        );
                         rms_sum = 0.0;
                         sample_count = 0;
                     }
