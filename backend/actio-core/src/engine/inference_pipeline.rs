@@ -1,4 +1,6 @@
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -6,7 +8,7 @@ use crate::engine::asr;
 use crate::engine::audio_capture::{self, AudioCaptureHandle};
 use crate::engine::model_manager::ModelPaths;
 use crate::engine::transcript_aggregator::TranscriptAggregator;
-use crate::engine::vad::{self, VadConfig};
+use crate::engine::vad::{self, SpeechSegment, VadConfig};
 
 pub struct InferencePipeline {
     /// The capture handle — dropping it stops capture
@@ -49,16 +51,32 @@ impl InferencePipeline {
         let chosen = asr_model.unwrap_or("auto");
         info!(model = chosen, "Selected ASR model");
 
-        // Helper: start VAD → offline ASR pipeline (shared by all offline models).
-        let start_vad_pipeline =
-            |audio_rx: tokio::sync::mpsc::Receiver<Vec<f32>>| -> anyhow::Result<_> {
-                if !model_paths.silero_vad.exists() {
-                    return Err(anyhow::anyhow!(
-                        "Silero VAD not found — required for offline models"
-                    ));
-                }
-                vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)
-            };
+        if model_paths.speaker_embedding.is_none() {
+            info!("Speaker embedding model not loaded — segments will stay [UNKNOWN]");
+        }
+
+        // Helper: start VAD, then fan each speech segment into (a) a per-segment
+        // speaker-identification task and (b) the downstream offline ASR
+        // consumer. Streaming ASR paths do not go through this helper — they
+        // consume raw audio directly and skip per-segment identification.
+        let embedding_model = model_paths.speaker_embedding.clone();
+        let pool = aggregator.pool();
+        let start_vad_pipeline = |audio_rx: mpsc::Receiver<Vec<f32>>| -> anyhow::Result<_> {
+            if !model_paths.silero_vad.exists() {
+                return Err(anyhow::anyhow!(
+                    "Silero VAD not found — required for offline models"
+                ));
+            }
+            let upstream =
+                vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)?;
+            Ok(split_segments_for_speaker_id(
+                upstream,
+                session_id,
+                Uuid::nil(),
+                pool.clone(),
+                embedding_model.clone(),
+            ))
+        };
 
         let transcript_rx = if let Some(files) = model_paths.transducers.get(chosen) {
             // ── Streaming transducer (any model in the table) ────────
@@ -201,4 +219,113 @@ impl Drop for InferencePipeline {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// Interpose between VAD output and the downstream (offline-ASR) consumer.
+/// Each `SpeechSegment` is forwarded unchanged to the returned receiver AND
+/// a detached task is spawned to extract a speaker embedding, identify the
+/// speaker, and persist an `audio_segments` row.
+///
+/// When the embedding model is absent, the task still writes a segment row
+/// with a NULL speaker so retroactive tagging has something to point at.
+fn split_segments_for_speaker_id(
+    mut upstream: mpsc::Receiver<SpeechSegment>,
+    session_id: Uuid,
+    tenant_id: Uuid,
+    pool: sqlx::SqlitePool,
+    embedding_model: Option<PathBuf>,
+) -> mpsc::Receiver<SpeechSegment> {
+    let (tx, rx) = mpsc::channel::<SpeechSegment>(32);
+    tokio::spawn(async move {
+        while let Some(seg) = upstream.recv().await {
+            let start_ms = (seg.start_sample as i64 * 1000) / 16000;
+            let end_ms = (seg.end_sample as i64 * 1000) / 16000;
+            let audio_clone = seg.audio.clone();
+            let pool_c = pool.clone();
+            let emb_c = embedding_model.clone();
+
+            tokio::spawn(async move {
+                if let Err(e) = handle_segment_embedding(
+                    &pool_c, emb_c, session_id, tenant_id, start_ms, end_ms, audio_clone,
+                )
+                .await
+                {
+                    warn!(%session_id, error = %e, "segment speaker-id hook failed");
+                }
+            });
+
+            if tx.send(seg).await.is_err() {
+                break; // downstream ASR consumer went away
+            }
+        }
+    });
+    rx
+}
+
+/// Persist a single VAD segment along with its speaker identification.
+///
+/// Order of operations:
+/// 1. If no embedding model is loaded: insert the row with NULL speaker + NULL
+///    embedding so the user can still retroactively tag it.
+/// 2. Extract the embedding; on failure, insert the row with NULL speaker and
+///    NULL embedding (same outcome as step 1 for this segment).
+/// 3. Run `identify_speaker` against the tenant's enrolled voiceprints. If
+///    `accepted`, write the matched speaker id; otherwise NULL. In both cases
+///    the embedding is persisted on the row so it can be promoted later.
+async fn handle_segment_embedding(
+    pool: &sqlx::SqlitePool,
+    embedding_model: Option<PathBuf>,
+    session_id: Uuid,
+    tenant_id: Uuid,
+    start_ms: i64,
+    end_ms: i64,
+    audio: Vec<f32>,
+) -> anyhow::Result<Option<String>> {
+    let Some(model_path) = embedding_model else {
+        crate::repository::segment::insert_segment(
+            pool, session_id, start_ms, end_ms, None, None, None,
+        )
+        .await?;
+        return Ok(None);
+    };
+
+    let emb = match crate::engine::diarization::extract_embedding(&model_path, &audio).await {
+        Ok(e) => e,
+        Err(err) => {
+            warn!(?err, "speaker embedding failed; segment marked UNKNOWN");
+            crate::repository::segment::insert_segment(
+                pool, session_id, start_ms, end_ms, None, None, None,
+            )
+            .await?;
+            return Ok(None);
+        }
+    };
+
+    let result =
+        crate::domain::speaker_matcher::identify_speaker(pool, &emb.values, tenant_id, 5)
+            .await
+            .unwrap_or(crate::domain::speaker_matcher::SpeakerMatchResult {
+                speaker_id: None,
+                similarity_score: 0.0,
+                z_norm_score: 0.0,
+                accepted: false,
+            });
+
+    let speaker_id = result
+        .speaker_id
+        .as_ref()
+        .and_then(|s| Uuid::parse_str(s).ok());
+
+    crate::repository::segment::insert_segment(
+        pool,
+        session_id,
+        start_ms,
+        end_ms,
+        speaker_id,
+        Some(result.similarity_score),
+        Some(&emb.values),
+    )
+    .await?;
+
+    Ok(result.speaker_id)
 }

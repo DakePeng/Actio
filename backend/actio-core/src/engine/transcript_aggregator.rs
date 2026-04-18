@@ -29,6 +29,13 @@ impl TranscriptAggregator {
         self.events.subscribe()
     }
 
+    /// Shared handle to the underlying pool. Used by out-of-band writers like
+    /// the per-segment speaker-identification hook so they don't have to be
+    /// threaded a separate clone of the pool.
+    pub fn pool(&self) -> sqlx::SqlitePool {
+        self.pool.clone()
+    }
+
     /// Number of currently-attached broadcast receivers. Used by the
     /// pipeline supervisor to decide whether to keep the always-on
     /// recognizer warm or hibernate it to free RAM.

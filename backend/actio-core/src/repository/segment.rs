@@ -74,6 +74,44 @@ pub async fn unassign_speaker(pool: &SqlitePool, segment_id: Uuid) -> Result<boo
     Ok(r.rows_affected() > 0)
 }
 
+/// Insert an audio_segments row, optionally attaching a pre-computed embedding
+/// and speaker identification result. Used by the live inference pipeline as
+/// each VAD-detected segment completes.
+pub async fn insert_segment(
+    pool: &SqlitePool,
+    session_id: Uuid,
+    start_ms: i64,
+    end_ms: i64,
+    speaker_id: Option<Uuid>,
+    speaker_score: Option<f64>,
+    embedding: Option<&[f32]>,
+) -> Result<Uuid, sqlx::Error> {
+    let id = Uuid::new_v4().to_string();
+    let (blob, dim) = match embedding {
+        Some(e) => (
+            Some(bytemuck::cast_slice::<f32, u8>(e).to_vec()),
+            Some(e.len() as i64),
+        ),
+        None => (None, None),
+    };
+    sqlx::query(
+        "INSERT INTO audio_segments \
+           (id, session_id, start_ms, end_ms, speaker_id, speaker_score, embedding, embedding_dim) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )
+    .bind(&id)
+    .bind(session_id.to_string())
+    .bind(start_ms)
+    .bind(end_ms)
+    .bind(speaker_id.map(|u| u.to_string()))
+    .bind(speaker_score)
+    .bind(blob)
+    .bind(dim)
+    .execute(pool)
+    .await?;
+    Uuid::parse_str(&id).map_err(|e| sqlx::Error::Decode(Box::new(e)))
+}
+
 pub async fn has_primary_embedding(
     pool: &SqlitePool,
     speaker_id: Uuid,
