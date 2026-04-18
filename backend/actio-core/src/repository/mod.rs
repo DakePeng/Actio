@@ -1,6 +1,7 @@
 pub mod db;
 pub mod label;
 pub mod reminder;
+pub mod segment;
 pub mod session;
 pub mod speaker;
 pub mod todo;
