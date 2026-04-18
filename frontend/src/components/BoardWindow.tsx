@@ -6,6 +6,7 @@ import { ArchiveView } from './ArchiveView';
 import { SettingsView } from './settings/SettingsView';
 import { RecordingTab } from './RecordingTab';
 import { PeopleTab } from './PeopleTab';
+import { CandidatePromptModal } from './CandidatePromptModal';
 import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -153,6 +154,8 @@ export function BoardWindow() {
     : { type: 'spring' as const, stiffness: 260, damping: 24 };
 
   return (
+    <>
+      <CandidatePromptModal />
     <AnimatePresence onExitComplete={() => void handleExitComplete()}>
       {showBoardWindow && (
         <>
@@ -214,5 +217,6 @@ export function BoardWindow() {
         </>
       )}
     </AnimatePresence>
+    </>
   );
 }

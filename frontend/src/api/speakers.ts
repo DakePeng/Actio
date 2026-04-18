@@ -4,6 +4,7 @@ import type {
   EnrollResponse,
   Speaker,
   UnknownSegment,
+  VoiceprintCandidate,
 } from '../types/speaker';
 import { getApiUrl } from './backend-url';
 import { DEV_TENANT_ID } from './actio-api';
@@ -104,4 +105,37 @@ export async function assignSegment(
 
 export async function unassignSegment(segmentId: string): Promise<void> {
   await requestJson<void>(`/segments/${segmentId}/unassign`, { method: 'POST' });
+}
+
+/** Phase-C: clusters of retained unknown-voice clips ready to be named. */
+export async function listCandidates(): Promise<VoiceprintCandidate[]> {
+  return requestJson<VoiceprintCandidate[]>('/candidates');
+}
+
+export async function confirmCandidate(input: {
+  display_name: string;
+  color: string;
+  member_segment_ids: string[];
+}): Promise<Speaker> {
+  return requestJson<Speaker>('/candidates/confirm', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function dismissCandidate(
+  member_segment_ids: string[],
+): Promise<void> {
+  await requestJson<void>('/candidates/dismiss', {
+    method: 'POST',
+    body: JSON.stringify({ member_segment_ids }),
+  });
+}
+
+/** Returns a fetchable URL for the retained clip so <audio> can play it.
+ *  Resolves the backend base URL lazily so port autodiscovery still works. */
+export async function candidateClipUrl(audioRef: string): Promise<string> {
+  const encoded = encodeURIComponent(audioRef);
+  const { getApiUrl } = await import('./backend-url');
+  return getApiUrl(`/candidates/audio/${encoded}`);
 }

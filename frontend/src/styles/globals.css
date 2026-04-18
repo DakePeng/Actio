@@ -1609,22 +1609,19 @@ body.body--native-board .desktop-window__body .board-shell {
 
 @keyframes cardSpotlight {
   0% {
-  transform: scale(0.985);
+    transform: scale(0.985);
     box-shadow: 0 0 0 0 var(--color-accent);
     border-color: var(--color-accent);
-    background: rgba(255, 244, 236, 0.98);
   }
   45% {
-  transform: scale(1.01);
+    transform: scale(1.01);
     box-shadow: 0 0 0 10px var(--color-accent);
     border-color: var(--color-accent);
-    background: rgba(255, 248, 242, 0.98);
   }
   100% {
-  transform: scale(1);
+    transform: scale(1);
     box-shadow: var(--shadow-card-md);
     border-color: var(--color-accent);
-    background: var(--color-surface-glass-medium);
   }
 }
 
@@ -4394,4 +4391,65 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   border: 1px dashed rgba(100, 181, 246, 0.5);
   font-size: 0.85rem;
   opacity: 0.85;
+}
+
+/* Candidate Prompt Modal (Phase C) */
+.candidate-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.candidate-modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+  width: min(440px, 92vw);
+  padding: 1.25rem 1.25rem 1rem;
+}
+.candidate-modal__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.candidate-modal__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0;
+}
+.candidate-modal__meta {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin: 0;
+}
+.candidate-modal__audio {
+  width: 100%;
+  min-height: 44px;
+}
+.candidate-modal__audio--loading {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+.candidate-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.candidate-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.candidate-modal__error {
+  color: #c0392b;
+  font-size: 0.85rem;
+  margin: 0;
 }

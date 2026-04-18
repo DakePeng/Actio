@@ -35,3 +35,18 @@ export interface AssignSegmentResult {
   segment_id: string;
   speaker_id: string;
 }
+
+/** Phase-C voiceprint-candidate: one cluster of retained unknown-voice clips
+ *  that has cleared the evidence bar (≥5 occurrences, ≥60 s cumulative,
+ *  ≥2 distinct sessions). Drives the "who was this?" prompt modal. */
+export interface VoiceprintCandidate {
+  candidate_id: string;
+  representative_segment_id: string;
+  audio_ref: string;
+  session_id: string;
+  occurrences: number;
+  total_duration_ms: number;
+  earliest_ms: number;
+  latest_ms: number;
+  member_segment_ids: string[];
+}
