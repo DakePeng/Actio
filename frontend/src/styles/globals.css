@@ -4162,16 +4162,24 @@ body.body--native-board .desktop-window {
   pointer-events: none;
 }
 
-.card--skeleton .card-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 18px 16px;
+/* Subtle accent bar on the left — matches real card's .reminder-accent */
+.card--skeleton .reminder-accent {
+  background: linear-gradient(
+    180deg,
+    var(--color-border, #e4e4e7) 0%,
+    var(--color-border-strong, #d4d4d8) 50%,
+    var(--color-border, #e4e4e7) 100%
+  );
+  background-size: 100% 200%;
+  animation: shimmer-vertical 1.5s ease-in-out infinite;
 }
 
-.skeleton-line {
-  height: 14px;
-  border-radius: 4px;
+/* Shimmer primitives — all derive from the same gradient keyframe so
+   every element moves in visual sync. */
+.skeleton-line,
+.skeleton-badge,
+.skeleton-chip,
+.skeleton-dot {
   background: linear-gradient(
     90deg,
     var(--color-border, #e4e4e7) 0%,
@@ -4182,17 +4190,90 @@ body.body--native-board .desktop-window {
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
-.skeleton-line--short {
-  width: 60%;
+.skeleton-line {
+  height: 14px;
+  border-radius: 4px;
 }
 
-.skeleton-line--long {
-  width: 90%;
+/* Title: bolder than description lines, ~70% width. */
+.skeleton-line--title {
+  height: 18px;
+  width: 78%;
+  margin-top: 2px;
 }
+
+/* Description: two lines of descending length, matching the 2-line clamp
+   on a real card's description. */
+.skeleton-line--desc {
+  height: 13px;
+  width: 94%;
+}
+.skeleton-line--desc-short {
+  height: 13px;
+  width: 72%;
+}
+
+/* Small inline lines inside the meta row. */
+.skeleton-line--meta {
+  height: 11px;
+  width: 72px;
+  display: inline-block;
+}
+.skeleton-line--meta-short {
+  height: 11px;
+  width: 48px;
+  display: inline-block;
+}
+
+/* The priority badge placeholder in the card-head. */
+.skeleton-badge {
+  display: inline-block;
+  height: 18px;
+  width: 92px;
+  border-radius: 999px;
+}
+
+/* Clock-icon stand-in in the meta row. */
+.skeleton-dot {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+/* Label-chip placeholders. */
+.skeleton-chip {
+  display: inline-block;
+  height: 18px;
+  border-radius: 999px;
+}
+
+/* The AI mini-badge gets its own pulsing gradient so the user sees
+   something alive-and-working rather than just grey shimmer. */
+.skeleton-ai-badge {
+  animation: ai-badge-pulse 1.6s ease-in-out infinite;
+}
+
+/* Legacy .skeleton-line--short / --long kept in case anything else
+   in the codebase still uses them. */
+.skeleton-line--short { width: 60%; }
+.skeleton-line--long  { width: 90%; }
 
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
+  0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+@keyframes shimmer-vertical {
+  0%   { background-position: 0 200%; }
+  100% { background-position: 0 -200%; }
+}
+
+@keyframes ai-badge-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.75; transform: scale(0.96); }
 }
 
 /* ── AI badge ────────────────────────────────────────── */
