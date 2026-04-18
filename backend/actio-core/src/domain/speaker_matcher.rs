@@ -90,28 +90,26 @@ pub async fn save_embedding(
     quality_score: f64,
     is_primary: bool,
 ) -> Result<Uuid, sqlx::Error> {
-    let emb_str: String = embedding
-        .iter()
-        .map(|v| v.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let vector_str = format!("[{}]", emb_str);
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = Uuid::new_v4().to_string();
+    let blob: &[u8] = bytemuck::cast_slice(embedding);
+    let dim = embedding.len() as i64;
 
     let row: (String,) = sqlx::query_as(
-        "INSERT INTO speaker_embeddings (id, speaker_id, embedding, duration_ms, quality_score, is_primary, embedding_dimension) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 192) RETURNING id",
+        "INSERT INTO speaker_embeddings \
+           (id, speaker_id, embedding, duration_ms, quality_score, is_primary, embedding_dimension) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id",
     )
     .bind(&id)
     .bind(speaker_id.to_string())
-    .bind(vector_str)
+    .bind(blob)
     .bind(duration_ms)
     .bind(quality_score)
-    .bind(is_primary)
+    .bind(is_primary as i64)
+    .bind(dim)
     .fetch_one(pool)
     .await?;
 
-    Ok(Uuid::parse_str(&row.0).unwrap_or_else(|_| Uuid::nil()))
+    Uuid::parse_str(&row.0).map_err(|e| sqlx::Error::Decode(Box::new(e)))
 }
 
 fn compute_stats(values: &[f64]) -> (f64, f64) {
@@ -127,6 +125,22 @@ fn compute_stats(values: &[f64]) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repository::db::run_migrations;
+    use crate::repository::speaker::create_speaker;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn fresh_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
 
     #[test]
     fn test_compute_stats() {
@@ -140,5 +154,34 @@ mod tests {
         let (mean, std) = compute_stats(&[]);
         assert_eq!(mean, 0.0);
         assert_eq!(std, 0.0);
+    }
+
+    #[tokio::test]
+    async fn save_and_load_embedding_roundtrip() {
+        let pool = fresh_pool().await;
+        let s = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        let sid = Uuid::parse_str(&s.id).unwrap();
+
+        // Arbitrary 512-dim embedding with recognisable bit patterns
+        let emb: Vec<f32> = (0..512).map(|i| i as f32 / 100.0).collect();
+        let id = save_embedding(&pool, sid, &emb, 10_000.0, 0.8, true)
+            .await
+            .unwrap();
+        assert_ne!(id, Uuid::nil());
+
+        // Read back via a direct query and decode
+        let row: (Vec<u8>, i64) = sqlx::query_as(
+            "SELECT embedding, embedding_dimension FROM speaker_embeddings \
+             WHERE speaker_id = ?1",
+        )
+        .bind(sid.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.1, 512);
+        let decoded: &[f32] = bytemuck::cast_slice(&row.0);
+        assert_eq!(decoded, emb.as_slice());
     }
 }
