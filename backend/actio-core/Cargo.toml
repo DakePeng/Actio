@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # HTTP / WebSocket
-axum = { version = "0.7", features = ["ws", "macros"] }
+axum = { version = "0.7", features = ["ws", "macros", "multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
@@ -30,6 +30,7 @@ sherpa-onnx = { version = "1.12.36", default-features = false, features = ["shar
 # Audio capture
 cpal = "0.15"
 crossbeam-channel = "0.5"
+hound = "3.5"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 

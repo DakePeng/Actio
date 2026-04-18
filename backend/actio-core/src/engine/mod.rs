@@ -16,3 +16,4 @@ pub mod remote_llm_client;
 pub mod todo_generator;
 pub mod transcript_aggregator;
 pub mod vad;
+pub mod wav;
