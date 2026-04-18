@@ -205,10 +205,15 @@ pub async fn get_todo_items(
 
 // --- Speaker ---
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateSpeakerRequest {
-    pub tenant_id: Option<Uuid>,
     pub display_name: String,
+    #[serde(default = "default_color")]
+    pub color: String,
+}
+
+fn default_color() -> String {
+    "#64B5F6".into()
 }
 
 #[utoipa::path(
@@ -226,8 +231,8 @@ pub async fn create_speaker(
     headers: HeaderMap,
     Json(req): Json<CreateSpeakerRequest>,
 ) -> Result<(StatusCode, Json<Speaker>), AppApiError> {
-    let tenant_id = req.tenant_id.unwrap_or(tenant_id_from_headers(&headers)?);
-    let s = speaker::create_speaker(&state.pool, &req.display_name, tenant_id)
+    let tenant_id = tenant_id_from_headers(&headers)?;
+    let s = speaker::create_speaker(&state.pool, &req.display_name, &req.color, tenant_id)
         .await
         .map_err(|e| AppApiError(e.to_string()))?;
     Ok((StatusCode::CREATED, Json(s)))
@@ -279,9 +284,10 @@ pub async fn list_sessions(
 
 // --- Speaker mutations ---
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateSpeakerRequest {
-    pub display_name: String,
+    pub display_name: Option<String>,
+    pub color: Option<String>,
 }
 
 #[utoipa::path(
@@ -299,12 +305,17 @@ pub async fn update_speaker(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateSpeakerRequest>,
 ) -> Result<Json<Speaker>, AppApiError> {
-    match speaker::update_speaker(&state.pool, id, &req.display_name)
-        .await
-        .map_err(|e| AppApiError(e.to_string()))?
+    match speaker::update_speaker(
+        &state.pool,
+        id,
+        req.display_name.as_deref(),
+        req.color.as_deref(),
+    )
+    .await
     {
-        Some(s) => Ok(Json(s)),
-        None => Err(AppApiError("not found".into())),
+        Ok(Some(s)) => Ok(Json(s)),
+        Ok(None) => Err(AppApiError("speaker not found".into())),
+        Err(e) => Err(AppApiError(e.to_string())),
     }
 }
 
@@ -322,13 +333,13 @@ pub async fn delete_speaker(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppApiError> {
-    let deleted = speaker::soft_delete_speaker(&state.pool, id)
+    let deleted = speaker::delete_speaker_with_segment_cleanup(&state.pool, id)
         .await
         .map_err(|e| AppApiError(e.to_string()))?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppApiError("not found".into()))
+        Err(AppApiError("speaker not found".into()))
     }
 }
 
