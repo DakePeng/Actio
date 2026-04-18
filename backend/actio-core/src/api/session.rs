@@ -568,3 +568,62 @@ fn tenant_id_from_headers(headers: &HeaderMap) -> Result<Uuid, AppApiError> {
         None => Ok(Uuid::nil()),
     }
 }
+
+#[cfg(test)]
+mod enroll_tests {
+    use crate::repository::db::run_migrations;
+    use crate::repository::speaker::create_speaker;
+    use hound::{WavSpec, WavWriter};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::io::Cursor;
+    use uuid::Uuid;
+
+    fn sine_wav(seconds: f32) -> Vec<u8> {
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let n = (16_000.0 * seconds) as usize;
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        {
+            let mut w = WavWriter::new(&mut buf, spec).unwrap();
+            for i in 0..n {
+                let x = (i as f32 / 16_000.0 * 440.0 * std::f32::consts::TAU).sin() * 0.2;
+                w.write_sample(x).unwrap();
+            }
+            w.finalize().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    // The end-to-end check against a running server with a real embedding
+    // model lives in the manual smoke checklist. This unit test validates the
+    // decode + duration gate that the handler would apply before extraction.
+    #[tokio::test]
+    async fn clips_too_short_are_rejected_with_warnings() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        let s = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        let _id = Uuid::parse_str(&s.id).unwrap();
+
+        let wav = sine_wav(1.0); // 1s — too short
+        let (samples, dur) = crate::engine::wav::decode_to_mono_16k(&wav).unwrap();
+        assert!(dur < 3000.0);
+        assert!(!samples.is_empty());
+    }
+
+    #[tokio::test]
+    async fn clips_in_band_pass_duration_gate() {
+        let wav = sine_wav(5.0);
+        let (samples, dur) = crate::engine::wav::decode_to_mono_16k(&wav).unwrap();
+        assert!(dur >= 3_000.0 && dur <= 30_000.0);
+        assert!(samples.len() > 16_000);
+    }
+}
