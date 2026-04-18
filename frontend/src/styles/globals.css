@@ -4273,3 +4273,60 @@ body.body--native-board .desktop-window {
   display: flex;
   gap: 0.5rem;
 }
+
+/* Voiceprint Recorder */
+.voiceprint-recorder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+}
+.voiceprint-recorder__passage {
+  font-style: italic;
+  line-height: 1.4;
+  margin: 0;
+}
+.voiceprint-recorder__meter {
+  height: 8px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.voiceprint-recorder__bar {
+  height: 100%;
+  background: var(--accent, #64b5f6);
+  transition: width 0.05s linear;
+}
+.voiceprint-recorder__timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+  opacity: 0.7;
+}
+.voiceprint-recorder__captured {
+  display: flex;
+  gap: 0.5rem;
+}
+.voiceprint-recorder__chip {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.08);
+}
+.voiceprint-recorder__chip.is-done {
+  background: var(--accent, #64b5f6);
+  color: #fff;
+}
+.voiceprint-recorder__error {
+  color: #c0392b;
+  font-size: 0.875rem;
+  margin: 0;
+}
+.voiceprint-recorder__actions {
+  display: flex;
+  gap: 0.5rem;
+}
