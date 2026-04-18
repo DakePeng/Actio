@@ -4,11 +4,13 @@ use sqlx::FromRow;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+// sqlx::FromRow binds by column name, so field order need not match the DB column order.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Speaker {
     pub id: String,
     pub tenant_id: String,
     pub display_name: String,
+    pub color: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
