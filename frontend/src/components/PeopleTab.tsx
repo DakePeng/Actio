@@ -71,6 +71,7 @@ export function PeopleTab() {
   const [color, setColor] = useState(PRESET_COLORS[0]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     if (speakersStatus === 'idle') void fetchSpeakers();
@@ -109,14 +110,13 @@ export function PeopleTab() {
     }
   }
 
-  async function handleDelete(s: Speaker) {
-    if (!window.confirm(`Delete ${s.display_name}? This removes their voiceprint.`)) {
-      return;
-    }
+  async function confirmDelete(id: string) {
     try {
-      await deleteSpeaker(s.id);
+      await deleteSpeaker(id);
+      setPendingDeleteId(null);
     } catch (e) {
       console.warn('[Actio] delete speaker failed', e);
+      setPendingDeleteId(null);
     }
   }
 
@@ -249,7 +249,7 @@ export function PeopleTab() {
           {speakers.map((speaker, i) => (
             <motion.div
               key={speaker.id}
-              className="person-row"
+              className={`person-row${pendingDeleteId === speaker.id ? ' is-confirming-delete' : ''}`}
               variants={personVariants}
               initial="hidden"
               animate="visible"
@@ -265,29 +265,59 @@ export function PeopleTab() {
               >
                 {speaker.display_name.charAt(0).toUpperCase()}
               </motion.div>
-              <span className="person-row__name">{speaker.display_name}</span>
-              <div className="person-row__actions">
-                <motion.button
-                  type="button"
-                  className="person-edit-btn"
-                  onClick={() => startEdit(speaker)}
-                  aria-label={`Edit ${speaker.display_name}`}
-                  whileHover={{ scale: 1.15 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <PencilIcon />
-                </motion.button>
-                <motion.button
-                  type="button"
-                  className="person-delete-btn"
-                  onClick={() => void handleDelete(speaker)}
-                  aria-label={`Delete ${speaker.display_name}`}
-                  whileHover={{ scale: 1.15 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <TrashIcon />
-                </motion.button>
-              </div>
+              {pendingDeleteId === speaker.id ? (
+                <>
+                  <span className="person-row__confirm-text">
+                    Delete {speaker.display_name}? Voiceprint is removed too.
+                  </span>
+                  <div className="person-row__actions">
+                    <motion.button
+                      type="button"
+                      className="person-row__confirm-delete"
+                      onClick={() => void confirmDelete(speaker.id)}
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.96 }}
+                    >
+                      Delete
+                    </motion.button>
+                    <motion.button
+                      type="button"
+                      className="person-row__confirm-cancel"
+                      onClick={() => setPendingDeleteId(null)}
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.96 }}
+                    >
+                      Cancel
+                    </motion.button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="person-row__name">{speaker.display_name}</span>
+                  <div className="person-row__actions">
+                    <motion.button
+                      type="button"
+                      className="person-edit-btn"
+                      onClick={() => startEdit(speaker)}
+                      aria-label={`Edit ${speaker.display_name}`}
+                      whileHover={{ scale: 1.15 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      <PencilIcon />
+                    </motion.button>
+                    <motion.button
+                      type="button"
+                      className="person-delete-btn"
+                      onClick={() => setPendingDeleteId(speaker.id)}
+                      aria-label={`Delete ${speaker.display_name}`}
+                      whileHover={{ scale: 1.15 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      <TrashIcon />
+                    </motion.button>
+                  </div>
+                </>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>

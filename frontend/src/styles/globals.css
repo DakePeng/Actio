@@ -4453,3 +4453,40 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   font-size: 0.85rem;
   margin: 0;
 }
+
+/* Inline delete confirmation on person rows */
+.person-row.is-confirming-delete {
+  background: rgba(229, 115, 115, 0.08);
+  border: 1px solid rgba(229, 115, 115, 0.22);
+}
+.person-row__confirm-text {
+  flex: 1;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  min-width: 0;
+}
+.person-row__confirm-delete,
+.person-row__confirm-cancel {
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  border: none;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.person-row__confirm-delete {
+  background: #e57373;
+  color: #fff;
+}
+.person-row__confirm-delete:hover {
+  background: #d65f5f;
+}
+.person-row__confirm-cancel {
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+}
+.person-row__confirm-cancel:hover {
+  opacity: 1;
+}
