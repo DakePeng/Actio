@@ -2,26 +2,49 @@ use sqlx::SqlitePool;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::repository::speaker;
+use crate::engine::diarization::cosine_similarity;
 
 #[derive(Debug)]
 pub struct SpeakerMatchResult {
-    pub speaker_id: Option<Uuid>,
+    pub speaker_id: Option<String>,
     pub similarity_score: f64,
     pub z_norm_score: f64,
     pub accepted: bool,
 }
 
 const Z_NORM_THRESHOLD: f64 = 0.0;
+// Guard against dividing by near-zero std dev (e.g., all candidates equidistant).
+const MIN_STD_DEV: f64 = 0.001;
+// Absolute cosine threshold used when Z-norm cannot discriminate (single
+// candidate, or all candidates tied). Picked as a conservative default for
+// ERes2Net-style 512-dim embeddings — expected to be tuned with usage data.
+const SINGLE_CANDIDATE_COSINE_THRESHOLD: f64 = 0.5;
 
 pub async fn identify_speaker(
     pool: &SqlitePool,
-    embedding: &[f32],
+    query: &[f32],
     tenant_id: Uuid,
     k: usize,
 ) -> Result<SpeakerMatchResult, sqlx::Error> {
-    let speakers = speaker::list_speakers(pool, tenant_id).await?;
-    if speakers.is_empty() {
+    // Fetch all embeddings for active speakers in the tenant whose dimension
+    // matches the query. We sort by similarity in Rust; dataset is small
+    // (hundreds of rows at most in realistic usage) and pgvector is unavailable.
+    let query_dim = query.len() as i64;
+
+    let rows: Vec<(String, Vec<u8>)> = sqlx::query_as(
+        "SELECT e.speaker_id, e.embedding \
+         FROM speaker_embeddings e \
+         JOIN speakers s ON s.id = e.speaker_id \
+         WHERE s.tenant_id = ?1 \
+           AND s.status = 'active' \
+           AND e.embedding_dimension = ?2",
+    )
+    .bind(tenant_id.to_string())
+    .bind(query_dim)
+    .fetch_all(pool)
+    .await?;
+
+    if rows.is_empty() {
         return Ok(SpeakerMatchResult {
             speaker_id: None,
             similarity_score: 0.0,
@@ -30,29 +53,35 @@ pub async fn identify_speaker(
         });
     }
 
-    let emb_str: String = embedding
-        .iter()
-        .map(|v| v.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let raw_results: Vec<(Uuid, f64)> = sqlx::query_as(
-        "SELECT e.speaker_id, 1.0 - (e.embedding_distance) AS similarity \
-         FROM speaker_embeddings e \
-         JOIN speakers s ON s.id = e.speaker_id \
-         WHERE s.tenant_id = ?1 AND s.status = 'active' \
-         ORDER BY e.embedding_distance LIMIT ?2",
-    )
-    .bind(format!("[{}]", emb_str))
-    .bind(k as i64)
-    .fetch_all(pool)
-    .await?;
+    // Compute cosine similarity for every candidate.
+    // SQLite's Vec<u8> allocations are 8-byte aligned on all supported targets,
+    // so bytemuck::cast_slice::<u8, f32> is safe in practice. The debug assert
+    // makes an accidental misalignment fail loudly in dev rather than silently
+    // in production.
+    let mut scored: Vec<(String, f64)> = rows
+        .into_iter()
+        .map(|(speaker_id, blob)| {
+            debug_assert_eq!(
+                blob.as_ptr() as usize % std::mem::align_of::<f32>(),
+                0,
+                "embedding BLOB not 4-byte aligned"
+            );
+            let emb: &[f32] = bytemuck::cast_slice(&blob);
+            let sim = cosine_similarity(query, emb) as f64;
+            (speaker_id, sim)
+        })
+        .collect();
 
-    let similarities: Vec<f64> = raw_results.iter().map(|(_, s)| *s).collect();
-    let (mean, std_dev) = compute_stats(&similarities);
-    let z_scores: Vec<f64> = if std_dev > 0.001 {
-        similarities.iter().map(|s| (s - mean) / std_dev).collect()
+    // Keep top-k
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(k);
+
+    let sims: Vec<f64> = scored.iter().map(|(_, s)| *s).collect();
+    let (mean, std_dev) = compute_stats(&sims);
+    let z_scores: Vec<f64> = if std_dev > MIN_STD_DEV {
+        sims.iter().map(|s| (s - mean) / std_dev).collect()
     } else {
-        similarities.iter().map(|_| 0.0).collect()
+        sims.iter().map(|_| 0.0).collect()
     };
 
     let best_idx = z_scores
@@ -62,10 +91,18 @@ pub async fn identify_speaker(
         .map(|(i, _)| i);
 
     if let Some(idx) = best_idx {
-        let (speaker_id, sim) = raw_results[idx];
         let z_norm = z_scores[idx];
-        let accepted = z_norm > Z_NORM_THRESHOLD;
-        info!(?speaker_id, sim, z_norm, accepted, "Speaker identified");
+        let (speaker_id, sim) = scored.swap_remove(idx);
+        // Z-norm requires ≥2 candidates with variance to discriminate. When
+        // std_dev collapsed to ~0 (single candidate, or all-tied), fall back
+        // to an absolute cosine threshold so the only enrolled speaker can
+        // still be accepted.
+        let accepted = if std_dev > MIN_STD_DEV {
+            z_norm > Z_NORM_THRESHOLD
+        } else {
+            sim >= SINGLE_CANDIDATE_COSINE_THRESHOLD
+        };
+        info!(speaker_id = %speaker_id, sim, z_norm, accepted, "Speaker identified");
         Ok(SpeakerMatchResult {
             speaker_id: accepted.then_some(speaker_id),
             similarity_score: sim,
@@ -183,5 +220,157 @@ mod tests {
         assert_eq!(row.1, 512);
         let decoded: &[f32] = bytemuck::cast_slice(&row.0);
         assert_eq!(decoded, emb.as_slice());
+    }
+
+    fn normalize(v: &mut [f32]) {
+        let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if n > 0.0 {
+            for x in v {
+                *x /= n;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn identify_picks_closest_above_threshold() {
+        let pool = fresh_pool().await;
+        let alice = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        let bob = create_speaker(&pool, "Bob", "#64B5F6", Uuid::nil())
+            .await
+            .unwrap();
+
+        // Alice: embedding close to [1, 0, 0, ...]
+        let mut alice_emb = vec![1.0; 512];
+        for i in 1..512 {
+            alice_emb[i] = 0.01;
+        }
+        normalize(&mut alice_emb);
+
+        // Bob: embedding close to [0, 1, 0, ...]
+        let mut bob_emb = vec![0.01; 512];
+        bob_emb[1] = 1.0;
+        normalize(&mut bob_emb);
+
+        save_embedding(
+            &pool,
+            Uuid::parse_str(&alice.id).unwrap(),
+            &alice_emb,
+            5000.0,
+            0.9,
+            true,
+        )
+        .await
+        .unwrap();
+        save_embedding(
+            &pool,
+            Uuid::parse_str(&bob.id).unwrap(),
+            &bob_emb,
+            5000.0,
+            0.9,
+            true,
+        )
+        .await
+        .unwrap();
+
+        // Query close to Alice
+        let mut query = alice_emb.clone();
+        query[2] = 0.02;
+        normalize(&mut query);
+
+        let result = identify_speaker(&pool, &query, Uuid::nil(), 5)
+            .await
+            .unwrap();
+        assert!(result.accepted);
+        assert_eq!(result.speaker_id.as_deref(), Some(alice.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn identify_accepts_single_enrolled_speaker_by_absolute_similarity() {
+        // Regression: with one candidate std_dev is 0 so z-norm alone cannot
+        // accept anyone. Absolute cosine fallback must kick in.
+        let pool = fresh_pool().await;
+        let alice = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        let mut emb = vec![0.01f32; 512];
+        emb[0] = 1.0;
+        normalize(&mut emb);
+        save_embedding(
+            &pool,
+            Uuid::parse_str(&alice.id).unwrap(),
+            &emb,
+            5000.0,
+            0.9,
+            true,
+        )
+        .await
+        .unwrap();
+
+        // Query identical to Alice's embedding → cosine ≈ 1.0, well above 0.5.
+        let result = identify_speaker(&pool, &emb, Uuid::nil(), 5)
+            .await
+            .unwrap();
+        assert!(result.accepted, "single enrolled speaker should be accepted");
+        assert_eq!(result.speaker_id.as_deref(), Some(alice.id.as_str()));
+        assert!(result.similarity_score >= 0.5);
+    }
+
+    #[tokio::test]
+    async fn identify_rejects_single_low_similarity() {
+        // Single candidate but the query is orthogonal — cosine ~0, below 0.5.
+        let pool = fresh_pool().await;
+        let alice = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        let mut alice_emb = vec![0.0f32; 512];
+        alice_emb[0] = 1.0;
+        save_embedding(
+            &pool,
+            Uuid::parse_str(&alice.id).unwrap(),
+            &alice_emb,
+            5000.0,
+            0.9,
+            true,
+        )
+        .await
+        .unwrap();
+
+        let mut query = vec![0.0f32; 512];
+        query[100] = 1.0;
+        let result = identify_speaker(&pool, &query, Uuid::nil(), 5)
+            .await
+            .unwrap();
+        assert!(!result.accepted);
+        assert!(result.speaker_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn identify_ignores_wrong_dimension_rows() {
+        let pool = fresh_pool().await;
+        let alice = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        // Insert a 192-dim embedding directly (simulating a stale row)
+        sqlx::query(
+            "INSERT INTO speaker_embeddings \
+               (id, speaker_id, embedding, duration_ms, quality_score, is_primary, embedding_dimension) \
+             VALUES (?1, ?2, ?3, 5000, 0.9, 1, 192)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&alice.id)
+        .bind(bytemuck::cast_slice::<f32, u8>(&vec![0.5f32; 192]))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let query = vec![0.5f32; 512];
+        let result = identify_speaker(&pool, &query, Uuid::nil(), 5)
+            .await
+            .unwrap();
+        // No 512-dim rows → no match, not a panic.
+        assert!(!result.accepted);
+        assert!(result.speaker_id.is_none());
     }
 }
