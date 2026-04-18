@@ -49,9 +49,9 @@
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/REPLACE_OWNER/REPLACE_REPO/releases/latest/download/latest.json"
+        "https://github.com/DakePeng/Actio/releases/latest/download/latest.json"
       ],
-      "pubkey": "REPLACE_WITH_ED25519_PUBKEY_FROM_TAURI_SIGNER_GENERATE",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBQjQxNTc3NkQwRUMwNzEKUldSeHdBNXRkeFcwMmdScmp3WTVLcEU0bzlGRWZnS0ZTYWRIWEhQS3BrUlpUUjlmcm1BQnE4S1kK",
       "windows": {
         "installMode": "passive"
       }
