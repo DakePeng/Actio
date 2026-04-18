@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
+import { VoiceprintRecorder } from './VoiceprintRecorder';
+import { UnknownSpeakerPanel } from './UnknownSpeakerPanel';
 import type { Speaker } from '../types/speaker';
 
 const PRESET_COLORS = [
@@ -14,7 +16,11 @@ const PRESET_COLORS = [
   '#FF8A65',
 ];
 
-type FormMode = 'idle' | 'adding' | { editing: string };
+type FormMode =
+  | { kind: 'idle' }
+  | { kind: 'adding' }
+  | { kind: 'editing'; speaker: Speaker }
+  | { kind: 'enrolling'; speakerId: string; replace: boolean };
 
 function PencilIcon() {
   return (
@@ -43,6 +49,17 @@ function PlusIcon() {
   );
 }
 
+function MicIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  );
+}
+
 const personVariants = {
   hidden: { opacity: 0, y: 16 },
   visible: (i: number) => ({
@@ -62,45 +79,44 @@ export function PeopleTab() {
   const updateSpeaker = useVoiceStore((s) => s.updateSpeaker);
   const deleteSpeaker = useVoiceStore((s) => s.deleteSpeaker);
 
-  const [formMode, setFormMode] = useState<FormMode>('idle');
+  const [mode, setMode] = useState<FormMode>({ kind: 'idle' });
   const [name, setName] = useState('');
   const [color, setColor] = useState(PRESET_COLORS[0]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Load speakers on mount (and on remount after reconnection).
   useEffect(() => {
-    if (speakersStatus === 'idle') {
-      void fetchSpeakers();
-    }
+    if (speakersStatus === 'idle') void fetchSpeakers();
   }, [speakersStatus, fetchSpeakers]);
 
-  function openAdd() {
-    setFormMode('adding');
+  function startAdd() {
+    setMode({ kind: 'adding' });
     setName('');
     setColor(PRESET_COLORS[0]);
     setSaveError(null);
   }
 
-  function openEdit(speaker: Speaker) {
-    setFormMode({ editing: speaker.id });
-    setName(speaker.display_name);
-    setColor(speaker.color);
+  function startEdit(s: Speaker) {
+    setMode({ kind: 'editing', speaker: s });
+    setName(s.display_name);
+    setColor(s.color);
     setSaveError(null);
   }
 
-  async function handleSave() {
+  async function save() {
     const trimmed = name.trim();
     if (!trimmed) return;
     setSaving(true);
     setSaveError(null);
     try {
-      if (formMode === 'adding') {
-        await createSpeaker({ display_name: trimmed, color });
-      } else if (typeof formMode === 'object') {
-        await updateSpeaker(formMode.editing, { display_name: trimmed, color });
+      if (mode.kind === 'adding') {
+        const created = await createSpeaker({ display_name: trimmed, color });
+        // After creation, prompt for voiceprint capture.
+        setMode({ kind: 'enrolling', speakerId: created.id, replace: false });
+      } else if (mode.kind === 'editing') {
+        await updateSpeaker(mode.speaker.id, { display_name: trimmed, color });
+        setMode({ kind: 'idle' });
       }
-      setFormMode('idle');
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -108,30 +124,28 @@ export function PeopleTab() {
     }
   }
 
-  function handleCancel() {
-    setFormMode('idle');
-    setSaveError(null);
-  }
-
-  async function handleDelete(id: string) {
+  async function handleDelete(s: Speaker) {
+    if (!window.confirm(`Delete ${s.display_name}? This removes their voiceprint.`)) {
+      return;
+    }
     try {
-      await deleteSpeaker(id);
+      await deleteSpeaker(s.id);
     } catch (e) {
       console.warn('[Actio] delete speaker failed', e);
     }
   }
 
-  const isFormOpen = formMode !== 'idle';
+  const isFormOpen = mode.kind !== 'idle';
 
   return (
     <div className="people-tab">
       <AnimatePresence mode="wait">
-        {!isFormOpen ? (
+        {mode.kind === 'idle' && (
           <motion.button
             key="add-btn"
             type="button"
             className="primary-button people-tab__add-btn"
-            onClick={openAdd}
+            onClick={startAdd}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
@@ -142,7 +156,9 @@ export function PeopleTab() {
             <PlusIcon />
             Add person
           </motion.button>
-        ) : (
+        )}
+
+        {(mode.kind === 'adding' || mode.kind === 'editing') && (
           <motion.div
             key="form"
             className="person-form"
@@ -159,8 +175,8 @@ export function PeopleTab() {
               onChange={(e) => setName(e.target.value)}
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleSave();
-                if (e.key === 'Escape') handleCancel();
+                if (e.key === 'Enter') void save();
+                if (e.key === 'Escape') setMode({ kind: 'idle' });
               }}
             />
             <div className="person-form__swatches" role="group" aria-label="Color">
@@ -182,7 +198,7 @@ export function PeopleTab() {
               <motion.button
                 type="button"
                 className="primary-button"
-                onClick={() => void handleSave()}
+                onClick={() => void save()}
                 disabled={!name.trim() || saving}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
@@ -192,7 +208,7 @@ export function PeopleTab() {
               <motion.button
                 type="button"
                 className="secondary-button"
-                onClick={handleCancel}
+                onClick={() => setMode({ kind: 'idle' })}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
               >
@@ -202,17 +218,50 @@ export function PeopleTab() {
             {saveError && <p className="person-form__error">{saveError}</p>}
           </motion.div>
         )}
+
+        {mode.kind === 'enrolling' && (
+          <motion.div
+            key="enrolling"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <VoiceprintRecorder
+              speakerId={mode.speakerId}
+              onDone={() => {
+                setMode({ kind: 'idle' });
+                void fetchSpeakers();
+              }}
+              onCancel={() => setMode({ kind: 'idle' })}
+            />
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {speakersStatus === 'error' && (
-        <p className="people-tab__empty" role="alert">
-          Backend required to manage speakers. {speakersError ?? ''}
-        </p>
+        <div className="people-tab__error" role="alert">
+          Backend required to manage speakers.{' '}
+          {speakersError && <span className="people-tab__error-detail">{speakersError}</span>}
+          <button type="button" className="secondary-button" onClick={() => void fetchSpeakers()}>
+            Retry
+          </button>
+        </div>
       )}
 
       <div className="people-tab__list">
         <AnimatePresence>
-          {speakers.length === 0 && speakersStatus === 'ready' && !isFormOpen && (
+          {speakersStatus === 'loading' && (
+            <motion.p
+              key="loading"
+              className="people-tab__empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              Loading…
+            </motion.p>
+          )}
+          {speakersStatus === 'ready' && speakers.length === 0 && !isFormOpen && (
             <motion.p
               key="empty"
               className="people-tab__empty"
@@ -247,7 +296,20 @@ export function PeopleTab() {
                 <motion.button
                   type="button"
                   className="person-edit-btn"
-                  onClick={() => openEdit(speaker)}
+                  onClick={() =>
+                    setMode({ kind: 'enrolling', speakerId: speaker.id, replace: true })
+                  }
+                  aria-label={`Re-enroll ${speaker.display_name}`}
+                  title="Re-enroll voiceprint"
+                  whileHover={{ scale: 1.15 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  <MicIcon />
+                </motion.button>
+                <motion.button
+                  type="button"
+                  className="person-edit-btn"
+                  onClick={() => startEdit(speaker)}
                   aria-label={`Edit ${speaker.display_name}`}
                   whileHover={{ scale: 1.15 }}
                   whileTap={{ scale: 0.9 }}
@@ -257,7 +319,7 @@ export function PeopleTab() {
                 <motion.button
                   type="button"
                   className="person-delete-btn"
-                  onClick={() => void handleDelete(speaker.id)}
+                  onClick={() => void handleDelete(speaker)}
                   aria-label={`Delete ${speaker.display_name}`}
                   whileHover={{ scale: 1.15 }}
                   whileTap={{ scale: 0.9 }}
@@ -269,6 +331,8 @@ export function PeopleTab() {
           ))}
         </AnimatePresence>
       </div>
+
+      <UnknownSpeakerPanel />
     </div>
   );
 }
