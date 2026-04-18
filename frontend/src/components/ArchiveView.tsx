@@ -80,11 +80,82 @@ export function ArchiveView() {
   const [clipFilter, setClipFilter] = useState<ClipFilter>('all');
   const [expandedClipId, setExpandedClipId] = useState<string | null>(null);
 
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
+
   const archived = [...reminders]
     .filter((r) => r.archivedAt !== null)
     .sort((a, b) => new Date(b.archivedAt!).getTime() - new Date(a.archivedAt!).getTime());
 
   const visibleClips = clipFilter === 'starred' ? segments.filter((s) => s.starred) : segments;
+
+  // ── Tab switching ────────────────────────────────────────────────────
+  const handleSectionChange = (s: ArchiveSection) => {
+    setSection(s);
+    setSelectedTaskIds(new Set());
+    setSelectedClipIds(new Set());
+  };
+
+  // ── Task multi-select ────────────────────────────────────────────────
+  const toggleTask = (id: string) =>
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const allTasksSelected = archived.length > 0 && selectedTaskIds.size === archived.length;
+  const toggleAllTasks = () =>
+    setSelectedTaskIds(allTasksSelected ? new Set() : new Set(archived.map((r) => r.id)));
+
+  const bulkRestoreTasks = () => {
+    selectedTaskIds.forEach((id) => void restoreReminder(id));
+    setSelectedTaskIds(new Set());
+  };
+  const bulkDeleteTasks = () => {
+    selectedTaskIds.forEach((id) => void deleteReminder(id));
+    setSelectedTaskIds(new Set());
+  };
+
+  // ── Clip multi-select ────────────────────────────────────────────────
+  const toggleClip = (id: string) =>
+    setSelectedClipIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const allClipsSelected = visibleClips.length > 0 && selectedClipIds.size === visibleClips.length;
+  const toggleAllClips = () =>
+    setSelectedClipIds(allClipsSelected ? new Set() : new Set(visibleClips.map((s) => s.id)));
+
+  const bulkStarClips = () => {
+    selectedClipIds.forEach((id) => {
+      const clip = segments.find((s) => s.id === id);
+      if (clip && !clip.starred) starSegment(id);
+    });
+    setSelectedClipIds(new Set());
+  };
+  const bulkUnstarClips = () => {
+    selectedClipIds.forEach((id) => {
+      const clip = segments.find((s) => s.id === id);
+      if (clip && clip.starred) unstarSegment(id);
+    });
+    setSelectedClipIds(new Set());
+  };
+  const bulkDeleteClips = () => {
+    selectedClipIds.forEach((id) => deleteSegment(id));
+    setSelectedClipIds(new Set());
+  };
+
+  const handleClipFilterChange = (f: ClipFilter) => {
+    setClipFilter(f);
+    setSelectedClipIds(new Set());
+  };
+
+  const selectedClipsAllStarred =
+    selectedClipIds.size > 0 &&
+    [...selectedClipIds].every((id) => segments.find((s) => s.id === id)?.starred);
 
   return (
     <div className="archive-view">
@@ -99,7 +170,7 @@ export function ArchiveView() {
               role="tab"
               aria-selected={isActive}
               className={`archive-section-btn${isActive ? ' is-active' : ''}`}
-              onClick={() => setSection(id)}
+              onClick={() => handleSectionChange(id)}
             >
               {label}
               {isActive && (
@@ -137,50 +208,89 @@ export function ArchiveView() {
                 }
               />
             ) : (
-              <div className="archive-list">
-                <AnimatePresence>
-                  {archived.map((reminder, i) => {
-                    const colors = PRIORITY_COLORS[reminder.priority ?? 'medium'];
-                    return (
+              <>
+                {/* Floating bulk action pill (appears when anything selected) */}
+                <div className="archive-bulk-bar-anchor">
+                  <AnimatePresence>
+                    {selectedTaskIds.size > 0 && (
                       <motion.div
-                        key={reminder.id}
-                        className="archive-row"
-                        variants={listItemVariants}
-                        initial="hidden"
-                        animate="visible"
-                        exit="exit"
-                        custom={i}
-                        layout
+                        key="tasks-bulk-bar"
+                        className="archive-bulk-bar"
+                        initial={{ opacity: 0, y: 24 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 24 }}
+                        transition={{ duration: 0.18, ease: 'easeOut' }}
                       >
-                        <span
-                          className="card-badge"
-                          style={{ background: colors.bg, color: colors.text, flexShrink: 0 }}
-                        >
-                          {colors.label}
-                        </span>
-                        <span className="archive-row__title">{reminder.title}</span>
-                        <span className="archive-row__date">{formatDate(reminder.archivedAt!)}</span>
-                        <div className="archive-row__actions">
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => void restoreReminder(reminder.id)}
-                          >
+                        <span className="archive-bulk-bar__count">{selectedTaskIds.size} selected</span>
+                        <button type="button" className="archive-bulk-bar__select-all" onClick={toggleAllTasks}>
+                          {allTasksSelected ? 'Deselect all' : 'Select all'}
+                        </button>
+                        <div className="archive-bulk-bar__actions">
+                          <button type="button" className="ghost-button" onClick={bulkRestoreTasks}>
                             Restore
                           </button>
-                          <button
-                            type="button"
-                            className="ghost-button archive-row__delete"
-                            onClick={() => void deleteReminder(reminder.id)}
-                          >
+                          <button type="button" className="ghost-button archive-row__delete" onClick={bulkDeleteTasks}>
                             Delete
                           </button>
                         </div>
                       </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                <div className="archive-list">
+                  <AnimatePresence>
+                    {archived.map((reminder, i) => {
+                      const colors = PRIORITY_COLORS[reminder.priority ?? 'medium'];
+                      const isSelected = selectedTaskIds.has(reminder.id);
+                      return (
+                        <motion.div
+                          key={reminder.id}
+                          className={`archive-row${isSelected ? ' is-selected' : ''}`}
+                          variants={listItemVariants}
+                          initial="hidden"
+                          animate="visible"
+                          exit="exit"
+                          custom={i}
+                          layout
+                          onClick={() => toggleTask(reminder.id)}
+                        >
+                          <span
+                            className="card-badge"
+                            style={{ background: colors.bg, color: colors.text, flexShrink: 0 }}
+                          >
+                            {colors.label}
+                          </span>
+                          <span className="archive-row__title">{reminder.title}</span>
+                          <span className="archive-row__date">{formatDate(reminder.archivedAt!)}</span>
+                          <div className="archive-row__actions">
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void restoreReminder(reminder.id);
+                              }}
+                            >
+                              Restore
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button archive-row__delete"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void deleteReminder(reminder.id);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              </>
             )}
           </motion.div>
         )}
@@ -200,7 +310,7 @@ export function ArchiveView() {
                   key={f}
                   type="button"
                   className={`clips-filter-btn${clipFilter === f ? ' is-active' : ''}`}
-                  onClick={() => setClipFilter(f)}
+                  onClick={() => handleClipFilterChange(f)}
                 >
                   {f === 'all' ? 'All' : 'Starred'}
                 </button>
@@ -219,66 +329,110 @@ export function ArchiveView() {
                   : 'No clips yet. Start recording to generate clips.'}
               </motion.p>
             ) : (
-              <div className="clips-tab__list">
-                <AnimatePresence>
-                  {visibleClips.map((segment, i) => {
-                    const isExpanded = expandedClipId === segment.id;
-                    const isLong = segment.text.length > 150;
-                    return (
+              <>
+                {/* Floating bulk action pill (appears when anything selected) */}
+                <div className="archive-bulk-bar-anchor">
+                  <AnimatePresence>
+                    {selectedClipIds.size > 0 && (
                       <motion.div
-                        key={segment.id}
-                        className="clip-card"
-                        variants={listItemVariants}
-                        initial="hidden"
-                        animate="visible"
-                        exit="exit"
-                        custom={i}
-                        layout
+                        key="clips-bulk-bar"
+                        className="archive-bulk-bar"
+                        initial={{ opacity: 0, y: 24 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 24 }}
+                        transition={{ duration: 0.18, ease: 'easeOut' }}
                       >
-                        <div className="clip-card__header">
-                          <span className="clip-card__timestamp">{formatTimestamp(segment.createdAt)}</span>
-                          <div className="clip-card__actions">
-                            <motion.button
-                              type="button"
-                              className={`clip-star-btn${segment.starred ? ' is-starred' : ''}`}
-                              onClick={() =>
-                                segment.starred ? unstarSegment(segment.id) : starSegment(segment.id)
-                              }
-                              aria-label={segment.starred ? 'Unstar clip' : 'Star clip'}
-                              whileHover={{ scale: 1.15 }}
-                              whileTap={{ scale: 0.9 }}
-                            >
-                              <StarIcon filled={segment.starred} />
-                            </motion.button>
-                            <motion.button
-                              type="button"
-                              className="clip-delete-btn"
-                              onClick={() => deleteSegment(segment.id)}
-                              aria-label="Delete clip"
-                              whileHover={{ scale: 1.15 }}
-                              whileTap={{ scale: 0.9 }}
-                            >
-                              <TrashIcon />
-                            </motion.button>
-                          </div>
-                        </div>
-                        <p className={`clip-card__text${isExpanded ? ' is-expanded' : ''}`}>
-                          {segment.text}
-                        </p>
-                        {isLong && (
+                        <span className="archive-bulk-bar__count">{selectedClipIds.size} selected</span>
+                        <button type="button" className="archive-bulk-bar__select-all" onClick={toggleAllClips}>
+                          {allClipsSelected ? 'Deselect all' : 'Select all'}
+                        </button>
+                        <div className="archive-bulk-bar__actions">
                           <button
                             type="button"
-                            className="clip-expand-btn"
-                            onClick={() => setExpandedClipId(isExpanded ? null : segment.id)}
+                            className="ghost-button"
+                            onClick={selectedClipsAllStarred ? bulkUnstarClips : bulkStarClips}
                           >
-                            {isExpanded ? 'Show less' : 'Show more'}
+                            {selectedClipsAllStarred ? 'Unstar' : 'Star'}
                           </button>
-                        )}
+                          <button type="button" className="ghost-button archive-row__delete" onClick={bulkDeleteClips}>
+                            Delete
+                          </button>
+                        </div>
                       </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                <div className="clips-tab__list">
+                  <AnimatePresence>
+                    {visibleClips.map((segment, i) => {
+                      const isExpanded = expandedClipId === segment.id;
+                      const isLong = segment.text.length > 150;
+                      const isSelected = selectedClipIds.has(segment.id);
+                      return (
+                        <motion.div
+                          key={segment.id}
+                          className={`clip-card${isSelected ? ' is-selected' : ''}`}
+                          variants={listItemVariants}
+                          initial="hidden"
+                          animate="visible"
+                          exit="exit"
+                          custom={i}
+                          layout
+                          onClick={() => toggleClip(segment.id)}
+                        >
+                          <div className="clip-card__header">
+                            <span className="clip-card__timestamp">{formatTimestamp(segment.createdAt)}</span>
+                            <div className="clip-card__actions">
+                              <motion.button
+                                type="button"
+                                className={`clip-star-btn${segment.starred ? ' is-starred' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  segment.starred ? unstarSegment(segment.id) : starSegment(segment.id);
+                                }}
+                                aria-label={segment.starred ? 'Unstar clip' : 'Star clip'}
+                                whileHover={{ scale: 1.15 }}
+                                whileTap={{ scale: 0.9 }}
+                              >
+                                <StarIcon filled={segment.starred} />
+                              </motion.button>
+                              <motion.button
+                                type="button"
+                                className="clip-delete-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteSegment(segment.id);
+                                }}
+                                aria-label="Delete clip"
+                                whileHover={{ scale: 1.15 }}
+                                whileTap={{ scale: 0.9 }}
+                              >
+                                <TrashIcon />
+                              </motion.button>
+                            </div>
+                          </div>
+                          <p className={`clip-card__text${isExpanded ? ' is-expanded' : ''}`}>
+                            {segment.text}
+                          </p>
+                          {isLong && (
+                            <button
+                              type="button"
+                              className="clip-expand-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedClipId(isExpanded ? null : segment.id);
+                              }}
+                            >
+                              {isExpanded ? 'Show less' : 'Show more'}
+                            </button>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              </>
             )}
           </motion.div>
         )}
