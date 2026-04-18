@@ -4671,3 +4671,65 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   font-size: 0.85rem;
   opacity: 0.75;
 }
+
+/* ── Live transcript: speaker-grouped bubbles ──────────────────── */
+.live-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.25rem 0;
+}
+.live-transcript__bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.live-transcript__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.live-transcript__avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+.live-transcript__avatar--unresolved {
+  background: rgba(0, 0, 0, 0.12);
+  color: rgba(0, 0, 0, 0.55);
+  font-weight: 500;
+}
+.live-transcript__header--unresolved .live-transcript__name {
+  color: rgba(0, 0, 0, 0.55);
+  font-style: italic;
+}
+.live-transcript__name {
+  font-weight: 600;
+}
+.live-transcript__body {
+  padding-left: calc(22px + 0.5rem);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+  line-height: 1.55;
+}
+.live-transcript__line {
+  /* just flow inline */
+}
+.live-transcript__partial {
+  font-style: italic;
+  opacity: 0.75;
+}
+.live-transcript__bubble--partial .live-transcript__body {
+  /* partial-only bubble sits slightly muted */
+  opacity: 0.9;
+}

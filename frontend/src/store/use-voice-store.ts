@@ -6,13 +6,26 @@ import * as speakerApi from '../api/speakers';
 
 export type ClipInterval = 1 | 2 | 5 | 10 | 30;
 
+/** A single finalized transcript line. `speaker_id` starts null and fills
+ *  in when the backend emits a `speaker_resolved` WS event whose time
+ *  range overlaps this line's [start_ms, end_ms]. */
+export interface TranscriptLine {
+  id: string;
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  speaker_id: string | null;
+  is_final: boolean;
+}
+
 interface RecordingSession {
   id: string;
   startedAt: string;
-  /** Committed (final) transcript text */
-  liveTranscript: string;
-  /** Current in-progress partial from ASR */
-  pendingPartial: string;
+  /** Finalized ASR output, per line. Rendered as speaker-grouped bubbles. */
+  lines: TranscriptLine[];
+  /** In-progress partial from the streaming recognizer — replaces in place
+   *  on each update, becomes a finalized line when `is_final` arrives. */
+  pendingPartial: TranscriptLine | null;
   /** True once the first transcript (partial or final) has been received
    *  from the backend. Used to show a "Starting up…" state before the
    *  pipeline is actually producing output. */
@@ -92,6 +105,99 @@ function saveVoiceData(segments: Segment[], clipInterval: ClipInterval) {
 
 const { segments: initialSegments, clipInterval: initialClipInterval } = loadVoiceData();
 
+type StoreSet = (
+  update: (s: VoiceState) => Partial<VoiceState> | VoiceState,
+) => void;
+
+// --- WS message handlers ---
+
+/** `kind: "transcript"` — either a partial (replace in-progress line) or a
+ *  final (append to lines, clear partial). Upserts by transcript_id. */
+function handleTranscriptMessage(
+  set: StoreSet,
+  msg: {
+    transcript_id?: string;
+    text: string;
+    start_ms?: number;
+    end_ms?: number;
+    is_final?: boolean;
+    speaker_id?: string | null;
+  },
+) {
+  if (!msg.text.trim()) return;
+  const isFinal = msg.is_final ?? false;
+
+  set((state) => {
+    if (!state.currentSession) return state;
+    const line: TranscriptLine = {
+      id: msg.transcript_id || `local-${crypto.randomUUID()}`,
+      text: msg.text,
+      start_ms: msg.start_ms ?? 0,
+      end_ms: msg.end_ms ?? 0,
+      speaker_id: msg.speaker_id ?? null,
+      is_final: isFinal,
+    };
+
+    if (!isFinal) {
+      return {
+        currentSession: {
+          ...state.currentSession,
+          pendingPartial: line,
+          pipelineReady: true,
+        },
+      };
+    }
+
+    // Finalize: if a line with this id already exists (late re-broadcast
+    // from a backfill path), upsert; otherwise append. Clear the partial.
+    const lines = state.currentSession.lines;
+    const existingIdx = lines.findIndex((l) => l.id === line.id);
+    const nextLines =
+      existingIdx >= 0
+        ? lines.map((l, i) => (i === existingIdx ? { ...l, ...line } : l))
+        : [...lines, line];
+
+    return {
+      currentSession: {
+        ...state.currentSession,
+        lines: nextLines,
+        pendingPartial: null,
+        pipelineReady: true,
+      },
+    };
+  });
+}
+
+/** `kind: "speaker_resolved"` — the per-segment identification task has
+ *  decided who was speaking during [start_ms, end_ms]. Fill in speaker_id
+ *  on every line whose time range overlaps. */
+function handleSpeakerResolved(
+  set: StoreSet,
+  msg: { start_ms?: number; end_ms?: number; speaker_id?: string | null },
+) {
+  const start = msg.start_ms;
+  const end = msg.end_ms;
+  const speaker = msg.speaker_id ?? null;
+  if (typeof start !== 'number' || typeof end !== 'number') return;
+
+  set((state) => {
+    if (!state.currentSession) return state;
+    let changed = false;
+    const lines = state.currentSession.lines.map((line) => {
+      // Overlap test: two ranges overlap if neither ends before the other
+      // starts. Skip lines that already have a speaker — they're resolved.
+      if (line.speaker_id !== null) return line;
+      if (line.end_ms < start || line.start_ms > end) return line;
+      changed = true;
+      return { ...line, speaker_id: speaker };
+    });
+    if (!changed) return state;
+    return {
+      currentSession: { ...state.currentSession, lines },
+    };
+  });
+}
+
 export const useVoiceStore = create<VoiceState>((set, get) => ({
   isRecording: false,
   currentSession: null,
@@ -110,8 +216,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     const session: RecordingSession = {
       id: 'live',
       startedAt: new Date().toISOString(),
-      liveTranscript: '',
-      pendingPartial: '',
+      lines: [],
+      pendingPartial: null,
       pipelineReady: false,
     };
     set({ isRecording: true, currentSession: session });
@@ -123,34 +229,10 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
-            if (msg.kind === 'transcript' && msg.text) {
-              if (msg.is_final) {
-                // Commit: append finalized text, clear pending partial
-                set((state) => {
-                  if (!state.currentSession) return state;
-                  const prev = state.currentSession.liveTranscript;
-                  return {
-                    currentSession: {
-                      ...state.currentSession,
-                      liveTranscript: prev ? `${prev} ${msg.text}` : msg.text,
-                      pendingPartial: '',
-                      pipelineReady: true,
-                    },
-                  };
-                });
-              } else {
-                // Partial: replace in-progress text (don't append)
-                set((state) => {
-                  if (!state.currentSession) return state;
-                  return {
-                    currentSession: {
-                      ...state.currentSession,
-                      pendingPartial: msg.text,
-                      pipelineReady: true,
-                    },
-                  };
-                });
-              }
+            if (msg.kind === 'transcript' && typeof msg.text === 'string') {
+              handleTranscriptMessage(set, msg);
+            } else if (msg.kind === 'speaker_resolved') {
+              handleSpeakerResolved(set, msg);
             }
           } catch { /* ignore malformed frames */ }
         };
@@ -163,18 +245,27 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   stopRecording: () => {
     const { currentSession, _ws } = get();
     _ws?.close();
-    if (currentSession?.liveTranscript.trim()) get().flushInterval();
+    if (currentSession && currentSession.lines.length > 0) get().flushInterval();
     set({ isRecording: false, currentSession: null, _ws: null });
   },
 
   appendLiveTranscript: (text) => {
+    // Mainly used by tests to simulate an ASR final. Creates a synthetic
+    // line with no backend id so it won't collide with real transcripts.
     set((state) => {
       if (!state.currentSession) return state;
-      const prev = state.currentSession.liveTranscript;
+      const line: TranscriptLine = {
+        id: `local-${crypto.randomUUID()}`,
+        text,
+        start_ms: 0,
+        end_ms: 0,
+        speaker_id: null,
+        is_final: true,
+      };
       return {
         currentSession: {
           ...state.currentSession,
-          liveTranscript: prev ? `${prev} ${text}` : text,
+          lines: [...state.currentSession.lines, line],
         },
       };
     });
@@ -182,12 +273,15 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   flushInterval: () => {
     const { currentSession, segments, clipInterval } = get();
-    if (!currentSession || !currentSession.liveTranscript.trim()) return;
+    if (!currentSession || currentSession.lines.length === 0) return;
+
+    const text = currentSession.lines.map((l) => l.text).join(' ').trim();
+    if (!text) return;
 
     const newSegment: Segment = {
       id: crypto.randomUUID(),
       sessionId: currentSession.id,
-      text: currentSession.liveTranscript.trim(),
+      text,
       createdAt: new Date().toISOString(),
       starred: false,
     };
@@ -196,7 +290,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     saveVoiceData(next, clipInterval);
     set({
       segments: next,
-      currentSession: { ...currentSession, liveTranscript: '' },
+      currentSession: { ...currentSession, lines: [] },
     });
   },
 

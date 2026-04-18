@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
 import { getApiUrl } from '../api/backend-url';
+import { LiveTranscript } from './LiveTranscript';
 
 type WarmupState = 'idle' | 'warming' | 'ready' | 'error';
 
@@ -168,7 +169,7 @@ export function RecordingTab() {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
-  }, [currentSession?.liveTranscript, currentSession?.pendingPartial]);
+  }, [currentSession?.lines, currentSession?.pendingPartial]);
 
   const hintContent = (() => {
     if (warming) {
@@ -292,19 +293,17 @@ export function RecordingTab() {
             transition={{ type: 'spring', stiffness: 200, damping: 22 }}
             aria-live="polite"
           >
-            {pipelineStarting && !currentSession.liveTranscript && !currentSession.pendingPartial ? (
+            {pipelineStarting &&
+            currentSession.lines.length === 0 &&
+            !currentSession.pendingPartial ? (
               <span className="recording-tab__starting">
                 Starting up<AnimatedDots />
               </span>
-            ) : currentSession.liveTranscript || currentSession.pendingPartial ? (
-              <>
-                {currentSession.liveTranscript}
-                {currentSession.pendingPartial && (
-                  <span className="recording-tab__partial"> {currentSession.pendingPartial}</span>
-                )}
-              </>
             ) : (
-              <span className="recording-tab__transcript-placeholder">Listening…</span>
+              <LiveTranscript
+                lines={currentSession.lines}
+                pendingPartial={currentSession.pendingPartial}
+              />
             )}
           </motion.div>
         )}

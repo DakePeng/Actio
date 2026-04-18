@@ -110,30 +110,30 @@ describe('useVoiceStore', () => {
     const s = useVoiceStore.getState();
     expect(s.isRecording).toBe(true);
     expect(s.currentSession).not.toBeNull();
-    expect(s.currentSession!.liveTranscript).toBe('');
+    expect(s.currentSession!.lines).toEqual([]);
+    expect(s.currentSession!.pendingPartial).toBeNull();
     expect(MockWebSocket.instances[0].url).toBe('ws://127.0.0.1:3000/ws');
   });
 
-  it('appendLiveTranscript appends text to currentSession', () => {
+  it('appendLiveTranscript appends lines to currentSession', () => {
     useVoiceStore.getState().startRecording();
     useVoiceStore.getState().appendLiveTranscript('Hello world.');
     useVoiceStore.getState().appendLiveTranscript('Second sentence.');
-    const transcript = useVoiceStore.getState().currentSession!.liveTranscript;
-    expect(transcript).toContain('Hello world.');
-    expect(transcript).toContain('Second sentence.');
+    const lines = useVoiceStore.getState().currentSession!.lines;
+    expect(lines.map((l) => l.text)).toEqual(['Hello world.', 'Second sentence.']);
   });
 
-  it('flushInterval creates a segment and clears liveTranscript', () => {
+  it('flushInterval creates a segment from all lines and clears them', () => {
     useVoiceStore.getState().startRecording();
     useVoiceStore.getState().appendLiveTranscript('Some spoken words.');
     useVoiceStore.getState().flushInterval();
     const s = useVoiceStore.getState();
     expect(s.segments).toHaveLength(1);
     expect(s.segments[0].text).toBe('Some spoken words.');
-    expect(s.currentSession!.liveTranscript).toBe('');
+    expect(s.currentSession!.lines).toEqual([]);
   });
 
-  it('flushInterval does nothing when liveTranscript is empty', () => {
+  it('flushInterval does nothing when there are no lines', () => {
     useVoiceStore.getState().startRecording();
     useVoiceStore.getState().flushInterval();
     expect(useVoiceStore.getState().segments).toHaveLength(0);
