@@ -4330,3 +4330,41 @@ body.body--native-board .desktop-window {
   display: flex;
   gap: 0.5rem;
 }
+
+/* Unknown Speaker Panel */
+.unknown-panel {
+  margin-top: 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  padding-top: 1rem;
+}
+.unknown-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  padding: 0.25rem 0;
+}
+.unknown-panel summary::-webkit-details-marker {
+  display: none;
+}
+.unknown-panel__list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.unknown-panel__row {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+}
+.unknown-panel__meta {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-bottom: 0.5rem;
+}
+.unknown-panel__actions {
+  display: flex;
+  gap: 0.5rem;
+}
