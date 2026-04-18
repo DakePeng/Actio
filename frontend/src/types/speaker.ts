@@ -20,6 +20,19 @@ export interface EnrollResponse {
   warnings: string[];
 }
 
+/** Live-enrollment state: backend routes quality-passing VAD segments into
+ *  the target speaker's voiceprints instead of the normal identify path. */
+export type LiveEnrollmentStatus = 'active' | 'complete' | 'cancelled';
+
+export interface LiveEnrollmentState {
+  speaker_id: string;
+  target: number;
+  captured: number;
+  last_captured_duration_ms?: number;
+  status: LiveEnrollmentStatus;
+  version: number;
+}
+
 /** Phase-C voiceprint-candidate: one cluster of retained unknown-voice clips
  *  that has cleared the evidence bar (≥5 occurrences, ≥60 s cumulative,
  *  ≥2 distinct sessions). Drives the Pending Voices panel in PeopleTab. */

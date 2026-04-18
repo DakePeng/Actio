@@ -44,6 +44,10 @@ pub struct AppState {
     pub settings_manager: Arc<SettingsManager>,
     /// Directory where Phase-A voiceprint-candidate clips are written.
     pub clips_dir: PathBuf,
+    /// Shared state for live voiceprint enrollment. When Some+Active, the
+    /// pipeline routes quality-passing VAD segments into the target
+    /// speaker's voiceprints instead of the normal identify/candidate path.
+    pub live_enrollment: crate::engine::live_enrollment::LiveEnrollment,
     /// Signalled by the settings handler when `audio.asr_model` changes.
     /// The pipeline supervisor listens for this and hot-swaps the recognizer.
     pub pipeline_restart: Arc<tokio::sync::Notify>,
@@ -129,6 +133,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         inference_pipeline,
         settings_manager,
         clips_dir,
+        live_enrollment: crate::engine::live_enrollment::new_state(),
         pipeline_restart: Arc::new(tokio::sync::Notify::new()),
         engine_slot,
         llm_downloader,
@@ -337,6 +342,7 @@ async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
             None,
             asr_model.as_deref(),
             state.clips_dir.clone(),
+            state.live_enrollment.clone(),
         )?;
     }
 

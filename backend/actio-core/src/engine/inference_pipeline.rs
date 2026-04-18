@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::engine::asr;
 use crate::engine::audio_capture::{self, AudioCaptureHandle};
+use crate::engine::live_enrollment::LiveEnrollment;
 use crate::engine::model_manager::ModelPaths;
 use crate::engine::transcript_aggregator::TranscriptAggregator;
 use crate::engine::vad::{self, SpeechSegment, VadConfig};
@@ -45,6 +46,7 @@ impl InferencePipeline {
         device_name: Option<&str>,
         asr_model: Option<&str>,
         clips_dir: PathBuf,
+        live_enrollment: LiveEnrollment,
     ) -> anyhow::Result<()> {
         // 1. Start audio capture
         let (capture_handle, audio_rx) = audio_capture::start_capture(device_name)?;
@@ -82,6 +84,7 @@ impl InferencePipeline {
                 pool.clone(),
                 embedding_model.clone(),
                 clips_dir.clone(),
+                live_enrollment.clone(),
             ))
         };
 
@@ -242,6 +245,7 @@ fn split_segments_for_speaker_id(
     pool: sqlx::SqlitePool,
     embedding_model: Option<PathBuf>,
     clips_dir: PathBuf,
+    live_enrollment: LiveEnrollment,
 ) -> mpsc::Receiver<SpeechSegment> {
     let (tx, rx) = mpsc::channel::<SpeechSegment>(32);
     tokio::spawn(async move {
@@ -252,6 +256,7 @@ fn split_segments_for_speaker_id(
             let pool_c = pool.clone();
             let emb_c = embedding_model.clone();
             let clips_dir_c = clips_dir.clone();
+            let enroll_c = live_enrollment.clone();
 
             tokio::spawn(async move {
                 if let Err(e) = handle_segment_embedding(
@@ -263,6 +268,7 @@ fn split_segments_for_speaker_id(
                     end_ms,
                     audio_clone,
                     &clips_dir_c,
+                    &enroll_c,
                 )
                 .await
                 {
@@ -306,6 +312,7 @@ async fn handle_segment_embedding(
     end_ms: i64,
     audio: Vec<f32>,
     clips_dir: &Path,
+    live_enrollment: &LiveEnrollment,
 ) -> anyhow::Result<Option<String>> {
     let Some(model_path) = embedding_model else {
         crate::repository::segment::insert_segment(
@@ -327,6 +334,35 @@ async fn handle_segment_embedding(
         }
     };
 
+    // Live-enrollment short-circuit: if the user is actively reading passages
+    // to enroll a speaker, consume this segment as a voiceprint for them and
+    // skip normal identification / candidate retention.
+    let duration_ms = (end_ms - start_ms) as f64;
+    let quality = crate::engine::audio_quality::score(&audio);
+    if let Some(enrolled_speaker) = crate::engine::live_enrollment::consume_segment(
+        live_enrollment,
+        duration_ms,
+        quality,
+        pool,
+        &emb.values,
+    )
+    .await?
+    {
+        let speaker_uuid = Uuid::parse_str(&enrolled_speaker).ok();
+        crate::repository::segment::insert_segment(
+            pool,
+            session_id,
+            start_ms,
+            end_ms,
+            speaker_uuid,
+            None,
+            Some(&emb.values),
+            None,
+        )
+        .await?;
+        return Ok(Some(enrolled_speaker));
+    }
+
     let result =
         crate::domain::speaker_matcher::identify_speaker(pool, &emb.values, tenant_id, 5)
             .await
@@ -347,7 +383,6 @@ async fn handle_segment_embedding(
     // (we already have their voiceprint), low-quality unknown segments
     // aren't worth asking the user about.
     let audio_ref = if speaker_id.is_none() {
-        let quality = crate::engine::audio_quality::score(&audio);
         if quality >= VOICEPRINT_CANDIDATE_QUALITY {
             let candidate_id = Uuid::new_v4().to_string();
             match crate::engine::clip_storage::write_clip(clips_dir, &candidate_id, &audio) {

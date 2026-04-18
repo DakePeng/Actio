@@ -1,5 +1,6 @@
 import type {
   EnrollResponse,
+  LiveEnrollmentState,
   Speaker,
   VoiceprintCandidate,
 } from '../types/speaker';
@@ -91,6 +92,31 @@ export async function confirmCandidate(input: {
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+/** Live voiceprint enrollment: arms the backend audio pipeline to save the
+ *  next `target` quality-passing VAD segments as this speaker's voiceprints. */
+export async function startLiveEnrollment(
+  speakerId: string,
+  target = 3,
+): Promise<LiveEnrollmentState> {
+  return requestJson<LiveEnrollmentState>(
+    `/speakers/${speakerId}/enroll-live/start`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    },
+  );
+}
+
+export async function cancelLiveEnrollment(speakerId: string): Promise<void> {
+  await requestJson<void>(`/speakers/${speakerId}/enroll-live/cancel`, {
+    method: 'POST',
+  });
+}
+
+export async function getLiveEnrollmentStatus(): Promise<LiveEnrollmentState | null> {
+  return requestJson<LiveEnrollmentState | null>('/enroll-live/status');
 }
 
 export async function dismissCandidate(

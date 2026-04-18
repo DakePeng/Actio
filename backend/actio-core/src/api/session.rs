@@ -66,6 +66,7 @@ pub async fn create_session(
                 None,
                 asr_model,
                 state.clips_dir.clone(),
+                state.live_enrollment.clone(),
             ) {
                 warn!(session_id = %s.id, error = %e, "Failed to start inference pipeline — CRUD-only mode");
             }
@@ -570,6 +571,70 @@ pub fn tenant_id_from_headers(headers: &HeaderMap) -> Result<Uuid, AppApiError> 
             }),
         None => Ok(Uuid::nil()),
     }
+}
+
+// --- Live voiceprint enrollment ---
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct StartLiveEnrollmentRequest {
+    #[serde(default = "default_enroll_target")]
+    pub target: u32,
+}
+
+fn default_enroll_target() -> u32 {
+    3
+}
+
+#[utoipa::path(
+    post,
+    path = "/speakers/{id}/enroll-live/start",
+    tag = "speakers",
+    params(("id" = Uuid, Path, description = "Speaker ID")),
+    request_body = StartLiveEnrollmentRequest,
+    responses(
+        (status = 200, description = "Enrollment armed", body = crate::engine::live_enrollment::EnrollmentState),
+        (status = 409, description = "Another enrollment is already active", body = AppApiError),
+    ),
+)]
+pub async fn start_live_enrollment(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<StartLiveEnrollmentRequest>,
+) -> Result<Json<crate::engine::live_enrollment::EnrollmentState>, AppApiError> {
+    let target = req.target.clamp(1, 10);
+    crate::engine::live_enrollment::start(&state.live_enrollment, id, target)
+        .await
+        .map(Json)
+        .map_err(|code| AppApiError::Conflict(code.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/speakers/{id}/enroll-live/cancel",
+    tag = "speakers",
+    params(("id" = Uuid, Path, description = "Speaker ID")),
+    responses((status = 204, description = "Enrollment cancelled")),
+)]
+pub async fn cancel_live_enrollment(
+    State(state): State<AppState>,
+    Path(_id): Path<Uuid>,
+) -> Result<StatusCode, AppApiError> {
+    crate::engine::live_enrollment::cancel(&state.live_enrollment).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/enroll-live/status",
+    tag = "speakers",
+    responses(
+        (status = 200, description = "Current enrollment snapshot (null if inactive)", body = Option<crate::engine::live_enrollment::EnrollmentState>),
+    ),
+)]
+pub async fn get_live_enrollment_status(
+    State(state): State<AppState>,
+) -> Json<Option<crate::engine::live_enrollment::EnrollmentState>> {
+    Json(crate::engine::live_enrollment::snapshot(&state.live_enrollment).await)
 }
 
 #[cfg(test)]

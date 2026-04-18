@@ -6,6 +6,7 @@ pub mod clip_storage;
 pub mod diarization;
 pub mod dictation;
 pub mod inference_pipeline;
+pub mod live_enrollment;
 pub mod llm_catalog;
 pub mod llm_downloader;
 pub mod llm_endpoint;

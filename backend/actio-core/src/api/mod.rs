@@ -38,6 +38,9 @@ use std::sync::atomic::Ordering;
         update_speaker,
         delete_speaker,
         enroll_speaker,
+        session::start_live_enrollment,
+        session::cancel_live_enrollment,
+        session::get_live_enrollment_status,
         segment::list_session_unknowns,
         segment::list_unknowns,
         segment::list_candidates,
@@ -53,6 +56,9 @@ use std::sync::atomic::Ordering;
         UpdateSpeakerRequest,
         EnrolledEmbedding,
         EnrollResponse,
+        session::StartLiveEnrollmentRequest,
+        crate::engine::live_enrollment::EnrollmentState,
+        crate::engine::live_enrollment::Status,
         UnknownSegmentResponse,
         VoiceprintCandidateResponse,
         ConfirmCandidateRequest,
@@ -106,6 +112,18 @@ pub fn router(state: AppState) -> Router {
         .route("/speakers/:id", patch(session::update_speaker))
         .route("/speakers/:id", delete(session::delete_speaker))
         .route("/speakers/:id/enroll", post(session::enroll_speaker))
+        .route(
+            "/speakers/:id/enroll-live/start",
+            post(session::start_live_enrollment),
+        )
+        .route(
+            "/speakers/:id/enroll-live/cancel",
+            post(session::cancel_live_enrollment),
+        )
+        .route(
+            "/enroll-live/status",
+            get(session::get_live_enrollment_status),
+        )
         // segment routes (unknown speakers + retroactive tagging)
         .route(
             "/sessions/:id/unknowns",

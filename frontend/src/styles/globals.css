@@ -4659,3 +4659,15 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   font-size: 0.85rem;
   margin: 0;
 }
+
+/* Live enrollment — new titles + hint text */
+.voiceprint-recorder__title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 600;
+}
+.voiceprint-recorder__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}

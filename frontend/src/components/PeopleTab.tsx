@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
 import { PendingVoicesPanel } from './PendingVoicesPanel';
+import { VoiceprintRecorder } from './VoiceprintRecorder';
 import type { Speaker } from '../types/speaker';
 
 const PRESET_COLORS = [
@@ -18,7 +19,8 @@ const PRESET_COLORS = [
 type FormMode =
   | { kind: 'idle' }
   | { kind: 'adding' }
-  | { kind: 'editing'; speaker: Speaker };
+  | { kind: 'editing'; speaker: Speaker }
+  | { kind: 'enrolling'; speaker: Speaker };
 
 function PencilIcon() {
   return (
@@ -34,6 +36,17 @@ function TrashIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
     </svg>
   );
 }
@@ -98,11 +111,14 @@ export function PeopleTab() {
     setSaveError(null);
     try {
       if (mode.kind === 'adding') {
-        await createSpeaker({ display_name: trimmed, color });
+        const created = await createSpeaker({ display_name: trimmed, color });
+        // After creating a speaker, drop straight into the voiceprint recorder
+        // so the user can read the prompts while the mic is still warm.
+        setMode({ kind: 'enrolling', speaker: created });
       } else if (mode.kind === 'editing') {
         await updateSpeaker(mode.speaker.id, { display_name: trimmed, color });
+        setMode({ kind: 'idle' });
       }
-      setMode({ kind: 'idle' });
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -202,12 +218,28 @@ export function PeopleTab() {
             </div>
             {mode.kind === 'adding' && (
               <p className="person-form__hint">
-                Their voiceprint will be captured automatically — once the app has
-                heard them speak enough across a few sessions, it'll ask you to
-                confirm.
+                After saving, you'll be asked to read three short passages so
+                the app learns their voice.
               </p>
             )}
             {saveError && <p className="person-form__error">{saveError}</p>}
+          </motion.div>
+        )}
+
+        {mode.kind === 'enrolling' && (
+          <motion.div
+            key="enrolling"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.15 }}
+          >
+            <VoiceprintRecorder
+              speakerId={mode.speaker.id}
+              speakerName={mode.speaker.display_name}
+              onDone={() => setMode({ kind: 'idle' })}
+              onCancel={() => setMode({ kind: 'idle' })}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -295,6 +327,17 @@ export function PeopleTab() {
                 <>
                   <span className="person-row__name">{speaker.display_name}</span>
                   <div className="person-row__actions">
+                    <motion.button
+                      type="button"
+                      className="person-edit-btn"
+                      onClick={() => setMode({ kind: 'enrolling', speaker })}
+                      aria-label={`Record voiceprint for ${speaker.display_name}`}
+                      title="Record voiceprint"
+                      whileHover={{ scale: 1.15 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      <MicIcon />
+                    </motion.button>
                     <motion.button
                       type="button"
                       className="person-edit-btn"
