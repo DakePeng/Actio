@@ -4368,3 +4368,14 @@ body.body--native-board .desktop-window {
   display: flex;
   gap: 0.5rem;
 }
+
+/* Recording tab: unknown voices hint */
+.recording-tab__unknowns-hint {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: rgba(100, 181, 246, 0.12);
+  border: 1px dashed rgba(100, 181, 246, 0.5);
+  font-size: 0.85rem;
+  opacity: 0.85;
+}

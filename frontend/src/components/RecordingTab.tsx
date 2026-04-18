@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
-
-const API_BASE = 'http://127.0.0.1:3000';
+import { getApiUrl } from '../api/backend-url';
 
 type WarmupState = 'idle' | 'warming' | 'ready' | 'error';
 
@@ -98,6 +97,8 @@ export function RecordingTab() {
   const currentSession = useVoiceStore((s) => s.currentSession);
   const startRecording = useVoiceStore((s) => s.startRecording);
   const stopRecording = useVoiceStore((s) => s.stopRecording);
+  const unknowns = useVoiceStore((s) => s.unknowns);
+  const fetchUnknowns = useVoiceStore((s) => s.fetchUnknowns);
 
   const [elapsed, setElapsed] = useState(0);
   const [warmupState, setWarmupState] = useState<WarmupState>('idle');
@@ -121,7 +122,7 @@ export function RecordingTab() {
     (async () => {
       try {
         setWarmupState('warming');
-        const settingsRes = await fetch(`${API_BASE}/settings`);
+        const settingsRes = await fetch(await getApiUrl('/settings'));
         if (!settingsRes.ok) throw new Error(`settings HTTP ${settingsRes.status}`);
         const settings = await settingsRes.json();
         const asrModel: string | undefined = settings.audio?.asr_model;
@@ -129,7 +130,7 @@ export function RecordingTab() {
           if (!cancelled) setWarmupState('ready');
           return;
         }
-        const warmRes = await fetch(`${API_BASE}/settings/models/warmup`, {
+        const warmRes = await fetch(await getApiUrl('/settings/models/warmup'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ asr_model: asrModel }),
@@ -170,6 +171,19 @@ export function RecordingTab() {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
   }, [currentSession?.liveTranscript, currentSession?.pendingPartial]);
+
+  // While recording, periodically check for newly-detected UNKNOWN segments so
+  // we can surface a hint in-line. The per-line speaker chip (plan §6.6 full
+  // variant) requires threading segment_id through the transcript stream,
+  // which is deferred — this is the pragmatic v1.
+  useEffect(() => {
+    if (!isRecording) return;
+    void fetchUnknowns();
+    const timer = window.setInterval(() => {
+      void fetchUnknowns();
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [isRecording, fetchUnknowns]);
 
   const hintContent = (() => {
     if (warming) {
@@ -310,6 +324,17 @@ export function RecordingTab() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isRecording && unknowns.length > 0 && (
+        <div
+          className="recording-tab__unknowns-hint"
+          role="status"
+          aria-live="polite"
+        >
+          {unknowns.length} unidentified{' '}
+          {unknowns.length === 1 ? 'voice' : 'voices'} — tag in the People tab.
+        </div>
+      )}
     </div>
   );
 }
