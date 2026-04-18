@@ -14,8 +14,8 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api::segment::{
-    AssignSegmentRequest, AssignSegmentResponse, NewSpeakerSpec, UnknownSegmentResponse,
-    VoiceprintCandidateResponse,
+    AssignSegmentRequest, AssignSegmentResponse, ConfirmCandidateRequest, DismissCandidateRequest,
+    NewSpeakerSpec, UnknownSegmentResponse, VoiceprintCandidateResponse,
 };
 use crate::api::session::*;
 use crate::domain::types::*;
@@ -41,6 +41,8 @@ use std::sync::atomic::Ordering;
         segment::list_session_unknowns,
         segment::list_unknowns,
         segment::list_candidates,
+        segment::confirm_candidate,
+        segment::dismiss_candidate,
         segment::assign_segment,
         segment::unassign_segment,
     ),
@@ -53,6 +55,8 @@ use std::sync::atomic::Ordering;
         EnrollResponse,
         UnknownSegmentResponse,
         VoiceprintCandidateResponse,
+        ConfirmCandidateRequest,
+        DismissCandidateRequest,
         AssignSegmentRequest,
         AssignSegmentResponse,
         NewSpeakerSpec,
@@ -109,6 +113,12 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/unknowns", get(segment::list_unknowns))
         .route("/candidates", get(segment::list_candidates))
+        .route("/candidates/confirm", post(segment::confirm_candidate))
+        .route("/candidates/dismiss", post(segment::dismiss_candidate))
+        .route(
+            "/candidates/audio/:audio_ref",
+            get(segment::get_candidate_clip),
+        )
         .route("/segments/:id/assign", post(segment::assign_segment))
         .route("/segments/:id/unassign", post(segment::unassign_segment))
         .route("/ws", get(ws::ws_session))

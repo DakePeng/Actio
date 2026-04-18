@@ -67,21 +67,14 @@ impl InferencePipeline {
         // consume raw audio directly and skip per-segment identification.
         let embedding_model = model_paths.speaker_embedding.clone();
         let pool = aggregator.pool();
-        let caps = asr::capabilities_for(chosen);
         let start_vad_pipeline = |audio_rx: mpsc::Receiver<Vec<f32>>| -> anyhow::Result<_> {
             if !model_paths.silero_vad.exists() {
                 return Err(anyhow::anyhow!(
                     "Silero VAD not found — required for offline models"
                 ));
             }
-            // Enable VAD partials only when the chosen ASR model is fast
-            // enough to re-decode a growing buffer without falling behind.
-            let mut vad_config = VadConfig::default();
-            if caps.pseudo_streaming {
-                vad_config.partial_interval_ms = Some(500);
-                info!(model = chosen, "Pseudo-streaming enabled (VAD partials @ 500 ms)");
-            }
-            let upstream = vad::start_vad(&model_paths.silero_vad, vad_config, audio_rx)?;
+            let upstream =
+                vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)?;
             Ok(split_segments_for_speaker_id(
                 upstream,
                 session_id,
@@ -253,35 +246,29 @@ fn split_segments_for_speaker_id(
     let (tx, rx) = mpsc::channel::<SpeechSegment>(32);
     tokio::spawn(async move {
         while let Some(seg) = upstream.recv().await {
-            // Partial (in-progress) segments are routed straight to ASR so the
-            // recognizer can refresh its partial transcript. Speaker-id and
-            // the segment row are expensive and speaker-stable, so they run
-            // only once per closed (final) segment.
-            if !seg.is_partial {
-                let start_ms = (seg.start_sample as i64 * 1000) / 16000;
-                let end_ms = (seg.end_sample as i64 * 1000) / 16000;
-                let audio_clone = seg.audio.clone();
-                let pool_c = pool.clone();
-                let emb_c = embedding_model.clone();
-                let clips_dir_c = clips_dir.clone();
+            let start_ms = (seg.start_sample as i64 * 1000) / 16000;
+            let end_ms = (seg.end_sample as i64 * 1000) / 16000;
+            let audio_clone = seg.audio.clone();
+            let pool_c = pool.clone();
+            let emb_c = embedding_model.clone();
+            let clips_dir_c = clips_dir.clone();
 
-                tokio::spawn(async move {
-                    if let Err(e) = handle_segment_embedding(
-                        &pool_c,
-                        emb_c,
-                        session_id,
-                        tenant_id,
-                        start_ms,
-                        end_ms,
-                        audio_clone,
-                        &clips_dir_c,
-                    )
-                    .await
-                    {
-                        warn!(%session_id, error = %e, "segment speaker-id hook failed");
-                    }
-                });
-            }
+            tokio::spawn(async move {
+                if let Err(e) = handle_segment_embedding(
+                    &pool_c,
+                    emb_c,
+                    session_id,
+                    tenant_id,
+                    start_ms,
+                    end_ms,
+                    audio_clone,
+                    &clips_dir_c,
+                )
+                .await
+                {
+                    warn!(%session_id, error = %e, "segment speaker-id hook failed");
+                }
+            });
 
             if tx.send(seg).await.is_err() {
                 break; // downstream ASR consumer went away

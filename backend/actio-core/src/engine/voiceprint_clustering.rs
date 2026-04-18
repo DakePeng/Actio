@@ -31,6 +31,38 @@ pub struct CandidateCluster {
     pub total_duration_ms: i64,
     pub earliest_ms: i64,
     pub latest_ms: i64,
+    /// Number of distinct `session_id`s across cluster members. A cluster
+    /// heard in many sessions is more likely to be a person the user
+    /// actually interacts with rather than a one-off voice (podcast,
+    /// caller, background chatter).
+    pub distinct_sessions: usize,
+}
+
+/// Evidence bar for "this is probably a person worth asking about."
+/// Tuned conservatively so the prompt modal doesn't get annoying.
+#[derive(Debug, Clone, Copy)]
+pub struct PromptEligibility {
+    pub min_occurrences: usize,
+    pub min_total_duration_ms: i64,
+    pub min_distinct_sessions: usize,
+}
+
+impl Default for PromptEligibility {
+    fn default() -> Self {
+        Self {
+            min_occurrences: 5,
+            min_total_duration_ms: 60_000,
+            min_distinct_sessions: 2,
+        }
+    }
+}
+
+impl PromptEligibility {
+    pub fn passes(&self, c: &CandidateCluster) -> bool {
+        c.occurrences >= self.min_occurrences
+            && c.total_duration_ms >= self.min_total_duration_ms
+            && c.distinct_sessions >= self.min_distinct_sessions
+    }
 }
 
 /// Empirically tuned for ERes2Net 512-dim embeddings. Two clips of the same
@@ -101,6 +133,13 @@ pub fn cluster_candidates(
             let earliest_ms = b.members.iter().map(|m| m.start_ms).min().unwrap_or(0);
             let latest_ms = b.members.iter().map(|m| m.end_ms).max().unwrap_or(0);
             let member_ids = b.members.iter().map(|m| m.id.clone()).collect();
+            let distinct_sessions = {
+                let mut set = std::collections::HashSet::new();
+                for m in &b.members {
+                    set.insert(m.session_id.clone());
+                }
+                set.len()
+            };
             let representative = b.members.into_iter().nth(b.rep_idx).expect("rep_idx valid");
             CandidateCluster {
                 representative,
@@ -109,6 +148,7 @@ pub fn cluster_candidates(
                 total_duration_ms,
                 earliest_ms,
                 latest_ms,
+                distinct_sessions,
             }
         })
         .collect();
@@ -217,5 +257,35 @@ mod tests {
         assert_eq!(clusters.len(), 1);
         assert_eq!(clusters[0].occurrences, 1);
         assert_eq!(clusters[0].representative.id, "only");
+    }
+
+    #[test]
+    fn eligibility_gate_rejects_below_thresholds() {
+        let gate = PromptEligibility::default();
+        let mut emb = vec![0.01; 64];
+        emb[0] = 1.0;
+        normalize(&mut emb);
+        let clusters = cluster_candidates(vec![seg("only", emb, 5000)], 0.5);
+        assert!(!gate.passes(&clusters[0]));
+    }
+
+    #[test]
+    fn eligibility_gate_accepts_strong_evidence() {
+        let gate = PromptEligibility::default();
+        let mut emb = vec![0.01; 64];
+        emb[0] = 1.0;
+        normalize(&mut emb);
+        // 6 clips @ 12s each = 72s across 2 sessions → passes all gates.
+        let segs: Vec<_> = (0..6)
+            .map(|i| {
+                let mut s = seg(&format!("s{i}"), emb.clone(), 12_000);
+                s.session_id = if i < 3 { "sess-a".into() } else { "sess-b".into() };
+                s
+            })
+            .collect();
+        let clusters = cluster_candidates(segs, 0.5);
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(clusters[0].distinct_sessions, 2);
+        assert!(gate.passes(&clusters[0]));
     }
 }

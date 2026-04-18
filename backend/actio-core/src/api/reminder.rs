@@ -50,9 +50,8 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
         Some(next_weekday(today, Weekday::Fri))
     } else if lower.contains("end of day") || lower.contains("eod") {
         Some(today)
-    } else if let Some((wd, is_next)) = parse_weekday_ref(&lower) {
-        let base = next_weekday(today, wd);
-        Some(if is_next { base + Duration::weeks(1) } else { base })
+    } else if let Some(wd) = parse_weekday_ref(&lower) {
+        Some(next_weekday(today, wd))
     } else if let Some(d) = parse_absolute_date(input, today) {
         Some(d)
     } else {
@@ -63,7 +62,7 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
     // If the user ALSO specified an explicit time-of-day ("in 2 days at 5pm"),
     // combine the day delta with that time instead of dropping it.
     if let Some(dt) = parse_in_duration(&lower, now) {
-        if let Some(t) = parse_time_of_day(&lower, now.time()) {
+        if let Some(t) = parse_time_of_day(&lower) {
             return Some(dt.date().and_time(t));
         }
         return Some(dt);
@@ -71,7 +70,7 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
 
     // ── Combine day + time ──
     if let Some(d) = day {
-        let time = parse_time_of_day(&lower, now.time()).unwrap_or_else(|| {
+        let time = parse_time_of_day(&lower).unwrap_or_else(|| {
             if lower.contains("tonight") || lower.contains("this evening") {
                 NaiveTime::from_hms_opt(20, 0, 0).unwrap()
             } else if lower.contains("end of day") || lower.contains("eod") {
@@ -84,7 +83,7 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
     }
 
     // ── Bare time reference (implies the nearest future occurrence) ──
-    parse_time_of_day(&lower, now.time()).map(|t| {
+    parse_time_of_day(&lower).map(|t| {
         // If the resolved time has already passed today, roll to tomorrow.
         if today.and_time(t) <= now {
             (today + Duration::days(1)).and_time(t)

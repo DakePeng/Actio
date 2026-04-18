@@ -62,6 +62,7 @@ pub async fn list_retained_candidates(
              FROM audio_segments \
              WHERE session_id = ?1 AND speaker_id IS NULL \
                AND audio_ref IS NOT NULL AND embedding IS NOT NULL \
+               AND dismissed_at IS NULL \
              ORDER BY start_ms DESC LIMIT ?2",
         )
         .bind(sid.to_string())
@@ -74,12 +75,95 @@ pub async fn list_retained_candidates(
              FROM audio_segments \
              WHERE speaker_id IS NULL \
                AND audio_ref IS NOT NULL AND embedding IS NOT NULL \
+               AND dismissed_at IS NULL \
              ORDER BY start_ms DESC LIMIT ?1",
         )
         .bind(limit)
         .fetch_all(pool)
         .await
     }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SegmentByIdRow {
+    pub id: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub embedding: Option<Vec<u8>>,
+    pub audio_ref: Option<String>,
+}
+
+/// Fetch a set of segments by id. Used by the candidate-confirm and
+/// candidate-dismiss handlers to snapshot audio_refs before nulling them.
+pub async fn fetch_segments_by_ids(
+    pool: &SqlitePool,
+    ids: &[String],
+) -> Result<Vec<SegmentByIdRow>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "SELECT id, start_ms, end_ms, embedding, audio_ref \
+         FROM audio_segments WHERE id IN ({})",
+        placeholders.join(","),
+    );
+    let mut q = sqlx::query_as::<_, SegmentByIdRow>(&sql);
+    for id in ids {
+        q = q.bind(id);
+    }
+    q.fetch_all(pool).await
+}
+
+/// Mark a set of segments as dismissed — they no longer surface as
+/// voiceprint candidates. The caller is responsible for deleting the
+/// retained WAV files from disk.
+pub async fn mark_segments_dismissed(
+    pool: &SqlitePool,
+    ids: &[String],
+) -> Result<u64, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "UPDATE audio_segments \
+         SET dismissed_at = datetime('now'), audio_ref = NULL \
+         WHERE id IN ({})",
+        placeholders.join(","),
+    );
+    let mut q = sqlx::query(&sql);
+    for id in ids {
+        q = q.bind(id);
+    }
+    let r = q.execute(pool).await?;
+    Ok(r.rows_affected())
+}
+
+/// Assign a set of segments to a speaker in one shot. Clears `audio_ref`
+/// so the retained WAVs can be deleted and the rows stop appearing in
+/// candidate queries.
+pub async fn assign_segments_to_speaker(
+    pool: &SqlitePool,
+    ids: &[String],
+    speaker_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders: Vec<String> = (2..=(ids.len() + 1)).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "UPDATE audio_segments \
+         SET speaker_id = ?1, audio_ref = NULL \
+         WHERE id IN ({})",
+        placeholders.join(","),
+    );
+    let mut q = sqlx::query(&sql).bind(speaker_id.to_string());
+    for id in ids {
+        q = q.bind(id);
+    }
+    let r = q.execute(pool).await?;
+    Ok(r.rows_affected())
 }
 
 /// Label-only assignment: sets `audio_segments.speaker_id` so past

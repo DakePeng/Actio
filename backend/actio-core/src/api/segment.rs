@@ -8,6 +8,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::api::session::{tenant_id_from_headers, AppApiError};
+use crate::domain::types::Speaker;
 use crate::AppState;
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -246,8 +247,14 @@ pub async fn list_candidates(
         crate::engine::voiceprint_clustering::DEFAULT_CLUSTER_THRESHOLD,
     );
 
+    // Only surface clusters with solid evidence this is a recurring person.
+    // The conservative defaults (5 bursts, 60 s cumulative, 2 distinct
+    // sessions) keep one-off voices — podcasts, callers, background
+    // chatter — from triggering the prompt modal.
+    let gate = crate::engine::voiceprint_clustering::PromptEligibility::default();
     let out: Vec<VoiceprintCandidateResponse> = clusters
         .into_iter()
+        .filter(|c| gate.passes(c))
         .map(|c| VoiceprintCandidateResponse {
             candidate_id: format!("cand_{}", c.representative.id),
             representative_segment_id: c.representative.id.clone(),
@@ -262,6 +269,191 @@ pub async fn list_candidates(
         .collect();
 
     Ok(Json(out))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ConfirmCandidateRequest {
+    pub display_name: String,
+    #[serde(default = "default_color")]
+    pub color: String,
+    /// All segment ids in the cluster the user is confirming.
+    pub member_segment_ids: Vec<String>,
+}
+
+fn delete_retained_files(clips_dir: &std::path::Path, audio_refs: &[String]) {
+    for name in audio_refs {
+        let path = clips_dir.join(name);
+        match std::fs::remove_file(&path) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(?path, error = %e, "failed to delete candidate clip");
+            }
+        }
+    }
+}
+
+/// Confirm a voiceprint candidate: create the new speaker, promote the
+/// longest few cluster members as voiceprint embeddings, tag all members
+/// with the new speaker_id, and clean up retained audio.
+///
+/// Unlike retroactive tagging (`POST /segments/:id/assign`), this DOES
+/// create voiceprints — the clips cleared both the retention quality bar
+/// and the multi-session evidence bar, so we trust them.
+#[utoipa::path(
+    post,
+    path = "/candidates/confirm",
+    tag = "segments",
+    request_body = ConfirmCandidateRequest,
+    responses(
+        (status = 200, description = "Candidate confirmed", body = Speaker),
+        (status = 400, description = "Bad request", body = AppApiError),
+        (status = 500, description = "Internal server error", body = AppApiError),
+    ),
+)]
+pub async fn confirm_candidate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ConfirmCandidateRequest>,
+) -> Result<Json<Speaker>, AppApiError> {
+    if body.member_segment_ids.is_empty() {
+        return Err(AppApiError::BadRequest(
+            "member_segment_ids must not be empty".into(),
+        ));
+    }
+    let display_name = body.display_name.trim();
+    if display_name.is_empty() {
+        return Err(AppApiError::BadRequest("display_name required".into()));
+    }
+    let tenant_id = tenant_id_from_headers(&headers)?;
+
+    let rows = crate::repository::segment::fetch_segments_by_ids(
+        &state.pool,
+        &body.member_segment_ids,
+    )
+    .await
+    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    if rows.is_empty() {
+        return Err(AppApiError::BadRequest("no matching segments found".into()));
+    }
+
+    let speaker = crate::repository::speaker::create_speaker(
+        &state.pool,
+        display_name,
+        &body.color,
+        tenant_id,
+    )
+    .await
+    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    let speaker_uuid = Uuid::parse_str(&speaker.id)
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+    // Promote up to 3 longest-duration members as voiceprint embeddings.
+    let mut sorted = rows.clone();
+    sorted.sort_by_key(|r| -(r.end_ms - r.start_ms));
+    for (i, row) in sorted.iter().take(3).enumerate() {
+        let Some(blob) = &row.embedding else { continue };
+        let Ok(emb) = bytemuck::try_cast_slice::<u8, f32>(blob) else {
+            continue;
+        };
+        let duration_ms = (row.end_ms - row.start_ms) as f64;
+        if let Err(e) = crate::domain::speaker_matcher::save_embedding(
+            &state.pool,
+            speaker_uuid,
+            emb,
+            duration_ms,
+            // The retention gate rejected anything below audio_quality 0.6
+            // so 0.75 is an honest "passed the gate" marker.
+            0.75,
+            i == 0,
+        )
+        .await
+        {
+            tracing::warn!(segment_id = %row.id, error = %e, "failed to save candidate embedding");
+        }
+    }
+
+    crate::repository::segment::assign_segments_to_speaker(
+        &state.pool,
+        &body.member_segment_ids,
+        speaker_uuid,
+    )
+    .await
+    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+    let audio_refs: Vec<String> = rows.iter().filter_map(|r| r.audio_ref.clone()).collect();
+    delete_retained_files(&state.clips_dir, &audio_refs);
+
+    Ok(Json(speaker))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DismissCandidateRequest {
+    pub member_segment_ids: Vec<String>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/candidates/dismiss",
+    tag = "segments",
+    request_body = DismissCandidateRequest,
+    responses(
+        (status = 204, description = "Candidate dismissed"),
+        (status = 400, description = "Bad request", body = AppApiError),
+        (status = 500, description = "Internal server error", body = AppApiError),
+    ),
+)]
+pub async fn dismiss_candidate(
+    State(state): State<AppState>,
+    Json(body): Json<DismissCandidateRequest>,
+) -> Result<StatusCode, AppApiError> {
+    if body.member_segment_ids.is_empty() {
+        return Err(AppApiError::BadRequest(
+            "member_segment_ids must not be empty".into(),
+        ));
+    }
+    let rows = crate::repository::segment::fetch_segments_by_ids(
+        &state.pool,
+        &body.member_segment_ids,
+    )
+    .await
+    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    let audio_refs: Vec<String> = rows.iter().filter_map(|r| r.audio_ref.clone()).collect();
+
+    crate::repository::segment::mark_segments_dismissed(&state.pool, &body.member_segment_ids)
+        .await
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+    delete_retained_files(&state.clips_dir, &audio_refs);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Stream a retained voiceprint-candidate clip by its `audio_ref`
+/// (filename). Used by the candidate-prompt modal to preview the voice
+/// before the user names it. Filename is validated to prevent traversal.
+pub async fn get_candidate_clip(
+    State(state): State<AppState>,
+    Path(audio_ref): Path<String>,
+) -> Result<axum::response::Response, AppApiError> {
+    use axum::http::header;
+    use axum::response::IntoResponse;
+
+    if audio_ref.contains('/')
+        || audio_ref.contains('\\')
+        || audio_ref.contains("..")
+        || !audio_ref.ends_with(".wav")
+    {
+        return Err(AppApiError::BadRequest("invalid audio_ref".into()));
+    }
+    let path = state.clips_dir.join(&audio_ref);
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(AppApiError::BadRequest("clip not found".into()));
+        }
+        Err(e) => return Err(AppApiError::Internal(e.to_string())),
+    };
+    Ok(([(header::CONTENT_TYPE, "audio/wav")], bytes).into_response())
 }
 
 #[utoipa::path(
