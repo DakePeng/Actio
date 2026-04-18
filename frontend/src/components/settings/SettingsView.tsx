@@ -30,6 +30,14 @@ const panelMotion = {
 export function SettingsView() {
   const [tab, setTab] = useState<SettingsTab>('general');
 
+  const panelContent: Record<SettingsTab, React.ReactNode> = {
+    general: <><ProfileSection /><PreferencesSection /><TraySection /></>,
+    board: <LabelManager />,
+    voice: <><AudioSettings /><RecordingSection /></>,
+    ai: <><LlmSettings /><ModelSetup /></>,
+    shortcuts: <KeyboardSettings />,
+  };
+
   return (
     <div className="settings-view">
       <div className="settings-view__section-tabs" role="tablist" aria-label="Settings sections">
@@ -59,35 +67,9 @@ export function SettingsView() {
       </div>
 
       <AnimatePresence mode="wait">
-        {tab === 'general' && (
-          <motion.div key="general" className="settings-view__panel" {...panelMotion}>
-            <ProfileSection />
-            <PreferencesSection />
-            <TraySection />
-          </motion.div>
-        )}
-        {tab === 'board' && (
-          <motion.div key="board" className="settings-view__panel" {...panelMotion}>
-            <LabelManager />
-          </motion.div>
-        )}
-        {tab === 'voice' && (
-          <motion.div key="voice" className="settings-view__panel" {...panelMotion}>
-            <AudioSettings />
-            <RecordingSection />
-          </motion.div>
-        )}
-        {tab === 'ai' && (
-          <motion.div key="ai" className="settings-view__panel" {...panelMotion}>
-            <LlmSettings />
-            <ModelSetup />
-          </motion.div>
-        )}
-        {tab === 'shortcuts' && (
-          <motion.div key="shortcuts" className="settings-view__panel" {...panelMotion}>
-            <KeyboardSettings />
-          </motion.div>
-        )}
+        <motion.div key={tab} className="settings-view__panel" {...panelMotion}>
+          {panelContent[tab]}
+        </motion.div>
       </AnimatePresence>
     </div>
   );
