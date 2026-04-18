@@ -4206,3 +4206,70 @@ body.body--native-board .desktop-window {
   font-weight: 700;
   letter-spacing: 0.04em;
 }
+
+/* Assign Speaker Picker */
+.assign-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.assign-picker input {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.assign-picker__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.assign-picker__row,
+.assign-picker__create {
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: inherit;
+  font: inherit;
+}
+.assign-picker__row:hover,
+.assign-picker__create:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+.assign-picker__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+}
+.assign-picker__swatches {
+  display: flex;
+  gap: 0.25rem;
+}
+.assign-picker__swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.assign-picker__swatch.is-selected {
+  border-color: currentColor;
+}
+.assign-picker__actions {
+  display: flex;
+  gap: 0.5rem;
+}
