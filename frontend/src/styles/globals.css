@@ -2721,26 +2721,58 @@ body.body--native-board .desktop-window {
 /* ─── Settings view ────────────────────────────────────────────────── */
 
 .settings-view {
-  padding: 28px 36px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
   flex: 1;
+  overflow: hidden;
 }
 
-.settings-group-title {
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
+.settings-view__panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 36px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-view__section-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 16px 36px 12px;
+  background: transparent;
+}
+
+.settings-section-btn {
+  position: relative;
+  padding: 8px 20px;
+  border: none;
+  border-radius: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  background: transparent;
   color: var(--color-text-tertiary);
-  margin: 0;
-  padding: 12px 0 0;
+  cursor: pointer;
+  transition: color 0.15s ease;
 }
 
-.settings-group-title:first-child {
-  padding-top: 0;
+.settings-section-btn:hover {
+  color: var(--color-text-secondary);
+}
+
+.settings-section-btn.is-active {
+  color: var(--color-accent-strong);
+}
+
+.settings-section-btn__indicator {
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-accent-strong);
+  border-radius: 2px;
 }
 
 .settings-section {
