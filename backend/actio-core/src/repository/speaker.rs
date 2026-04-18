@@ -61,18 +61,6 @@ pub async fn update_speaker(
     .await
 }
 
-/// Hard delete: removes the speaker and cascades to speaker_embeddings via FK.
-/// Callers MUST first null-out audio_segments.speaker_id to avoid dangling FKs
-/// (SQLite's REFERENCES clause on audio_segments does not have ON DELETE SET NULL
-/// in the existing schema). See `delete_speaker_with_segment_cleanup` below.
-pub async fn hard_delete_speaker(pool: &SqlitePool, id: Uuid) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM speakers WHERE id = ?1")
-        .bind(id.to_string())
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
-}
-
 /// Single-transaction delete with segment FK cleanup.
 pub async fn delete_speaker_with_segment_cleanup(
     pool: &SqlitePool,
@@ -87,6 +75,7 @@ pub async fn delete_speaker_with_segment_cleanup(
         .bind(id.to_string())
         .execute(&mut *tx)
         .await?;
+    // On any error above, `tx` drops without commit(), implicitly rolling back both writes.
     tx.commit().await?;
     Ok(result.rows_affected() > 0)
 }
@@ -100,6 +89,10 @@ mod tests {
     async fn fresh_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
             .await
             .unwrap();
         run_migrations(&pool).await.unwrap();
@@ -133,5 +126,57 @@ mod tests {
         .unwrap();
         assert_eq!(updated.display_name, "Alicia");
         assert_eq!(updated.color, "#64B5F6");
+    }
+
+    #[tokio::test]
+    async fn delete_speaker_clears_segment_refs() {
+        let pool = fresh_pool().await;
+        let s = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        // Insert a minimal audio_session and audio_segment referencing this speaker.
+        let session_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO audio_sessions (id, tenant_id, source_type, mode, started_at) \
+             VALUES (?1, ?2, 'microphone', 'realtime', datetime('now'))",
+        )
+        .bind(&session_id)
+        .bind(Uuid::nil().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let segment_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO audio_segments (id, session_id, speaker_id, start_ms, end_ms) \
+             VALUES (?1, ?2, ?3, 0, 1000)",
+        )
+        .bind(&segment_id)
+        .bind(&session_id)
+        .bind(&s.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let deleted = delete_speaker_with_segment_cleanup(&pool, Uuid::parse_str(&s.id).unwrap())
+            .await
+            .unwrap();
+        assert!(deleted);
+
+        // Speaker row should be gone.
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM speakers WHERE id = ?1")
+            .bind(&s.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0);
+
+        // Segment should have speaker_id = NULL.
+        let seg_speaker: (Option<String>,) =
+            sqlx::query_as("SELECT speaker_id FROM audio_segments WHERE id = ?1")
+                .bind(&segment_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(seg_speaker.0.is_none());
     }
 }

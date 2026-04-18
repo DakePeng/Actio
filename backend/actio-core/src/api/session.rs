@@ -325,7 +325,7 @@ pub async fn update_speaker(
     tag = "speakers",
     params(("id" = Uuid, Path, description = "Speaker ID")),
     responses(
-        (status = 204, description = "Speaker soft-deleted"),
+        (status = 204, description = "Speaker deleted"),
         (status = 500, description = "Internal server error", body = AppApiError),
     ),
 )]
