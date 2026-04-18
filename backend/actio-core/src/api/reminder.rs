@@ -25,6 +25,11 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
     let now = chrono::Local::now().naive_local();
     let today = now.date();
 
+    // Explicit rejection: we don't schedule anything in the past.
+    if contains_word(&lower, "yesterday") || input.contains("昨天") {
+        return None;
+    }
+
     // ── Day resolution (order matters — longer phrases first) ──
     let day = if lower.contains("day after tomorrow") {
         Some(today + Duration::days(2))
@@ -37,12 +42,17 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
         Some(next_weekday(today, Weekday::Sat))
     } else if lower.contains("next week") {
         Some(next_weekday(today, Weekday::Mon) + Duration::weeks(1))
+    } else if lower.contains("next month") {
+        Some(first_of_next_month(today))
+    } else if lower.contains("end of month") || lower.contains("eom") {
+        Some(last_of_month(today))
     } else if lower.contains("end of week") || lower.contains("eow") {
         Some(next_weekday(today, Weekday::Fri))
     } else if lower.contains("end of day") || lower.contains("eod") {
         Some(today)
-    } else if let Some(wd) = parse_weekday_ref(&lower) {
-        Some(next_weekday(today, wd))
+    } else if let Some((wd, is_next)) = parse_weekday_ref(&lower) {
+        let base = next_weekday(today, wd);
+        Some(if is_next { base + Duration::weeks(1) } else { base })
     } else if let Some(d) = parse_absolute_date(input, today) {
         Some(d)
     } else {
@@ -50,13 +60,18 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
     };
 
     // ── "in N <unit>" patterns ──
+    // If the user ALSO specified an explicit time-of-day ("in 2 days at 5pm"),
+    // combine the day delta with that time instead of dropping it.
     if let Some(dt) = parse_in_duration(&lower, now) {
+        if let Some(t) = parse_time_of_day(&lower, now.time()) {
+            return Some(dt.date().and_time(t));
+        }
         return Some(dt);
     }
 
     // ── Combine day + time ──
     if let Some(d) = day {
-        let time = parse_time_of_day(&lower).unwrap_or_else(|| {
+        let time = parse_time_of_day(&lower, now.time()).unwrap_or_else(|| {
             if lower.contains("tonight") || lower.contains("this evening") {
                 NaiveTime::from_hms_opt(20, 0, 0).unwrap()
             } else if lower.contains("end of day") || lower.contains("eod") {
@@ -68,8 +83,56 @@ fn resolve_relative_datetime(input: &str) -> Option<NaiveDateTime> {
         return Some(d.and_time(time));
     }
 
-    // ── Bare time reference (implies today) ──
-    parse_time_of_day(&lower).map(|t| today.and_time(t))
+    // ── Bare time reference (implies the nearest future occurrence) ──
+    parse_time_of_day(&lower, now.time()).map(|t| {
+        // If the resolved time has already passed today, roll to tomorrow.
+        if today.and_time(t) <= now {
+            (today + Duration::days(1)).and_time(t)
+        } else {
+            today.and_time(t)
+        }
+    })
+}
+
+/// First day of the month after `from`.
+fn first_of_next_month(from: NaiveDate) -> NaiveDate {
+    let (y, m) = if from.month() == 12 {
+        (from.year() + 1, 1)
+    } else {
+        (from.year(), from.month() + 1)
+    };
+    NaiveDate::from_ymd_opt(y, m, 1).unwrap_or(from)
+}
+
+/// Last day of the current month.
+fn last_of_month(from: NaiveDate) -> NaiveDate {
+    let first_next = first_of_next_month(from);
+    first_next - Duration::days(1)
+}
+
+/// True iff `needle` appears in `haystack` surrounded by non-alphabetic chars
+/// (i.e. matches on a word boundary). `haystack` is expected to be ASCII-lower
+/// where boundary matters; the helper is tolerant of non-ASCII by treating any
+/// byte that isn't an ASCII letter as a boundary.
+fn contains_word(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let hb = haystack.as_bytes();
+    let nb = needle.as_bytes();
+    let mut i = 0;
+    while i + nb.len() <= hb.len() {
+        if &hb[i..i + nb.len()] == nb {
+            let before_ok = i == 0 || !hb[i - 1].is_ascii_alphabetic();
+            let after_idx = i + nb.len();
+            let after_ok = after_idx == hb.len() || !hb[after_idx].is_ascii_alphabetic();
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Find the next occurrence of `target` weekday strictly after `from`.

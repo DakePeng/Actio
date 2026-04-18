@@ -1,6 +1,7 @@
 pub mod label;
 pub mod llm;
 pub mod reminder;
+pub mod segment;
 pub mod session;
 pub mod settings;
 pub mod ws;
@@ -12,6 +13,9 @@ use axum::Router;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::api::segment::{
+    AssignSegmentRequest, AssignSegmentResponse, NewSpeakerSpec, UnknownSegmentResponse,
+};
 use crate::api::session::*;
 use crate::domain::types::*;
 use crate::engine::metrics::HealthSummary;
@@ -33,6 +37,10 @@ use std::sync::atomic::Ordering;
         update_speaker,
         delete_speaker,
         enroll_speaker,
+        segment::list_session_unknowns,
+        segment::list_unknowns,
+        segment::assign_segment,
+        segment::unassign_segment,
     ),
     components(schemas(
         CreateSessionRequest,
@@ -41,6 +49,10 @@ use std::sync::atomic::Ordering;
         UpdateSpeakerRequest,
         EnrolledEmbedding,
         EnrollResponse,
+        UnknownSegmentResponse,
+        AssignSegmentRequest,
+        AssignSegmentResponse,
+        NewSpeakerSpec,
         AudioSession,
         Speaker,
         Transcript,
@@ -87,6 +99,11 @@ pub fn router(state: AppState) -> Router {
         .route("/speakers/:id", patch(session::update_speaker))
         .route("/speakers/:id", delete(session::delete_speaker))
         .route("/speakers/:id/enroll", post(session::enroll_speaker))
+        // segment routes (unknown speakers + retroactive tagging)
+        .route("/sessions/:id/unknowns", get(segment::list_session_unknowns))
+        .route("/unknowns", get(segment::list_unknowns))
+        .route("/segments/:id/assign", post(segment::assign_segment))
+        .route("/segments/:id/unassign", post(segment::unassign_segment))
         .route("/ws", get(ws::ws_session))
         // settings
         .route("/settings", get(settings::get_settings))

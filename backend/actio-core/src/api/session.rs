@@ -559,7 +559,7 @@ impl axum::response::IntoResponse for AppApiError {
     }
 }
 
-fn tenant_id_from_headers(headers: &HeaderMap) -> Result<Uuid, AppApiError> {
+pub fn tenant_id_from_headers(headers: &HeaderMap) -> Result<Uuid, AppApiError> {
     match headers.get("x-tenant-id") {
         Some(value) => value
             .to_str()
