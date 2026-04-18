@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -32,6 +32,11 @@ impl InferencePipeline {
     }
 
     /// Start the pipeline for a session. Returns error if models aren't ready.
+    ///
+    /// `clips_dir` is where Phase-A voiceprint-candidate clips are written.
+    /// Segments that fail speaker identification but pass a quality gate
+    /// have their raw audio retained here so the user can later be prompted
+    /// to identify who was speaking.
     pub fn start_session(
         &mut self,
         session_id: Uuid,
@@ -39,6 +44,7 @@ impl InferencePipeline {
         aggregator: Arc<TranscriptAggregator>,
         device_name: Option<&str>,
         asr_model: Option<&str>,
+        clips_dir: PathBuf,
     ) -> anyhow::Result<()> {
         // 1. Start audio capture
         let (capture_handle, audio_rx) = audio_capture::start_capture(device_name)?;
@@ -61,20 +67,28 @@ impl InferencePipeline {
         // consume raw audio directly and skip per-segment identification.
         let embedding_model = model_paths.speaker_embedding.clone();
         let pool = aggregator.pool();
+        let caps = asr::capabilities_for(chosen);
         let start_vad_pipeline = |audio_rx: mpsc::Receiver<Vec<f32>>| -> anyhow::Result<_> {
             if !model_paths.silero_vad.exists() {
                 return Err(anyhow::anyhow!(
                     "Silero VAD not found — required for offline models"
                 ));
             }
-            let upstream =
-                vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)?;
+            // Enable VAD partials only when the chosen ASR model is fast
+            // enough to re-decode a growing buffer without falling behind.
+            let mut vad_config = VadConfig::default();
+            if caps.pseudo_streaming {
+                vad_config.partial_interval_ms = Some(500);
+                info!(model = chosen, "Pseudo-streaming enabled (VAD partials @ 500 ms)");
+            }
+            let upstream = vad::start_vad(&model_paths.silero_vad, vad_config, audio_rx)?;
             Ok(split_segments_for_speaker_id(
                 upstream,
                 session_id,
                 Uuid::nil(),
                 pool.clone(),
                 embedding_model.clone(),
+                clips_dir.clone(),
             ))
         };
 
@@ -234,25 +248,40 @@ fn split_segments_for_speaker_id(
     tenant_id: Uuid,
     pool: sqlx::SqlitePool,
     embedding_model: Option<PathBuf>,
+    clips_dir: PathBuf,
 ) -> mpsc::Receiver<SpeechSegment> {
     let (tx, rx) = mpsc::channel::<SpeechSegment>(32);
     tokio::spawn(async move {
         while let Some(seg) = upstream.recv().await {
-            let start_ms = (seg.start_sample as i64 * 1000) / 16000;
-            let end_ms = (seg.end_sample as i64 * 1000) / 16000;
-            let audio_clone = seg.audio.clone();
-            let pool_c = pool.clone();
-            let emb_c = embedding_model.clone();
+            // Partial (in-progress) segments are routed straight to ASR so the
+            // recognizer can refresh its partial transcript. Speaker-id and
+            // the segment row are expensive and speaker-stable, so they run
+            // only once per closed (final) segment.
+            if !seg.is_partial {
+                let start_ms = (seg.start_sample as i64 * 1000) / 16000;
+                let end_ms = (seg.end_sample as i64 * 1000) / 16000;
+                let audio_clone = seg.audio.clone();
+                let pool_c = pool.clone();
+                let emb_c = embedding_model.clone();
+                let clips_dir_c = clips_dir.clone();
 
-            tokio::spawn(async move {
-                if let Err(e) = handle_segment_embedding(
-                    &pool_c, emb_c, session_id, tenant_id, start_ms, end_ms, audio_clone,
-                )
-                .await
-                {
-                    warn!(%session_id, error = %e, "segment speaker-id hook failed");
-                }
-            });
+                tokio::spawn(async move {
+                    if let Err(e) = handle_segment_embedding(
+                        &pool_c,
+                        emb_c,
+                        session_id,
+                        tenant_id,
+                        start_ms,
+                        end_ms,
+                        audio_clone,
+                        &clips_dir_c,
+                    )
+                    .await
+                    {
+                        warn!(%session_id, error = %e, "segment speaker-id hook failed");
+                    }
+                });
+            }
 
             if tx.send(seg).await.is_err() {
                 break; // downstream ASR consumer went away
@@ -262,16 +291,25 @@ fn split_segments_for_speaker_id(
     rx
 }
 
+/// Minimum quality score for an unknown segment to be retained as a
+/// voiceprint candidate. Empirically tuned: rms in the 0.05..0.30 band
+/// combined with at least ~4.5s of duration produces a score ≥ 0.6 through
+/// `audio_quality::score`.
+const VOICEPRINT_CANDIDATE_QUALITY: f32 = 0.6;
+
 /// Persist a single VAD segment along with its speaker identification.
 ///
 /// Order of operations:
-/// 1. If no embedding model is loaded: insert the row with NULL speaker + NULL
-///    embedding so the user can still retroactively tag it.
-/// 2. Extract the embedding; on failure, insert the row with NULL speaker and
-///    NULL embedding (same outcome as step 1 for this segment).
+/// 1. If no embedding model is loaded: insert the row with NULL speaker +
+///    NULL embedding so the user can still retroactively tag it.
+/// 2. Extract the embedding; on failure, same outcome as step 1.
 /// 3. Run `identify_speaker` against the tenant's enrolled voiceprints. If
-///    `accepted`, write the matched speaker id; otherwise NULL. In both cases
-///    the embedding is persisted on the row so it can be promoted later.
+///    `accepted`, write the matched speaker id; otherwise NULL. In both
+///    cases the embedding is persisted on the row.
+/// 4. When the segment is unknown AND passes the voiceprint-candidate
+///    quality bar, also retain the raw audio on disk so the app can later
+///    prompt the user to identify who was speaking (Phase A). A `sha` of
+///    the resulting file name is stored in `audio_segments.audio_ref`.
 async fn handle_segment_embedding(
     pool: &sqlx::SqlitePool,
     embedding_model: Option<PathBuf>,
@@ -280,10 +318,11 @@ async fn handle_segment_embedding(
     start_ms: i64,
     end_ms: i64,
     audio: Vec<f32>,
+    clips_dir: &Path,
 ) -> anyhow::Result<Option<String>> {
     let Some(model_path) = embedding_model else {
         crate::repository::segment::insert_segment(
-            pool, session_id, start_ms, end_ms, None, None, None,
+            pool, session_id, start_ms, end_ms, None, None, None, None,
         )
         .await?;
         return Ok(None);
@@ -294,7 +333,7 @@ async fn handle_segment_embedding(
         Err(err) => {
             warn!(?err, "speaker embedding failed; segment marked UNKNOWN");
             crate::repository::segment::insert_segment(
-                pool, session_id, start_ms, end_ms, None, None, None,
+                pool, session_id, start_ms, end_ms, None, None, None, None,
             )
             .await?;
             return Ok(None);
@@ -316,6 +355,28 @@ async fn handle_segment_embedding(
         .as_ref()
         .and_then(|s| Uuid::parse_str(s).ok());
 
+    // Phase-A candidate retention: only when the segment is unknown AND
+    // passes the quality gate. Known-speaker segments are redundant
+    // (we already have their voiceprint), low-quality unknown segments
+    // aren't worth asking the user about.
+    let audio_ref = if speaker_id.is_none() {
+        let quality = crate::engine::audio_quality::score(&audio);
+        if quality >= VOICEPRINT_CANDIDATE_QUALITY {
+            let candidate_id = Uuid::new_v4().to_string();
+            match crate::engine::clip_storage::write_clip(clips_dir, &candidate_id, &audio) {
+                Ok(name) => Some(name),
+                Err(err) => {
+                    warn!(?err, ?clips_dir, "failed to retain voiceprint-candidate clip");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     crate::repository::segment::insert_segment(
         pool,
         session_id,
@@ -324,6 +385,7 @@ async fn handle_segment_embedding(
         speaker_id,
         Some(result.similarity_score),
         Some(&emb.values),
+        audio_ref.as_deref(),
     )
     .await?;
 

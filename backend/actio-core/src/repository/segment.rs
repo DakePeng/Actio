@@ -75,6 +75,7 @@ pub async fn insert_segment(
     speaker_id: Option<Uuid>,
     speaker_score: Option<f64>,
     embedding: Option<&[f32]>,
+    audio_ref: Option<&str>,
 ) -> Result<Uuid, sqlx::Error> {
     let id = Uuid::new_v4().to_string();
     let (blob, dim) = match embedding {
@@ -86,8 +87,8 @@ pub async fn insert_segment(
     };
     sqlx::query(
         "INSERT INTO audio_segments \
-           (id, session_id, start_ms, end_ms, speaker_id, speaker_score, embedding, embedding_dim) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+           (id, session_id, start_ms, end_ms, speaker_id, speaker_score, embedding, embedding_dim, audio_ref) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )
     .bind(&id)
     .bind(session_id.to_string())
@@ -97,6 +98,7 @@ pub async fn insert_segment(
     .bind(speaker_score)
     .bind(blob)
     .bind(dim)
+    .bind(audio_ref)
     .execute(pool)
     .await?;
     Uuid::parse_str(&id).map_err(|e| sqlx::Error::Decode(Box::new(e)))

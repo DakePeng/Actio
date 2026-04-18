@@ -42,6 +42,8 @@ pub struct AppState {
     pub model_manager: Arc<ModelManager>,
     pub inference_pipeline: Arc<tokio::sync::Mutex<InferencePipeline>>,
     pub settings_manager: Arc<SettingsManager>,
+    /// Directory where Phase-A voiceprint-candidate clips are written.
+    pub clips_dir: PathBuf,
     /// Signalled by the settings handler when `audio.asr_model` changes.
     /// The pipeline supervisor listens for this and hot-swaps the recognizer.
     pub pipeline_restart: Arc<tokio::sync::Notify>,
@@ -97,6 +99,17 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     let inference_pipeline = Arc::new(tokio::sync::Mutex::new(InferencePipeline::new()));
     let settings_manager = Arc::new(SettingsManager::new(&config.data_dir));
 
+    // Phase-A voiceprint-candidate retention: clips land in <data_dir>/audio_clips/
+    // and get swept hourly per the user's `audio.clip_retention_days` setting.
+    let clips_dir = config.data_dir.join("audio_clips");
+    if let Err(e) = std::fs::create_dir_all(&clips_dir) {
+        warn!(error = %e, ?clips_dir, "failed to create voiceprint-clip dir");
+    }
+    {
+        let retention_days = settings_manager.get().await.audio.clip_retention_days;
+        crate::engine::clip_storage::start_cleanup_task(clips_dir.clone(), retention_days);
+    }
+
     // Build the initial router from current settings.
     let initial_settings = settings_manager.get().await;
     let initial_router = build_router_from_settings(
@@ -115,6 +128,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         model_manager,
         inference_pipeline,
         settings_manager,
+        clips_dir,
         pipeline_restart: Arc::new(tokio::sync::Notify::new()),
         engine_slot,
         llm_downloader,
@@ -322,6 +336,7 @@ async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
             state.aggregator.clone(),
             None,
             asr_model.as_deref(),
+            state.clips_dir.clone(),
         )?;
     }
 

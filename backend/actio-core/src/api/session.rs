@@ -65,6 +65,7 @@ pub async fn create_session(
                 state.aggregator.clone(),
                 None,
                 asr_model,
+                state.clips_dir.clone(),
             ) {
                 warn!(session_id = %s.id, error = %e, "Failed to start inference pipeline — CRUD-only mode");
             }
@@ -564,7 +565,9 @@ pub fn tenant_id_from_headers(headers: &HeaderMap) -> Result<Uuid, AppApiError> 
         Some(value) => value
             .to_str()
             .map_err(|e| AppApiError::Internal(e.to_string()))
-            .and_then(|value| Uuid::parse_str(value).map_err(|e| AppApiError::Internal(e.to_string()))),
+            .and_then(|value| {
+                Uuid::parse_str(value).map_err(|e| AppApiError::Internal(e.to_string()))
+            }),
         None => Ok(Uuid::nil()),
     }
 }

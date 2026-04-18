@@ -100,12 +100,31 @@ pub fn migrate_legacy_selection(llm: &mut LlmSettings) {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
     pub device_name: Option<String>,
     pub asr_model: Option<String>,
     #[serde(default)]
     pub download_source: DownloadSource,
+    /// Number of days to keep retained voiceprint-candidate clips on disk
+    /// before the background cleanup task deletes them.
+    #[serde(default = "default_clip_retention_days")]
+    pub clip_retention_days: u32,
+}
+
+fn default_clip_retention_days() -> u32 {
+    3
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            device_name: None,
+            asr_model: None,
+            download_source: DownloadSource::default(),
+            clip_retention_days: default_clip_retention_days(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
