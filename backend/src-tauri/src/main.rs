@@ -134,7 +134,10 @@ fn apply_window_mode(
     let next_height = tray_height;
 
     window.set_always_on_top(!show_board)?;
-    window.set_skip_taskbar(!show_board)?;
+    // Stay out of the Windows taskbar in every mode — the tray icon is our
+    // only entry point. Surfacing a taskbar thumbnail when the board opens
+    // just clutters the bottom bar.
+    window.set_skip_taskbar(true)?;
     window.set_decorations(false)?;
     window.set_resizable(false)?;
     clear_window_compositor_effects(window)?;
