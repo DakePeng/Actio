@@ -1,9 +1,15 @@
 import { create } from 'zustand';
-import type { Segment, Person } from '../types';
+import type { Segment } from '../types';
+import type {
+  EnrollResponse,
+  Speaker,
+  UnknownSegment,
+  AssignTarget,
+} from '../types/speaker';
+import { getWsUrl } from '../api/backend-url';
+import * as speakerApi from '../api/speakers';
 
 export type ClipInterval = 1 | 2 | 5 | 10 | 30;
-
-const WS_BASE = 'ws://127.0.0.1:3000';
 
 interface RecordingSession {
   id: string;
@@ -18,15 +24,28 @@ interface RecordingSession {
   pipelineReady: boolean;
 }
 
+export type SpeakersStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 interface VoiceState {
   isRecording: boolean;
   currentSession: RecordingSession | null;
   segments: Segment[];
-  people: Person[];
   clipInterval: ClipInterval;
+
+  // Backend-backed speaker registry.
+  speakers: Speaker[];
+  speakersStatus: SpeakersStatus;
+  speakersError: string | null;
+
+  // Retroactive tagging — unknown segments to assign.
+  unknowns: UnknownSegment[];
+  /** Client-side soft-hide — survives session lifetime but not reload. */
+  dismissedUnknowns: Set<string>;
+
   /** Internal — not serialised to localStorage */
   _ws: WebSocket | null;
 
+  // Recording + segment CRUD (unchanged).
   startRecording: () => void;
   stopRecording: () => void;
   appendLiveTranscript: (text: string) => void;
@@ -34,10 +53,19 @@ interface VoiceState {
   starSegment: (id: string) => void;
   unstarSegment: (id: string) => void;
   deleteSegment: (id: string) => void;
-  addPerson: (name: string, color: string) => void;
-  updatePerson: (id: string, updates: { name?: string; color?: string }) => void;
-  deletePerson: (id: string) => void;
   setClipInterval: (minutes: ClipInterval) => void;
+
+  // Speaker actions — all talk to the backend.
+  fetchSpeakers: () => Promise<void>;
+  createSpeaker: (input: { display_name: string; color: string }) => Promise<Speaker>;
+  updateSpeaker: (id: string, patch: { display_name?: string; color?: string }) => Promise<void>;
+  deleteSpeaker: (id: string) => Promise<void>;
+  enrollSpeaker: (id: string, clips: Blob[]) => Promise<EnrollResponse>;
+
+  // Unknown-segment actions.
+  fetchUnknowns: () => Promise<void>;
+  assignSegment: (segmentId: string, target: AssignTarget) => Promise<void>;
+  dismissUnknown: (segmentId: string) => void;
 }
 
 const MAX_UNSTARRED = 30;
@@ -54,40 +82,50 @@ export function pruneSegments(segments: Segment[]): Segment[] {
   });
 }
 
-function loadVoiceData(): { segments: Segment[]; people: Person[]; clipInterval: ClipInterval } {
+interface PersistedVoiceData {
+  segments: Segment[];
+  clipInterval: ClipInterval;
+}
+
+function loadVoiceData(): PersistedVoiceData {
   try {
-    return (
-      JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') ?? {
-        segments: [],
-        people: [],
-        clipInterval: 5,
-      }
-    );
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
+    if (raw && typeof raw === 'object') {
+      return {
+        segments: Array.isArray(raw.segments) ? raw.segments : [],
+        clipInterval: [1, 2, 5, 10, 30].includes(raw.clipInterval) ? raw.clipInterval : 5,
+      };
+    }
   } catch {
-    return { segments: [], people: [], clipInterval: 5 };
+    /* fall through */
   }
+  return { segments: [], clipInterval: 5 };
 }
 
-function saveVoiceData(segments: Segment[], people: Person[], clipInterval: ClipInterval) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ segments, people, clipInterval }));
+function saveVoiceData(segments: Segment[], clipInterval: ClipInterval) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ segments, clipInterval }));
 }
 
-const { segments: initialSegments, people: initialPeople, clipInterval: initialClipInterval } =
-  loadVoiceData();
+const { segments: initialSegments, clipInterval: initialClipInterval } = loadVoiceData();
 
 export const useVoiceStore = create<VoiceState>((set, get) => ({
   isRecording: false,
   currentSession: null,
   segments: initialSegments,
-  people: initialPeople,
   clipInterval: initialClipInterval,
+
+  speakers: [],
+  speakersStatus: 'idle',
+  speakersError: null,
+
+  unknowns: [],
+  dismissedUnknowns: new Set<string>(),
+
   _ws: null,
 
   startRecording: () => {
-    // The backend runs an always-on inference pipeline. Recording is just
-    // "subscribe to the live transcript stream" — no session creation, no
-    // backend state change. Closing the WebSocket detaches us; the pipeline
-    // keeps running for other consumers.
+    // The backend starts microphone capture while at least one WebSocket
+    // subscriber is attached. Closing this socket stops our recording session.
     const session: RecordingSession = {
       id: 'live',
       startedAt: new Date().toISOString(),
@@ -97,43 +135,48 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     };
     set({ isRecording: true, currentSession: session });
 
-    const ws = new WebSocket(`${WS_BASE}/ws`);
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.kind === 'transcript' && msg.text) {
-          if (msg.is_final) {
-            // Commit: append finalized text, clear pending partial
-            set((state) => {
-              if (!state.currentSession) return state;
-              const prev = state.currentSession.liveTranscript;
-              return {
-                currentSession: {
-                  ...state.currentSession,
-                  liveTranscript: prev ? `${prev} ${msg.text}` : msg.text,
-                  pendingPartial: '',
-                  pipelineReady: true,
-                },
-              };
-            });
-          } else {
-            // Partial: replace in-progress text (don't append)
-            set((state) => {
-              if (!state.currentSession) return state;
-              return {
-                currentSession: {
-                  ...state.currentSession,
-                  pendingPartial: msg.text,
-                  pipelineReady: true,
-                },
-              };
-            });
-          }
-        }
-      } catch { /* ignore malformed frames */ }
-    };
-    ws.onerror = (e) => console.warn('[Actio] WS error', e);
-    set({ _ws: ws });
+    void getWsUrl('/ws')
+      .then((url) => {
+        if (!get().currentSession) return;
+        const ws = new WebSocket(url);
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.kind === 'transcript' && msg.text) {
+              if (msg.is_final) {
+                // Commit: append finalized text, clear pending partial
+                set((state) => {
+                  if (!state.currentSession) return state;
+                  const prev = state.currentSession.liveTranscript;
+                  return {
+                    currentSession: {
+                      ...state.currentSession,
+                      liveTranscript: prev ? `${prev} ${msg.text}` : msg.text,
+                      pendingPartial: '',
+                      pipelineReady: true,
+                    },
+                  };
+                });
+              } else {
+                // Partial: replace in-progress text (don't append)
+                set((state) => {
+                  if (!state.currentSession) return state;
+                  return {
+                    currentSession: {
+                      ...state.currentSession,
+                      pendingPartial: msg.text,
+                      pipelineReady: true,
+                    },
+                  };
+                });
+              }
+            }
+          } catch { /* ignore malformed frames */ }
+        };
+        ws.onerror = (e) => console.warn('[Actio] WS error', e);
+        set({ _ws: ws });
+      })
+      .catch((e) => console.warn('[Actio] WS discovery failed', e));
   },
 
   stopRecording: () => {
@@ -157,7 +200,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   },
 
   flushInterval: () => {
-    const { currentSession, segments, people, clipInterval } = get();
+    const { currentSession, segments, clipInterval } = get();
     if (!currentSession || !currentSession.liveTranscript.trim()) return;
 
     const newSegment: Segment = {
@@ -169,7 +212,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     };
 
     const next = pruneSegments([newSegment, ...segments]);
-    saveVoiceData(next, people, clipInterval);
+    saveVoiceData(next, clipInterval);
     set({
       segments: next,
       currentSession: { ...currentSession, liveTranscript: '' },
@@ -179,7 +222,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   starSegment: (id) => {
     set((state) => {
       const next = state.segments.map((s) => (s.id === id ? { ...s, starred: true } : s));
-      saveVoiceData(next, state.people, state.clipInterval);
+      saveVoiceData(next, state.clipInterval);
       return { segments: next };
     });
   },
@@ -188,7 +231,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set((state) => {
       const mapped = state.segments.map((s) => (s.id === id ? { ...s, starred: false } : s));
       const next = pruneSegments(mapped);
-      saveVoiceData(next, state.people, state.clipInterval);
+      saveVoiceData(next, state.clipInterval);
       return { segments: next };
     });
   },
@@ -196,45 +239,100 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   deleteSegment: (id) => {
     set((state) => {
       const next = state.segments.filter((s) => s.id !== id);
-      saveVoiceData(next, state.people, state.clipInterval);
+      saveVoiceData(next, state.clipInterval);
       return { segments: next };
-    });
-  },
-
-  addPerson: (name, color) => {
-    set((state) => {
-      const person: Person = {
-        id: crypto.randomUUID(),
-        name,
-        color,
-        createdAt: new Date().toISOString(),
-      };
-      const next = [...state.people, person];
-      saveVoiceData(state.segments, next, state.clipInterval);
-      return { people: next };
-    });
-  },
-
-  updatePerson: (id, updates) => {
-    set((state) => {
-      const next = state.people.map((p) => (p.id === id ? { ...p, ...updates } : p));
-      saveVoiceData(state.segments, next, state.clipInterval);
-      return { people: next };
-    });
-  },
-
-  deletePerson: (id) => {
-    set((state) => {
-      const next = state.people.filter((p) => p.id !== id);
-      saveVoiceData(state.segments, next, state.clipInterval);
-      return { people: next };
     });
   },
 
   setClipInterval: (minutes) => {
     set((state) => {
-      saveVoiceData(state.segments, state.people, minutes);
+      saveVoiceData(state.segments, minutes);
       return { clipInterval: minutes };
+    });
+  },
+
+  // --- Speaker actions ---
+
+  fetchSpeakers: async () => {
+    set({ speakersStatus: 'loading', speakersError: null });
+    try {
+      const list = await speakerApi.listSpeakers();
+      set({ speakers: list, speakersStatus: 'ready' });
+    } catch (e) {
+      set({ speakersStatus: 'error', speakersError: (e as Error).message });
+    }
+  },
+
+  createSpeaker: async (input) => {
+    const s = await speakerApi.createSpeaker(input);
+    set((state) => ({ speakers: [s, ...state.speakers] }));
+    return s;
+  },
+
+  updateSpeaker: async (id, patch) => {
+    // Optimistic — fall back to re-fetch on failure.
+    const prev = get().speakers;
+    set({
+      speakers: prev.map((s) =>
+        s.id === id ? { ...s, ...(patch.display_name ? { display_name: patch.display_name } : {}), ...(patch.color ? { color: patch.color } : {}) } : s,
+      ),
+    });
+    try {
+      const updated = await speakerApi.updateSpeaker(id, patch);
+      set((state) => ({
+        speakers: state.speakers.map((s) => (s.id === id ? updated : s)),
+      }));
+    } catch (e) {
+      set({ speakers: prev });
+      throw e;
+    }
+  },
+
+  deleteSpeaker: async (id) => {
+    const prev = get().speakers;
+    set({ speakers: prev.filter((s) => s.id !== id) });
+    try {
+      await speakerApi.deleteSpeaker(id);
+    } catch (e) {
+      set({ speakers: prev });
+      throw e;
+    }
+  },
+
+  enrollSpeaker: async (id, clips) => speakerApi.enrollSpeaker(id, clips),
+
+  // --- Unknown segments ---
+
+  fetchUnknowns: async () => {
+    const list = await speakerApi.listUnknowns(50);
+    const dismissed = get().dismissedUnknowns;
+    set({ unknowns: list.filter((u) => !dismissed.has(u.segment_id)) });
+  },
+
+  assignSegment: async (segmentId, target) => {
+    const prev = get().unknowns;
+    // Optimistic removal.
+    set({ unknowns: prev.filter((u) => u.segment_id !== segmentId) });
+    try {
+      await speakerApi.assignSegment(segmentId, target);
+      // Refresh speakers if we just created a new one inline.
+      if ('new_speaker' in target) {
+        void get().fetchSpeakers();
+      }
+    } catch (e) {
+      set({ unknowns: prev });
+      throw e;
+    }
+  },
+
+  dismissUnknown: (segmentId) => {
+    set((state) => {
+      const dismissed = new Set(state.dismissedUnknowns);
+      dismissed.add(segmentId);
+      return {
+        dismissedUnknowns: dismissed,
+        unknowns: state.unknowns.filter((u) => u.segment_id !== segmentId),
+      };
     });
   },
 }));

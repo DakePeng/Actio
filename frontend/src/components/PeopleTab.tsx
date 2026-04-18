@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
-import type { Person } from '../types';
+import type { Speaker } from '../types/speaker';
 
 const PRESET_COLORS = [
   '#E57373',
@@ -54,40 +54,71 @@ const personVariants = {
 };
 
 export function PeopleTab() {
-  const people = useVoiceStore((s) => s.people);
-  const addPerson = useVoiceStore((s) => s.addPerson);
-  const updatePerson = useVoiceStore((s) => s.updatePerson);
-  const deletePerson = useVoiceStore((s) => s.deletePerson);
+  const speakers = useVoiceStore((s) => s.speakers);
+  const speakersStatus = useVoiceStore((s) => s.speakersStatus);
+  const speakersError = useVoiceStore((s) => s.speakersError);
+  const fetchSpeakers = useVoiceStore((s) => s.fetchSpeakers);
+  const createSpeaker = useVoiceStore((s) => s.createSpeaker);
+  const updateSpeaker = useVoiceStore((s) => s.updateSpeaker);
+  const deleteSpeaker = useVoiceStore((s) => s.deleteSpeaker);
 
   const [formMode, setFormMode] = useState<FormMode>('idle');
   const [name, setName] = useState('');
   const [color, setColor] = useState(PRESET_COLORS[0]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Load speakers on mount (and on remount after reconnection).
+  useEffect(() => {
+    if (speakersStatus === 'idle') {
+      void fetchSpeakers();
+    }
+  }, [speakersStatus, fetchSpeakers]);
 
   function openAdd() {
     setFormMode('adding');
     setName('');
     setColor(PRESET_COLORS[0]);
+    setSaveError(null);
   }
 
-  function openEdit(person: Person) {
-    setFormMode({ editing: person.id });
-    setName(person.name);
-    setColor(person.color);
+  function openEdit(speaker: Speaker) {
+    setFormMode({ editing: speaker.id });
+    setName(speaker.display_name);
+    setColor(speaker.color);
+    setSaveError(null);
   }
 
-  function handleSave() {
+  async function handleSave() {
     const trimmed = name.trim();
     if (!trimmed) return;
-    if (formMode === 'adding') {
-      addPerson(trimmed, color);
-    } else if (typeof formMode === 'object') {
-      updatePerson(formMode.editing, { name: trimmed, color });
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (formMode === 'adding') {
+        await createSpeaker({ display_name: trimmed, color });
+      } else if (typeof formMode === 'object') {
+        await updateSpeaker(formMode.editing, { display_name: trimmed, color });
+      }
+      setFormMode('idle');
+    } catch (e) {
+      setSaveError((e as Error).message);
+    } finally {
+      setSaving(false);
     }
-    setFormMode('idle');
   }
 
   function handleCancel() {
     setFormMode('idle');
+    setSaveError(null);
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteSpeaker(id);
+    } catch (e) {
+      console.warn('[Actio] delete speaker failed', e);
+    }
   }
 
   const isFormOpen = formMode !== 'idle';
@@ -128,7 +159,7 @@ export function PeopleTab() {
               onChange={(e) => setName(e.target.value)}
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSave();
+                if (e.key === 'Enter') void handleSave();
                 if (e.key === 'Escape') handleCancel();
               }}
             />
@@ -151,12 +182,12 @@ export function PeopleTab() {
               <motion.button
                 type="button"
                 className="primary-button"
-                onClick={handleSave}
-                disabled={!name.trim()}
+                onClick={() => void handleSave()}
+                disabled={!name.trim() || saving}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
               >
-                Save
+                {saving ? 'Saving…' : 'Save'}
               </motion.button>
               <motion.button
                 type="button"
@@ -168,13 +199,20 @@ export function PeopleTab() {
                 Cancel
               </motion.button>
             </div>
+            {saveError && <p className="person-form__error">{saveError}</p>}
           </motion.div>
         )}
       </AnimatePresence>
 
+      {speakersStatus === 'error' && (
+        <p className="people-tab__empty" role="alert">
+          Backend required to manage speakers. {speakersError ?? ''}
+        </p>
+      )}
+
       <div className="people-tab__list">
         <AnimatePresence>
-          {people.length === 0 && !isFormOpen && (
+          {speakers.length === 0 && speakersStatus === 'ready' && !isFormOpen && (
             <motion.p
               key="empty"
               className="people-tab__empty"
@@ -185,9 +223,9 @@ export function PeopleTab() {
               No people added yet.
             </motion.p>
           )}
-          {people.map((person, i) => (
+          {speakers.map((speaker, i) => (
             <motion.div
-              key={person.id}
+              key={speaker.id}
               className="person-row"
               variants={personVariants}
               initial="hidden"
@@ -198,19 +236,19 @@ export function PeopleTab() {
             >
               <motion.div
                 className="person-row__avatar"
-                style={{ backgroundColor: person.color }}
+                style={{ backgroundColor: speaker.color }}
                 aria-hidden="true"
-                layoutId={`avatar-${person.id}`}
+                layoutId={`avatar-${speaker.id}`}
               >
-                {person.name.charAt(0).toUpperCase()}
+                {speaker.display_name.charAt(0).toUpperCase()}
               </motion.div>
-              <span className="person-row__name">{person.name}</span>
+              <span className="person-row__name">{speaker.display_name}</span>
               <div className="person-row__actions">
                 <motion.button
                   type="button"
                   className="person-edit-btn"
-                  onClick={() => openEdit(person)}
-                  aria-label={`Edit ${person.name}`}
+                  onClick={() => openEdit(speaker)}
+                  aria-label={`Edit ${speaker.display_name}`}
                   whileHover={{ scale: 1.15 }}
                   whileTap={{ scale: 0.9 }}
                 >
@@ -219,8 +257,8 @@ export function PeopleTab() {
                 <motion.button
                   type="button"
                   className="person-delete-btn"
-                  onClick={() => deletePerson(person.id)}
-                  aria-label={`Delete ${person.name}`}
+                  onClick={() => void handleDelete(speaker.id)}
+                  aria-label={`Delete ${speaker.display_name}`}
                   whileHover={{ scale: 1.15 }}
                   whileTap={{ scale: 0.9 }}
                 >

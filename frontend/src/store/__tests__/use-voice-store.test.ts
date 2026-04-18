@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useVoiceStore, pruneSegments } from '../use-voice-store';
 import type { Segment } from '../../types';
+import { resetBackendUrlCache } from '../../api/backend-url';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -67,20 +68,31 @@ describe('pruneSegments', () => {
 
 describe('useVoiceStore', () => {
   beforeEach(() => {
+    resetBackendUrlCache();
     localStorage.clear();
     MockWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
     useVoiceStore.setState({
       isRecording: false,
       currentSession: null,
       segments: [],
-      people: [],
       clipInterval: 5,
+      speakers: [],
+      speakersStatus: 'idle',
+      speakersError: null,
+      unknowns: [],
+      dismissedUnknowns: new Set<string>(),
       _ws: null,
     });
   });
 
   afterEach(() => {
+    useVoiceStore.setState({
+      isRecording: false,
+      currentSession: null,
+      _ws: null,
+    });
     vi.unstubAllGlobals();
   });
 
@@ -89,12 +101,15 @@ describe('useVoiceStore', () => {
     expect(s.isRecording).toBe(false);
     expect(s.currentSession).toBeNull();
     expect(s.segments).toHaveLength(0);
-    expect(s.people).toHaveLength(0);
+    expect(s.speakers).toHaveLength(0);
+    expect(s.unknowns).toHaveLength(0);
+    expect(s.speakersStatus).toBe('idle');
     expect(s.clipInterval).toBe(5);
   });
 
-  it('startRecording sets isRecording and creates a session', () => {
+  it('startRecording sets isRecording and creates a session', async () => {
     useVoiceStore.getState().startRecording();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
     const s = useVoiceStore.getState();
     expect(s.isRecording).toBe(true);
     expect(s.currentSession).not.toBeNull();
@@ -161,30 +176,6 @@ describe('useVoiceStore', () => {
     expect(useVoiceStore.getState().segments).toHaveLength(0);
   });
 
-  it('addPerson creates a person entry', () => {
-    useVoiceStore.getState().addPerson('Alice', '#E57373');
-    const people = useVoiceStore.getState().people;
-    expect(people).toHaveLength(1);
-    expect(people[0].name).toBe('Alice');
-    expect(people[0].color).toBe('#E57373');
-  });
-
-  it('updatePerson changes name and color', () => {
-    useVoiceStore.getState().addPerson('Bob', '#64B5F6');
-    const id = useVoiceStore.getState().people[0].id;
-    useVoiceStore.getState().updatePerson(id, { name: 'Robert', color: '#81C784' });
-    const person = useVoiceStore.getState().people[0];
-    expect(person.name).toBe('Robert');
-    expect(person.color).toBe('#81C784');
-  });
-
-  it('deletePerson removes the entry', () => {
-    useVoiceStore.getState().addPerson('Carol', '#FFD54F');
-    const id = useVoiceStore.getState().people[0].id;
-    useVoiceStore.getState().deletePerson(id);
-    expect(useVoiceStore.getState().people).toHaveLength(0);
-  });
-
   it('setClipInterval updates interval and persists to localStorage', () => {
     useVoiceStore.getState().setClipInterval(10);
     expect(useVoiceStore.getState().clipInterval).toBe(10);
@@ -199,5 +190,18 @@ describe('useVoiceStore', () => {
     const stored = JSON.parse(localStorage.getItem('actio-voice') ?? '{}');
     expect(stored.segments).toHaveLength(1);
     expect(stored.segments[0].text).toBe('Persisted text.');
+  });
+
+  it('dismissUnknown soft-hides an unknown and remembers it', () => {
+    useVoiceStore.setState({
+      unknowns: [
+        { segment_id: 'seg-a', session_id: 's', start_ms: 0, end_ms: 1000, has_embedding: true },
+        { segment_id: 'seg-b', session_id: 's', start_ms: 2000, end_ms: 3000, has_embedding: true },
+      ],
+    });
+    useVoiceStore.getState().dismissUnknown('seg-a');
+    const s = useVoiceStore.getState();
+    expect(s.unknowns.map((u) => u.segment_id)).toEqual(['seg-b']);
+    expect(s.dismissedUnknowns.has('seg-a')).toBe(true);
   });
 });
