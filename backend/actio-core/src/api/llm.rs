@@ -66,7 +66,7 @@ pub async fn delete_local_llm(
         .llm_downloader
         .delete(&id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
 
     // If the deleted model was the active selection, switch to Disabled
     // and rebuild the router — all in one request (atomic DELETE).

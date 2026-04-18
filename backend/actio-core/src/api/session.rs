@@ -1,4 +1,4 @@
-use axum::extract::{Path, Query, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::Json;
@@ -51,7 +51,7 @@ pub async fn create_session(
     let mode = req.mode.as_deref().unwrap_or("realtime");
     let s = session::create_session(&state.pool, tenant_id, source_type, mode)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
 
     // Attempt to start inference pipeline if models are ready (graceful degradation)
     if let Some(model_paths) = state.model_manager.model_paths().await {
@@ -100,7 +100,7 @@ pub async fn get_session(
 ) -> Result<Json<AudioSession>, AppApiError> {
     let s = session::get_session(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(s))
 }
 
@@ -122,7 +122,7 @@ pub async fn end_session(
 ) -> Result<StatusCode, AppApiError> {
     session::end_session(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
 
     // Stop the inference pipeline if running
     state.inference_pipeline.lock().await.stop();
@@ -134,7 +134,7 @@ pub async fn end_session(
         let tenant_id = session::get_session(&state.pool, id)
             .await
             .map(|session| session.tenant_id.parse::<Uuid>().unwrap_or_default())
-            .map_err(|e| AppApiError(e.to_string()))?;
+            .map_err(|e| AppApiError::Internal(e.to_string()))?;
         tokio::spawn(async move {
             let router_guard = router.read().await;
             let result = tokio::time::timeout(
@@ -172,7 +172,7 @@ pub async fn get_transcripts(
 ) -> Result<Json<Vec<Transcript>>, AppApiError> {
     let transcripts = transcript::get_transcripts_for_session(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(transcripts))
 }
 
@@ -196,7 +196,7 @@ pub async fn get_todo_items(
 ) -> Result<Json<TodoListResponse>, AppApiError> {
     let todos = todo::get_todos_for_session(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(TodoListResponse {
         todos,
         generated: true,
@@ -234,7 +234,7 @@ pub async fn create_speaker(
     let tenant_id = tenant_id_from_headers(&headers)?;
     let s = speaker::create_speaker(&state.pool, &req.display_name, &req.color, tenant_id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok((StatusCode::CREATED, Json(s)))
 }
 
@@ -254,7 +254,7 @@ pub async fn list_speakers(
     let tenant_id = tenant_id_from_headers(&headers)?;
     let speakers = speaker::list_speakers(&state.pool, tenant_id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(speakers))
 }
 
@@ -278,7 +278,7 @@ pub async fn list_sessions(
     let offset = params.offset.unwrap_or(0);
     let sessions = session::list_sessions(&state.pool, tenant_id, limit, offset)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(sessions))
 }
 
@@ -314,8 +314,8 @@ pub async fn update_speaker(
     .await
     {
         Ok(Some(s)) => Ok(Json(s)),
-        Ok(None) => Err(AppApiError("speaker not found".into())),
-        Err(e) => Err(AppApiError(e.to_string())),
+        Ok(None) => Err(AppApiError::Internal("speaker not found".into())),
+        Err(e) => Err(AppApiError::Internal(e.to_string())),
     }
 }
 
@@ -335,42 +335,227 @@ pub async fn delete_speaker(
 ) -> Result<StatusCode, AppApiError> {
     let deleted = speaker::delete_speaker_with_segment_cleanup(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppApiError("speaker not found".into()))
+        Err(AppApiError::Internal("speaker not found".into()))
     }
 }
 
 // --- Speaker enrollment ---
 
-#[derive(Deserialize)]
-pub struct EnrollRequest {
-    /// Base64-encoded f32 audio samples at 16kHz mono
-    pub audio_base64: String,
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EnrolledEmbedding {
+    pub id: String,
+    pub duration_ms: f64,
+    pub quality_score: f64,
+    pub is_primary: bool,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EnrollResponse {
+    pub speaker_id: String,
+    pub embeddings: Vec<EnrolledEmbedding>,
+    pub warnings: Vec<String>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/speakers/{id}/enroll",
+    tag = "speakers",
+    params(("id" = Uuid, Path, description = "Speaker ID")),
+    responses(
+        (status = 201, description = "Voiceprint enrolled", body = EnrollResponse),
+        (status = 400, description = "No valid clips", body = AppApiError),
+        (status = 409, description = "Embedding model missing", body = AppApiError),
+        (status = 500, description = "Internal server error", body = AppApiError),
+    ),
+)]
 pub async fn enroll_speaker(
-    State(_state): State<AppState>,
-    Path(_id): Path<Uuid>,
-    Json(_body): Json<EnrollRequest>,
-) -> Result<StatusCode, AppApiError> {
-    // Stub — full enrollment logic requires frontend UI (Phase 6)
-    // and speaker_matcher.rs BLOB storage wiring.
-    Err(AppApiError("not implemented".into()))
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<EnrollResponse>), AppApiError> {
+    // Resolve the embedding model; 409 if missing.
+    let model_paths = state
+        .model_manager
+        .model_paths()
+        .await
+        .ok_or_else(|| AppApiError::Conflict("embedding_model_missing".into()))?;
+    let model_path = model_paths
+        .speaker_embedding
+        .clone()
+        .ok_or_else(|| AppApiError::Conflict("embedding_model_missing".into()))?;
+
+    // Collect clip bytes from multipart parts named clip_*
+    let mut raw_clips: Vec<(String, Vec<u8>)> = Vec::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppApiError::BadRequest(e.to_string()))?
+    {
+        let name = field.name().unwrap_or("").to_string();
+        if !name.starts_with("clip_") {
+            continue;
+        }
+        let data = field
+            .bytes()
+            .await
+            .map_err(|e| AppApiError::BadRequest(e.to_string()))?
+            .to_vec();
+        raw_clips.push((name, data));
+    }
+
+    if raw_clips.is_empty() {
+        return Err(AppApiError::BadRequest(
+            "no_valid_clips: empty upload".into(),
+        ));
+    }
+
+    // Decode + extract embeddings (NO DB writes yet).
+    struct Prepared {
+        embedding: Vec<f32>,
+        duration_ms: f64,
+        quality: f64,
+    }
+    let mut prepared: Vec<Prepared> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    for (name, bytes) in raw_clips {
+        let (samples, duration_ms) = match crate::engine::wav::decode_to_mono_16k(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                warnings.push(format!("{name}: failed to decode ({e})"));
+                continue;
+            }
+        };
+
+        if duration_ms < 3_000.0 {
+            warnings.push(format!(
+                "{name}: skipped — duration {:.1}s < 3s minimum",
+                duration_ms / 1000.0
+            ));
+            continue;
+        }
+        if duration_ms > 30_000.0 {
+            warnings.push(format!(
+                "{name}: skipped — duration {:.1}s > 30s maximum",
+                duration_ms / 1000.0
+            ));
+            continue;
+        }
+
+        let emb = match crate::engine::diarization::extract_embedding(&model_path, &samples).await {
+            Ok(e) => e,
+            Err(e) => {
+                warnings.push(format!("{name}: extraction failed ({e})"));
+                continue;
+            }
+        };
+
+        prepared.push(Prepared {
+            embedding: emb.values,
+            duration_ms,
+            quality: crate::engine::audio_quality::score(&samples) as f64,
+        });
+    }
+
+    if prepared.is_empty() {
+        return Err(AppApiError::BadRequest(format!(
+            "no_valid_clips: {}",
+            warnings.join("; ")
+        )));
+    }
+
+    // Transactional delete-then-insert (mode=replace is the v1 default).
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+    sqlx::query("DELETE FROM speaker_embeddings WHERE speaker_id = ?1")
+        .bind(id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+    let mut inserted: Vec<EnrolledEmbedding> = Vec::new();
+    for (i, p) in prepared.iter().enumerate() {
+        let is_primary = i == 0;
+        let new_id = Uuid::new_v4().to_string();
+        let blob: &[u8] = bytemuck::cast_slice(&p.embedding);
+        sqlx::query(
+            "INSERT INTO speaker_embeddings \
+               (id, speaker_id, embedding, duration_ms, quality_score, is_primary, embedding_dimension) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .bind(&new_id)
+        .bind(id.to_string())
+        .bind(blob)
+        .bind(p.duration_ms)
+        .bind(p.quality)
+        .bind(is_primary as i64)
+        .bind(p.embedding.len() as i64)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+        inserted.push(EnrolledEmbedding {
+            id: new_id,
+            duration_ms: p.duration_ms,
+            quality_score: p.quality,
+            is_primary,
+        });
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(EnrollResponse {
+            speaker_id: id.to_string(),
+            embeddings: inserted,
+            warnings,
+        }),
+    ))
 }
 
 // --- Error ---
 
 #[derive(Debug, ToSchema)]
 #[allow(dead_code)]
-pub struct AppApiError(pub String);
+pub enum AppApiError {
+    Internal(String),
+    BadRequest(String),
+    Conflict(String),
+}
 
 impl axum::response::IntoResponse for AppApiError {
     fn into_response(self) -> axum::response::Response {
-        tracing::error!(error = %self.0, "Internal server error");
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+        match self {
+            Self::Internal(msg) => {
+                tracing::error!(error = %msg, "Internal server error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": msg})),
+                )
+                    .into_response()
+            }
+            Self::BadRequest(msg) => (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": msg})),
+            )
+                .into_response(),
+            Self::Conflict(msg) => (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"error": msg})),
+            )
+                .into_response(),
+        }
     }
 }
 
@@ -378,8 +563,8 @@ fn tenant_id_from_headers(headers: &HeaderMap) -> Result<Uuid, AppApiError> {
     match headers.get("x-tenant-id") {
         Some(value) => value
             .to_str()
-            .map_err(|e| AppApiError(e.to_string()))
-            .and_then(|value| Uuid::parse_str(value).map_err(|e| AppApiError(e.to_string()))),
+            .map_err(|e| AppApiError::Internal(e.to_string()))
+            .and_then(|value| Uuid::parse_str(value).map_err(|e| AppApiError::Internal(e.to_string()))),
         None => Ok(Uuid::nil()),
     }
 }

@@ -23,7 +23,7 @@ pub async fn list_labels(
     let tenant_id = tenant_id_from_headers(&headers);
     let labels = label_repo::list_labels(&state.pool, tenant_id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(labels))
 }
 
@@ -36,9 +36,9 @@ pub async fn create_label(
     match label_repo::create_label(&state.pool, tenant_id, &req).await {
         Ok(label) => Ok((StatusCode::CREATED, Json(label))),
         Err(sqlx::Error::Database(e)) if e.constraint() == Some("labels_tenant_id_name_key") => {
-            Err(AppApiError(format!("label '{}' already exists", req.name)))
+            Err(AppApiError::Internal(format!("label '{}' already exists", req.name)))
         }
-        Err(e) => Err(AppApiError(e.to_string())),
+        Err(e) => Err(AppApiError::Internal(e.to_string())),
     }
 }
 
@@ -49,10 +49,10 @@ pub async fn patch_label(
 ) -> Result<Json<Label>, AppApiError> {
     match label_repo::patch_label(&state.pool, id, &req)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?
+        .map_err(|e| AppApiError::Internal(e.to_string()))?
     {
         Some(l) => Ok(Json(l)),
-        None => Err(AppApiError("not found".into())),
+        None => Err(AppApiError::Internal("not found".into())),
     }
 }
 
@@ -62,10 +62,10 @@ pub async fn delete_label(
 ) -> Result<StatusCode, AppApiError> {
     let deleted = label_repo::delete_label(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppApiError("not found".into()))
+        Err(AppApiError::Internal("not found".into()))
     }
 }

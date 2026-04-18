@@ -445,7 +445,7 @@ pub async fn list_reminders(
     };
     let reminders = reminder_repo::list_reminders(&state.pool, tenant_id, &filter)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(reminders))
 }
 
@@ -468,7 +468,7 @@ pub async fn create_reminder(
     Json(req): Json<CreateReminderRequest>,
 ) -> Result<(StatusCode, Json<Reminder>), AppApiError> {
     if req.title.is_none() && req.description.is_none() {
-        return Err(AppApiError("title or description is required".into()));
+        return Err(AppApiError::Internal("title or description is required".into()));
     }
     let tenant_id = tenant_id_from_headers(&headers);
     let label_ids = req.labels.as_deref().unwrap_or(&[]);
@@ -487,7 +487,7 @@ pub async fn create_reminder(
     };
     let reminder = reminder_repo::create_reminder(&state.pool, &new_reminder, label_ids)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok((StatusCode::CREATED, Json(reminder)))
 }
 
@@ -497,10 +497,10 @@ pub async fn get_reminder(
 ) -> Result<Json<Reminder>, AppApiError> {
     match reminder_repo::get_reminder(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?
+        .map_err(|e| AppApiError::Internal(e.to_string()))?
     {
         Some(r) => Ok(Json(r)),
-        None => Err(AppApiError("not found".into())),
+        None => Err(AppApiError::Internal("not found".into())),
     }
 }
 
@@ -511,20 +511,20 @@ pub async fn patch_reminder(
 ) -> Result<Json<Reminder>, AppApiError> {
     if let Some(ref s) = patch.status {
         if !["open", "completed", "archived"].contains(&s.as_str()) {
-            return Err(AppApiError(format!("invalid status: {s}")));
+            return Err(AppApiError::Internal(format!("invalid status: {s}")));
         }
     }
     if let Some(ref p) = patch.priority {
         if !["high", "medium", "low"].contains(&p.as_str()) {
-            return Err(AppApiError(format!("invalid priority: {p}")));
+            return Err(AppApiError::Internal(format!("invalid priority: {p}")));
         }
     }
     match reminder_repo::patch_reminder(&state.pool, id, &patch)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?
+        .map_err(|e| AppApiError::Internal(e.to_string()))?
     {
         Some(r) => Ok(Json(r)),
-        None => Err(AppApiError("not found".into())),
+        None => Err(AppApiError::Internal("not found".into())),
     }
 }
 
@@ -534,11 +534,11 @@ pub async fn delete_reminder(
 ) -> Result<StatusCode, AppApiError> {
     let deleted = reminder_repo::delete_reminder(&state.pool, id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppApiError("not found".into()))
+        Err(AppApiError::Internal("not found".into()))
     }
 }
 
@@ -562,14 +562,14 @@ pub async fn extract_reminders(
 ) -> Result<Json<Vec<Reminder>>, AppApiError> {
     let text = req.text.trim().to_string();
     if text.is_empty() && req.images.is_empty() {
-        return Err(AppApiError("text or at least one image is required".into()));
+        return Err(AppApiError::Internal("text or at least one image is required".into()));
     }
 
     let tenant_id = tenant_id_from_headers(&headers);
 
     let router = state.router.read().await;
     if router.is_disabled() {
-        return Err(AppApiError("no LLM backend is configured".into()));
+        return Err(AppApiError::Internal("no LLM backend is configured".into()));
     }
 
     // Fetch available labels so the model can tag items.
@@ -584,7 +584,7 @@ pub async fn extract_reminders(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "extract_reminders: LLM extraction failed");
-            AppApiError(format!("LLM extraction failed: {e}"))
+            AppApiError::Internal(format!("LLM extraction failed: {e}"))
         })?;
 
     let mut created_reminders = Vec::new();

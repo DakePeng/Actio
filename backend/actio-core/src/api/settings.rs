@@ -44,7 +44,7 @@ pub async fn start_model_download(
         .model_manager
         .start_download(req.target, source, tx)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -74,7 +74,7 @@ pub async fn delete_model(
         .model_manager
         .delete_model(&id)
         .await
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
     Ok(Json(DeleteModelResult { deleted }))
 }
 
@@ -91,7 +91,7 @@ pub async fn warmup_models(
     let paths = state
         .model_manager
         .files_to_warmup(&req.asr_model)
-        .map_err(|e| AppApiError(e.to_string()))?;
+        .map_err(|e| AppApiError::Internal(e.to_string()))?;
 
     let asr_model = req.asr_model;
     let handle = tokio::task::spawn_blocking(move || -> u64 {
@@ -126,7 +126,7 @@ pub async fn warmup_models(
 
     handle
         .await
-        .map_err(|e| AppApiError(format!("warmup task join error: {e}")))?;
+        .map_err(|e| AppApiError::Internal(format!("warmup task join error: {e}")))?;
 
     Ok(StatusCode::OK)
 }
