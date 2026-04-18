@@ -16,8 +16,6 @@ pub struct UnknownSegmentResponse {
     pub session_id: String,
     pub start_ms: i64,
     pub end_ms: i64,
-    /// Whether this segment has an embedding we can promote on assign.
-    pub has_embedding: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,7 +47,15 @@ fn default_color() -> String {
 pub struct AssignSegmentResponse {
     pub segment_id: String,
     pub speaker_id: String,
-    pub embedding_added: bool,
+}
+
+fn to_response(r: crate::repository::segment::UnknownSegmentRow) -> UnknownSegmentResponse {
+    UnknownSegmentResponse {
+        segment_id: r.id,
+        session_id: r.session_id,
+        start_ms: r.start_ms,
+        end_ms: r.end_ms,
+    }
 }
 
 #[utoipa::path(
@@ -74,17 +80,7 @@ pub async fn list_session_unknowns(
     )
     .await
     .map_err(|e| AppApiError::Internal(e.to_string()))?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| UnknownSegmentResponse {
-                segment_id: r.id,
-                session_id: r.session_id,
-                start_ms: r.start_ms,
-                end_ms: r.end_ms,
-                has_embedding: r.embedding.is_some(),
-            })
-            .collect(),
-    ))
+    Ok(Json(rows.into_iter().map(to_response).collect()))
 }
 
 #[utoipa::path(
@@ -103,19 +99,16 @@ pub async fn list_unknowns(
     let rows = crate::repository::segment::list_unknown_segments(&state.pool, None, params.limit)
         .await
         .map_err(|e| AppApiError::Internal(e.to_string()))?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| UnknownSegmentResponse {
-                segment_id: r.id,
-                session_id: r.session_id,
-                start_ms: r.start_ms,
-                end_ms: r.end_ms,
-                has_embedding: r.embedding.is_some(),
-            })
-            .collect(),
-    ))
+    Ok(Json(rows.into_iter().map(to_response).collect()))
 }
 
+/// Assign a speaker to an unknown segment. This is label-only: the
+/// segment's `speaker_id` is updated so past transcripts display the
+/// speaker's name, but the segment audio is NOT promoted into the
+/// speaker's voiceprint collection. Voiceprints are curated exclusively
+/// through `POST /speakers/{id}/enroll`, which captures deliberately-read
+/// prompts of known quality. Opportunistic transcription segments are too
+/// noisy and uncurated to be trusted as permanent identification data.
 #[utoipa::path(
     post,
     path = "/segments/{id}/assign",
@@ -155,39 +148,17 @@ pub async fn assign_segment(
         }
     };
 
-    let prev =
+    let updated =
         crate::repository::segment::assign_speaker(&state.pool, segment_id, target_speaker_id)
             .await
-            .map_err(|e| AppApiError::Internal(e.to_string()))?
-            .ok_or_else(|| AppApiError::BadRequest("segment not found".into()))?;
-
-    let mut embedding_added = false;
-    if let (Some(blob), Some(_dim)) = (prev.embedding, prev.embedding_dim) {
-        // Decode the BLOB into f32 and save as an embedding on the speaker.
-        let emb: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&blob).to_vec();
-        let is_primary =
-            !crate::repository::segment::has_primary_embedding(&state.pool, target_speaker_id)
-                .await
-                .map_err(|e| AppApiError::Internal(e.to_string()))?;
-        let duration_ms = (prev.end_ms - prev.start_ms) as f64;
-        // Quality score isn't meaningful without the source audio; use 0.5 as a neutral value.
-        crate::domain::speaker_matcher::save_embedding(
-            &state.pool,
-            target_speaker_id,
-            &emb,
-            duration_ms,
-            0.5,
-            is_primary,
-        )
-        .await
-        .map_err(|e| AppApiError::Internal(e.to_string()))?;
-        embedding_added = true;
+            .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    if !updated {
+        return Err(AppApiError::BadRequest("segment not found".into()));
     }
 
     Ok(Json(AssignSegmentResponse {
         segment_id: segment_id.to_string(),
         speaker_id: target_speaker_id.to_string(),
-        embedding_added,
     }))
 }
 

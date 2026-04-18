@@ -25,7 +25,6 @@ export interface UnknownSegment {
   session_id: string;
   start_ms: number;
   end_ms: number;
-  has_embedding: boolean;
 }
 
 export type AssignTarget =
@@ -35,5 +34,4 @@ export type AssignTarget =
 export interface AssignSegmentResult {
   segment_id: string;
   speaker_id: string;
-  embedding_added: boolean;
 }

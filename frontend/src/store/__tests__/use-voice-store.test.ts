@@ -195,8 +195,8 @@ describe('useVoiceStore', () => {
   it('dismissUnknown soft-hides an unknown and remembers it', () => {
     useVoiceStore.setState({
       unknowns: [
-        { segment_id: 'seg-a', session_id: 's', start_ms: 0, end_ms: 1000, has_embedding: true },
-        { segment_id: 'seg-b', session_id: 's', start_ms: 2000, end_ms: 3000, has_embedding: true },
+        { segment_id: 'seg-a', session_id: 's', start_ms: 0, end_ms: 1000 },
+        { segment_id: 'seg-b', session_id: 's', start_ms: 2000, end_ms: 3000 },
       ],
     });
     useVoiceStore.getState().dismissUnknown('seg-a');

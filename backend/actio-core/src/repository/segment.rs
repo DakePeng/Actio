@@ -39,31 +39,21 @@ pub async fn list_unknown_segments(
     }
 }
 
-/// Assign a speaker to a segment. Returns the segment row as it was BEFORE
-/// the update so the caller can promote the embedding to the speaker's
-/// voiceprint collection.
+/// Label-only assignment: sets `audio_segments.speaker_id` so past
+/// transcripts render the right name. Does NOT promote the segment's
+/// embedding to a voiceprint — voiceprints come exclusively from curated
+/// enrollment clips via `POST /speakers/{id}/enroll`.
 pub async fn assign_speaker(
     pool: &SqlitePool,
     segment_id: Uuid,
     speaker_id: Uuid,
-) -> Result<Option<UnknownSegmentRow>, sqlx::Error> {
-    let prev = sqlx::query_as::<_, UnknownSegmentRow>(
-        "SELECT id, session_id, start_ms, end_ms, embedding, embedding_dim \
-         FROM audio_segments WHERE id = ?1",
-    )
-    .bind(segment_id.to_string())
-    .fetch_optional(pool)
-    .await?;
-
-    let updated = sqlx::query("UPDATE audio_segments SET speaker_id = ?1 WHERE id = ?2")
+) -> Result<bool, sqlx::Error> {
+    let r = sqlx::query("UPDATE audio_segments SET speaker_id = ?1 WHERE id = ?2")
         .bind(speaker_id.to_string())
         .bind(segment_id.to_string())
         .execute(pool)
         .await?;
-    if updated.rows_affected() == 0 {
-        return Ok(None);
-    }
-    Ok(prev)
+    Ok(r.rows_affected() > 0)
 }
 
 pub async fn unassign_speaker(pool: &SqlitePool, segment_id: Uuid) -> Result<bool, sqlx::Error> {
@@ -110,19 +100,6 @@ pub async fn insert_segment(
     .execute(pool)
     .await?;
     Uuid::parse_str(&id).map_err(|e| sqlx::Error::Decode(Box::new(e)))
-}
-
-pub async fn has_primary_embedding(
-    pool: &SqlitePool,
-    speaker_id: Uuid,
-) -> Result<bool, sqlx::Error> {
-    let row: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM speaker_embeddings WHERE speaker_id = ?1 AND is_primary = 1",
-    )
-    .bind(speaker_id.to_string())
-    .fetch_one(pool)
-    .await?;
-    Ok(row.0 > 0)
 }
 
 #[cfg(test)]
@@ -183,12 +160,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.len(), 2);
-        assert!(rows[0].embedding.is_some());
-        assert_eq!(rows[0].embedding_dim, Some(512));
     }
 
     #[tokio::test]
-    async fn assigning_returns_previous_row() {
+    async fn assign_sets_speaker_id_and_removes_from_unknowns() {
         let pool = fresh_pool().await;
         let sid = insert_session(&pool).await;
         let seg_id = insert_unknown_segment(&pool, &sid, 0).await;
@@ -196,22 +171,32 @@ mod tests {
             .await
             .unwrap();
 
-        let prev = assign_speaker(
+        let ok = assign_speaker(
             &pool,
             Uuid::parse_str(&seg_id).unwrap(),
             Uuid::parse_str(&alice.id).unwrap(),
         )
         .await
-        .unwrap()
         .unwrap();
-        assert!(prev.embedding.is_some());
-        assert_eq!(prev.embedding_dim, Some(512));
+        assert!(ok);
 
         // Unknown list for the session is now empty.
         let rows = list_unknown_segments(&pool, Some(Uuid::parse_str(&sid).unwrap()), 10)
             .await
             .unwrap();
         assert!(rows.is_empty());
+
+        // Critical: assign must NOT promote the segment's embedding to a voiceprint.
+        let voiceprint_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM speaker_embeddings WHERE speaker_id = ?1")
+                .bind(&alice.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            voiceprint_count.0, 0,
+            "retroactive tagging must not create speaker_embeddings rows"
+        );
     }
 
     #[tokio::test]

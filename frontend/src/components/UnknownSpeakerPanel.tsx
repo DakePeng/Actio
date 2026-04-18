@@ -30,7 +30,6 @@ export function UnknownSpeakerPanel() {
             <div className="unknown-panel__meta">
               {((u.end_ms - u.start_ms) / 1000).toFixed(1)}s · session{' '}
               {u.session_id.slice(0, 8)}…
-              {!u.has_embedding && ' · no voiceprint from this clip'}
             </div>
             {pickingFor === u.segment_id ? (
               <AssignSpeakerPicker
