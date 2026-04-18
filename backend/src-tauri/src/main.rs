@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod updater;
+
 use actio_core::engine::dictation::DictationService;
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
@@ -565,6 +567,8 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             sync_window_mode,
             save_tray_position,
@@ -603,6 +607,7 @@ fn main() {
             });
 
             configure_startup_window(app)?;
+            updater::spawn_update_check(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
