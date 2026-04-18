@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { Segment } from '../types';
 import type {
-  EnrollResponse,
   Speaker,
   UnknownSegment,
   AssignTarget,
@@ -60,7 +59,6 @@ interface VoiceState {
   createSpeaker: (input: { display_name: string; color: string }) => Promise<Speaker>;
   updateSpeaker: (id: string, patch: { display_name?: string; color?: string }) => Promise<void>;
   deleteSpeaker: (id: string) => Promise<void>;
-  enrollSpeaker: (id: string, clips: Blob[]) => Promise<EnrollResponse>;
 
   // Unknown-segment actions.
   fetchUnknowns: () => Promise<void>;
@@ -298,8 +296,6 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       throw e;
     }
   },
-
-  enrollSpeaker: async (id, clips) => speakerApi.enrollSpeaker(id, clips),
 
   // --- Unknown segments ---
 

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
-import { VoiceprintRecorder } from './VoiceprintRecorder';
 import { UnknownSpeakerPanel } from './UnknownSpeakerPanel';
 import type { Speaker } from '../types/speaker';
 
@@ -19,8 +18,7 @@ const PRESET_COLORS = [
 type FormMode =
   | { kind: 'idle' }
   | { kind: 'adding' }
-  | { kind: 'editing'; speaker: Speaker }
-  | { kind: 'enrolling'; speakerId: string; replace: boolean };
+  | { kind: 'editing'; speaker: Speaker };
 
 function PencilIcon() {
   return (
@@ -45,17 +43,6 @@ function PlusIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function MicIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" y1="19" x2="12" y2="23" />
-      <line x1="8" y1="23" x2="16" y2="23" />
     </svg>
   );
 }
@@ -110,13 +97,11 @@ export function PeopleTab() {
     setSaveError(null);
     try {
       if (mode.kind === 'adding') {
-        const created = await createSpeaker({ display_name: trimmed, color });
-        // After creation, prompt for voiceprint capture.
-        setMode({ kind: 'enrolling', speakerId: created.id, replace: false });
+        await createSpeaker({ display_name: trimmed, color });
       } else if (mode.kind === 'editing') {
         await updateSpeaker(mode.speaker.id, { display_name: trimmed, color });
-        setMode({ kind: 'idle' });
       }
+      setMode({ kind: 'idle' });
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -215,25 +200,14 @@ export function PeopleTab() {
                 Cancel
               </motion.button>
             </div>
+            {mode.kind === 'adding' && (
+              <p className="person-form__hint">
+                Their voiceprint will be captured automatically — once the app has
+                heard them speak enough across a few sessions, it'll ask you to
+                confirm.
+              </p>
+            )}
             {saveError && <p className="person-form__error">{saveError}</p>}
-          </motion.div>
-        )}
-
-        {mode.kind === 'enrolling' && (
-          <motion.div
-            key="enrolling"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <VoiceprintRecorder
-              speakerId={mode.speakerId}
-              onDone={() => {
-                setMode({ kind: 'idle' });
-                void fetchSpeakers();
-              }}
-              onCancel={() => setMode({ kind: 'idle' })}
-            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -293,19 +267,6 @@ export function PeopleTab() {
               </motion.div>
               <span className="person-row__name">{speaker.display_name}</span>
               <div className="person-row__actions">
-                <motion.button
-                  type="button"
-                  className="person-edit-btn"
-                  onClick={() =>
-                    setMode({ kind: 'enrolling', speakerId: speaker.id, replace: true })
-                  }
-                  aria-label={`Re-enroll ${speaker.display_name}`}
-                  title="Re-enroll voiceprint"
-                  whileHover={{ scale: 1.15 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <MicIcon />
-                </motion.button>
                 <motion.button
                   type="button"
                   className="person-edit-btn"
