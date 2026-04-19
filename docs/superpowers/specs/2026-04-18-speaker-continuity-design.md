@@ -118,7 +118,7 @@ Segments are therefore processed strictly in VAD emission order, so:
 - State reads and writes are naturally serialized by the loop.
 - Out-of-order hazards are impossible by construction — no seq counters, no reorder buffer.
 - The clock used by the state machine is `segment.end_ms` (session-relative), not `Instant::now()`.
-- Offline ASR transcription latency is unchanged from today.
+- **Offline ASR transcription latency — per segment unchanged, under sustained burst load slightly delayed.** The *current* segment is forwarded to the ASR mpsc before the speaker hook awaits, so its ASR processing starts immediately. However, the loop cannot call `upstream.recv().await` for the *next* segment until the speaker hook returns, so when VAD produces segments faster than the hook finishes, later segments queue in the VAD crossbeam channel and their ASR forwarding is delayed by up to ~(hook_latency × queue_depth). In practice segments arrive every 1–5 s and the hook takes 200–400 ms, so the queue stays near-empty and added latency is negligible; only a rare very-short burst pattern would reveal any slowdown.
 
 **Back-pressure budget.** Embedding (~200–400 ms on CPU) + identify (~5–20 ms) now runs in the VAD consumer loop rather than a detached task. VAD's internal queue is `crossbeam_channel::bounded::<SpeechSegment>(32)`; at typical speech rates (one VAD segment every 1–5 s), this gives 30–160 s of headroom before the consumer loop falls behind. The downstream-ASR mpsc is also buffered (`mpsc::channel::<SpeechSegment>(32)`), so short-term skew is absorbed even if speaker work momentarily lags.
 
@@ -212,7 +212,20 @@ pub struct SpeakerResolvedEvent {
 }
 ```
 
-`WsSpeakerResolvedEvent` mirrors it (serialized with `#[serde(skip_serializing_if = "std::ops::Not::not")]` on a `bool` field to keep the wire compact when false).
+`WsSpeakerResolvedEvent` mirrors it. To keep the wire payload compact when the flag is false, use a tiny helper and point `skip_serializing_if` at it:
+
+```rust
+fn is_false(b: &bool) -> bool { !*b }
+
+#[derive(Serialize)]
+struct WsSpeakerResolvedEvent {
+    // ...
+    #[serde(skip_serializing_if = "is_false")]
+    carried_over: bool,
+}
+```
+
+(`std::ops::Not::not` cannot be used directly because its signature does not match serde's expected `fn(&bool) -> bool`.)
 
 ---
 
