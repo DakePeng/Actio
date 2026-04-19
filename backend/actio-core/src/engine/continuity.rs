@@ -91,6 +91,8 @@ pub fn next_attribution(
                     },
                     *state,
                 ),
+                // No live state (either never seeded or window expired):
+                // accept the Tentative speaker but do not seed state.
                 _ => (
                     AttributionOutcome {
                         speaker_id: Some(speaker_id),
@@ -101,14 +103,27 @@ pub fn next_attribution(
                 ),
             }
         }
-        MatchEvidence::Unknown => (
-            AttributionOutcome {
-                speaker_id: None,
-                confidence: None,
-                carried_over: false,
-            },
-            *state,
-        ),
+        MatchEvidence::Unknown => {
+            if within_window(state, segment_end_ms, config) {
+                (
+                    AttributionOutcome {
+                        speaker_id: state.speaker_id,
+                        confidence: Some(MatchConfidence::Tentative),
+                        carried_over: true,
+                    },
+                    *state,
+                )
+            } else {
+                (
+                    AttributionOutcome {
+                        speaker_id: None,
+                        confidence: None,
+                        carried_over: false,
+                    },
+                    *state,
+                )
+            }
+        }
     }
 }
 
@@ -116,6 +131,9 @@ fn within_window(state: &ContinuityState, now: i64, config: ContinuityConfig) ->
     if config.window_ms == 0 {
         return false;
     }
+    // If `now < t` (segment received out of order), `now - t` is negative
+    // and the comparison is trivially true; in-order processing is the
+    // caller's responsibility (enforced by the VAD consumer loop).
     state
         .last_confirmed_ms
         .map_or(false, |t| now - t <= config.window_ms as i64)
@@ -232,5 +250,88 @@ mod tests {
             ContinuityState::default(),
             "Tentative alone must not seed state"
         );
+    }
+
+    #[test]
+    fn unknown_carries_over_within_window() {
+        let a = uuid_a();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+        };
+        let (outcome, new_state) = next_attribution(
+            &state,
+            10_000,
+            MatchEvidence::Unknown,
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(a));
+        assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
+        assert!(outcome.carried_over);
+        assert_eq!(new_state, state, "carry-over must not update state");
+    }
+
+    #[test]
+    fn unknown_outside_window_drops() {
+        let a = uuid_a();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+        };
+        let (outcome, new_state) = next_attribution(
+            &state,
+            20_000, // window is 15_000, so 20_000 is outside
+            MatchEvidence::Unknown,
+            WINDOW,
+        );
+        assert!(outcome.speaker_id.is_none());
+        assert!(outcome.confidence.is_none());
+        assert!(!outcome.carried_over);
+        assert_eq!(new_state, state);
+    }
+
+    #[test]
+    fn carry_over_does_not_self_extend_the_window() {
+        let a = uuid_a();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+        };
+        // First Unknown carries (10_000 within 15_000 window).
+        let (carry, after_carry) =
+            next_attribution(&state, 10_000, MatchEvidence::Unknown, WINDOW);
+        assert!(carry.carried_over);
+        assert_eq!(after_carry, state, "carry must leave state alone");
+
+        // Second Unknown at 25_000 — still only 15_000 from the original
+        // last_confirmed_ms of 0, so outside window → drops.
+        let (drop, _) =
+            next_attribution(&after_carry, 25_000, MatchEvidence::Unknown, WINDOW);
+        assert!(drop.speaker_id.is_none());
+        assert!(!drop.carried_over);
+    }
+
+    #[test]
+    fn window_zero_disables_carry_over() {
+        let a = uuid_a();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+        };
+        let off = ContinuityConfig { window_ms: 0 };
+        let (outcome, _) =
+            next_attribution(&state, 1, MatchEvidence::Unknown, off);
+        assert!(outcome.speaker_id.is_none());
+        assert!(!outcome.carried_over);
+
+        // Confirmed and Tentative paths still behave normally with window=0.
+        let b = uuid_b();
+        let (c_out, _) = next_attribution(
+            &ContinuityState::default(),
+            1,
+            MatchEvidence::Confirmed { speaker_id: b },
+            off,
+        );
+        assert_eq!(c_out.speaker_id, Some(b));
     }
 }
