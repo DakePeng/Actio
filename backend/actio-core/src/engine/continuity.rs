@@ -48,14 +48,15 @@ pub struct AttributionOutcome {
 /// or not `outcome.carried_over` is true; carry-over outcomes return the
 /// state unchanged (no self-reinforcement).
 ///
-/// Task 1 ships a stub; Tasks 2–4 implement the three evidence arms.
+/// See the design spec's decision table for the full set of invariants.
+/// Task 4 fills in the Unknown carry-over arm; Confirmed and Tentative
+/// are already implemented.
 pub fn next_attribution(
     state: &ContinuityState,
     segment_end_ms: i64,
     evidence: MatchEvidence,
     config: ContinuityConfig,
 ) -> (AttributionOutcome, ContinuityState) {
-    let _ = config;
     match evidence {
         MatchEvidence::Confirmed { speaker_id } => (
             AttributionOutcome {
@@ -68,7 +69,39 @@ pub fn next_attribution(
                 last_confirmed_ms: Some(segment_end_ms),
             },
         ),
-        MatchEvidence::Tentative { .. } | MatchEvidence::Unknown => (
+        MatchEvidence::Tentative { speaker_id } => {
+            let within = within_window(state, segment_end_ms, config);
+            match state.speaker_id {
+                Some(active) if within && active == speaker_id => (
+                    AttributionOutcome {
+                        speaker_id: Some(speaker_id),
+                        confidence: Some(MatchConfidence::Tentative),
+                        carried_over: false,
+                    },
+                    ContinuityState {
+                        speaker_id: Some(speaker_id),
+                        last_confirmed_ms: Some(segment_end_ms),
+                    },
+                ),
+                Some(active) if within => (
+                    AttributionOutcome {
+                        speaker_id: Some(active),
+                        confidence: Some(MatchConfidence::Tentative),
+                        carried_over: true,
+                    },
+                    *state,
+                ),
+                _ => (
+                    AttributionOutcome {
+                        speaker_id: Some(speaker_id),
+                        confidence: Some(MatchConfidence::Tentative),
+                        carried_over: false,
+                    },
+                    *state,
+                ),
+            }
+        }
+        MatchEvidence::Unknown => (
             AttributionOutcome {
                 speaker_id: None,
                 confidence: None,
@@ -77,6 +110,15 @@ pub fn next_attribution(
             *state,
         ),
     }
+}
+
+fn within_window(state: &ContinuityState, now: i64, config: ContinuityConfig) -> bool {
+    if config.window_ms == 0 {
+        return false;
+    }
+    state
+        .last_confirmed_ms
+        .map_or(false, |t| now - t <= config.window_ms as i64)
 }
 
 #[cfg(test)]
@@ -127,5 +169,68 @@ mod tests {
         assert!(!outcome.carried_over);
         assert_eq!(new_state.speaker_id, Some(b));
         assert_eq!(new_state.last_confirmed_ms, Some(5_000));
+    }
+
+    #[test]
+    fn same_speaker_tentative_refreshes_timer() {
+        let a = uuid_a();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+        };
+        let (outcome, new_state) = next_attribution(
+            &state,
+            14_000,
+            MatchEvidence::Tentative { speaker_id: a },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(a));
+        assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
+        assert!(!outcome.carried_over);
+        assert_eq!(new_state.speaker_id, Some(a));
+        assert_eq!(
+            new_state.last_confirmed_ms,
+            Some(14_000),
+            "same-speaker tentative within window must refresh the timer"
+        );
+    }
+
+    #[test]
+    fn different_speaker_tentative_ignored_when_state_live() {
+        let a = uuid_a();
+        let b = uuid_b();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+        };
+        let (outcome, new_state) = next_attribution(
+            &state,
+            5_000,
+            MatchEvidence::Tentative { speaker_id: b },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(a), "A should stay attributed");
+        assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
+        assert!(outcome.carried_over);
+        assert_eq!(new_state, state, "weak contrary evidence must not update state");
+    }
+
+    #[test]
+    fn different_speaker_tentative_accepted_without_state() {
+        let b = uuid_b();
+        let (outcome, new_state) = next_attribution(
+            &ContinuityState::default(),
+            7_000,
+            MatchEvidence::Tentative { speaker_id: b },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(b));
+        assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
+        assert!(!outcome.carried_over);
+        assert_eq!(
+            new_state,
+            ContinuityState::default(),
+            "Tentative alone must not seed state"
+        );
     }
 }
