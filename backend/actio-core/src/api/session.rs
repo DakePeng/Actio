@@ -54,19 +54,31 @@ pub async fn create_session(
         .map_err(|e| AppApiError::Internal(e.to_string()))?;
 
     // Attempt to start inference pipeline if models are ready (graceful degradation)
-    if let Some(model_paths) = state.model_manager.model_paths().await {
+    let settings = state.settings_manager.get().await;
+    let embedding_id = settings.audio.speaker_embedding_model.clone();
+    if let Some(model_paths) = state
+        .model_manager
+        .model_paths(embedding_id.as_deref())
+        .await
+    {
         let mut pipeline = state.inference_pipeline.lock().await;
         if !pipeline.is_running() {
-            let settings = state.settings_manager.get().await;
             let asr_model = settings.audio.asr_model.as_deref();
             if let Err(e) = pipeline.start_session(
                 s.id.parse::<Uuid>().unwrap_or_default(),
+                tenant_id,
                 &model_paths,
                 state.aggregator.clone(),
                 None,
                 asr_model,
                 state.clips_dir.clone(),
                 state.live_enrollment.clone(),
+                crate::engine::inference_pipeline::SpeakerIdConfig {
+                    confirm_threshold: settings.audio.speaker_confirm_threshold,
+                    tentative_threshold: settings.audio.speaker_tentative_threshold,
+                    min_duration_ms: settings.audio.speaker_min_duration_ms,
+                    continuity_window_ms: settings.audio.speaker_continuity_window_ms,
+                },
             ) {
                 warn!(session_id = %s.id, error = %e, "Failed to start inference pipeline — CRUD-only mode");
             }
@@ -380,9 +392,16 @@ pub async fn enroll_speaker(
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<EnrollResponse>), AppApiError> {
     // Resolve the embedding model; 409 if missing.
+    let embedding_id = state
+        .settings_manager
+        .get()
+        .await
+        .audio
+        .speaker_embedding_model
+        .clone();
     let model_paths = state
         .model_manager
-        .model_paths()
+        .model_paths(embedding_id.as_deref())
         .await
         .ok_or_else(|| AppApiError::Conflict("embedding_model_missing".into()))?;
     let model_path = model_paths
@@ -599,13 +618,74 @@ fn default_enroll_target() -> u32 {
 pub async fn start_live_enrollment(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(req): Json<StartLiveEnrollmentRequest>,
 ) -> Result<Json<crate::engine::live_enrollment::EnrollmentState>, AppApiError> {
-    let target = req.target.clamp(1, 10);
-    crate::engine::live_enrollment::start(&state.live_enrollment, id, target)
+    // Precondition: the speaker-embedding model must be available. Without
+    // it, handle_segment_embedding short-circuits before consume_segment is
+    // ever called and the user reads into a void. Surfaced to the UI as an
+    // actionable message pointing at Models settings.
+    let embedding_id = state
+        .settings_manager
+        .get()
         .await
-        .map(Json)
-        .map_err(|code| AppApiError::Conflict(code.into()))
+        .audio
+        .speaker_embedding_model
+        .clone();
+    let model_paths = state
+        .model_manager
+        .model_paths(embedding_id.as_deref())
+        .await
+        .ok_or_else(|| AppApiError::Conflict("embedding_model_missing".into()))?;
+    if model_paths.speaker_embedding.is_none() {
+        return Err(AppApiError::Conflict("embedding_model_missing".into()));
+    }
+
+    let target = req.target.clamp(1, 10);
+    let result = crate::engine::live_enrollment::start(&state.live_enrollment, id, target)
+        .await
+        .map_err(|code| AppApiError::Conflict(code.into()))?;
+
+    // If the inference pipeline is not already running (e.g. always-on
+    // supervisor is disabled or hibernating), spin one up under a
+    // short-lived "enrollment" session so VAD segments flow.
+    let mut pipeline = state.inference_pipeline.lock().await;
+    if !pipeline.is_running() {
+        let tenant_id = tenant_id_from_headers(&headers).unwrap_or(Uuid::nil());
+        match session::create_session(&state.pool, tenant_id, "microphone", "enrollment").await {
+            Ok(s) => {
+                let session_uuid = s.id.parse::<Uuid>().unwrap_or_default();
+                let settings = state.settings_manager.get().await;
+                let asr_model = settings.audio.asr_model.as_deref();
+                if let Err(e) = pipeline.start_session(
+                    session_uuid,
+                    tenant_id,
+                    &model_paths,
+                    state.aggregator.clone(),
+                    None,
+                    asr_model,
+                    state.clips_dir.clone(),
+                    state.live_enrollment.clone(),
+                    crate::engine::inference_pipeline::SpeakerIdConfig {
+                        confirm_threshold: settings.audio.speaker_confirm_threshold,
+                        tentative_threshold: settings.audio.speaker_tentative_threshold,
+                        min_duration_ms: settings.audio.speaker_min_duration_ms,
+                        continuity_window_ms: settings.audio.speaker_continuity_window_ms,
+                    },
+                ) {
+                    warn!(error = %e, "Failed to start pipeline for enrollment");
+                } else {
+                    *state.enrollment_owned_session.lock().await = Some(session_uuid);
+                    info!(%session_uuid, "Pipeline started for voiceprint enrollment");
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to create enrollment session");
+            }
+        }
+    }
+
+    Ok(Json(result))
 }
 
 #[utoipa::path(
@@ -620,6 +700,17 @@ pub async fn cancel_live_enrollment(
     Path(_id): Path<Uuid>,
 ) -> Result<StatusCode, AppApiError> {
     crate::engine::live_enrollment::cancel(&state.live_enrollment).await;
+
+    // If we started the pipeline ourselves to drive enrollment, tear it down
+    // now. Sessions started for transcription are left alone.
+    let owned = state.enrollment_owned_session.lock().await.take();
+    if let Some(session_id) = owned {
+        state.inference_pipeline.lock().await.stop();
+        if let Err(e) = session::end_session(&state.pool, session_id).await {
+            warn!(error = %e, "Failed to end enrollment-owned session");
+        }
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 

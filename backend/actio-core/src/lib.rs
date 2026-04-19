@@ -48,6 +48,11 @@ pub struct AppState {
     /// pipeline routes quality-passing VAD segments into the target
     /// speaker's voiceprints instead of the normal identify/candidate path.
     pub live_enrollment: crate::engine::live_enrollment::LiveEnrollment,
+    /// Tracks the session UUID the enrollment flow started the pipeline
+    /// with, when no transcription session was already running. Lets the
+    /// cancel handler stop exactly what it started and leave real
+    /// transcription sessions untouched.
+    pub enrollment_owned_session: Arc<tokio::sync::Mutex<Option<uuid::Uuid>>>,
     /// Signalled by the settings handler when `audio.asr_model` changes.
     /// The pipeline supervisor listens for this and hot-swaps the recognizer.
     pub pipeline_restart: Arc<tokio::sync::Notify>,
@@ -134,6 +139,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         settings_manager,
         clips_dir,
         live_enrollment: crate::engine::live_enrollment::new_state(),
+        enrollment_owned_session: Arc::new(tokio::sync::Mutex::new(None)),
         pipeline_restart: Arc::new(tokio::sync::Notify::new()),
         engine_slot,
         llm_downloader,
@@ -308,14 +314,14 @@ async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
         }
     }
 
-    let model_paths = state
-        .model_manager
-        .model_paths()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("models not ready — skipping always-on pipeline"))?;
-
     let settings = state.settings_manager.get().await;
     let asr_model = settings.audio.asr_model.clone();
+    let embedding_id = settings.audio.speaker_embedding_model.clone();
+    let model_paths = state
+        .model_manager
+        .model_paths(embedding_id.as_deref())
+        .await
+        .ok_or_else(|| anyhow::anyhow!("models not ready — skipping always-on pipeline"))?;
 
     // Tenant must match the dev tenant the frontend filters by, same as
     // the label seeding logic in this file.
@@ -337,12 +343,19 @@ async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
         }
         pipeline.start_session(
             session_id,
+            tenant_id,
             &model_paths,
             state.aggregator.clone(),
             None,
             asr_model.as_deref(),
             state.clips_dir.clone(),
             state.live_enrollment.clone(),
+            crate::engine::inference_pipeline::SpeakerIdConfig {
+                confirm_threshold: settings.audio.speaker_confirm_threshold,
+                tentative_threshold: settings.audio.speaker_tentative_threshold,
+                min_duration_ms: settings.audio.speaker_min_duration_ms,
+                continuity_window_ms: settings.audio.speaker_continuity_window_ms,
+            },
         )?;
     }
 

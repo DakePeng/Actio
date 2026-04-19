@@ -11,6 +11,27 @@ use crate::engine::model_manager::ModelPaths;
 use crate::engine::transcript_aggregator::TranscriptAggregator;
 use crate::engine::vad::{self, SpeechSegment, VadConfig};
 
+/// Tunable knobs for the per-segment speaker identifier. Values live in
+/// AudioSettings so the user can adjust them without rebuilding.
+#[derive(Debug, Clone, Copy)]
+pub struct SpeakerIdConfig {
+    pub confirm_threshold: f32,
+    pub tentative_threshold: f32,
+    pub min_duration_ms: u32,
+    pub continuity_window_ms: u32,
+}
+
+impl Default for SpeakerIdConfig {
+    fn default() -> Self {
+        Self {
+            confirm_threshold: 0.55,
+            tentative_threshold: 0.40,
+            min_duration_ms: 1500,
+            continuity_window_ms: 15_000,
+        }
+    }
+}
+
 pub struct InferencePipeline {
     /// The capture handle — dropping it stops capture
     capture_handle: Option<AudioCaptureHandle>,
@@ -41,15 +62,22 @@ impl InferencePipeline {
     pub fn start_session(
         &mut self,
         session_id: Uuid,
+        tenant_id: Uuid,
         model_paths: &ModelPaths,
         aggregator: Arc<TranscriptAggregator>,
         device_name: Option<&str>,
         asr_model: Option<&str>,
         clips_dir: PathBuf,
         live_enrollment: LiveEnrollment,
+        speaker_id_config: SpeakerIdConfig,
     ) -> anyhow::Result<()> {
         // 1. Start audio capture
         let (capture_handle, audio_rx) = audio_capture::start_capture(device_name)?;
+
+        // Tap audio chunks to publish smoothed RMS into the live-enrollment
+        // state, so the enrollment UI can render a real mic-level meter.
+        // Cheap no-op when no enrollment is armed.
+        let audio_rx = install_level_observer(audio_rx, live_enrollment.clone());
 
         // 2. Select ASR model based on user setting and route audio to the
         //    appropriate recognizer.
@@ -59,8 +87,9 @@ impl InferencePipeline {
         let chosen = asr_model.unwrap_or("auto");
         info!(model = chosen, "Selected ASR model");
 
-        if model_paths.speaker_embedding.is_none() {
-            info!("Speaker embedding model not loaded — segments will stay [UNKNOWN]");
+        match &model_paths.speaker_embedding {
+            Some(p) => info!(path = %p.display(), "Speaker embedding model loaded"),
+            None => info!("Speaker embedding model not loaded — segments will stay [UNKNOWN]"),
         }
 
         // Helper: start VAD, then fan each speech segment into (a) a per-segment
@@ -81,12 +110,13 @@ impl InferencePipeline {
             Ok(split_segments_for_speaker_id(
                 upstream,
                 session_id,
-                Uuid::nil(),
+                tenant_id,
                 pool.clone(),
                 embedding_model.clone(),
                 clips_dir.clone(),
                 live_enrollment.clone(),
                 aggregator_for_hooks.clone(),
+                speaker_id_config,
             ))
         };
 
@@ -108,12 +138,13 @@ impl InferencePipeline {
                 spawn_speaker_id_only(
                     upstream,
                     session_id,
-                    Uuid::nil(),
+                    tenant_id,
                     pool.clone(),
                     embedding_model.clone(),
                     clips_dir.clone(),
                     live_enrollment.clone(),
                     aggregator_for_hooks.clone(),
+                    speaker_id_config,
                 );
                 Ok(())
             };
@@ -281,6 +312,7 @@ fn split_segments_for_speaker_id(
     clips_dir: PathBuf,
     live_enrollment: LiveEnrollment,
     aggregator: Arc<TranscriptAggregator>,
+    speaker_id_config: SpeakerIdConfig,
 ) -> mpsc::Receiver<SpeechSegment> {
     let (tx, rx) = mpsc::channel::<SpeechSegment>(32);
     tokio::spawn(async move {
@@ -294,6 +326,7 @@ fn split_segments_for_speaker_id(
                 clips_dir.clone(),
                 live_enrollment.clone(),
                 aggregator.clone(),
+                speaker_id_config,
             );
 
             if tx.send(seg).await.is_err() {
@@ -316,6 +349,7 @@ fn spawn_speaker_id_only(
     clips_dir: PathBuf,
     live_enrollment: LiveEnrollment,
     aggregator: Arc<TranscriptAggregator>,
+    speaker_id_config: SpeakerIdConfig,
 ) {
     tokio::spawn(async move {
         while let Some(seg) = upstream.recv().await {
@@ -328,6 +362,7 @@ fn spawn_speaker_id_only(
                 clips_dir.clone(),
                 live_enrollment.clone(),
                 aggregator.clone(),
+                speaker_id_config,
             );
         }
     });
@@ -343,6 +378,7 @@ fn spawn_segment_hook(
     clips_dir: PathBuf,
     live_enrollment: LiveEnrollment,
     aggregator: Arc<TranscriptAggregator>,
+    speaker_id_config: SpeakerIdConfig,
 ) {
     let start_ms = (seg.start_sample as i64 * 1000) / 16000;
     let end_ms = (seg.end_sample as i64 * 1000) / 16000;
@@ -362,12 +398,41 @@ fn spawn_segment_hook(
             &clips_dir,
             &live_enrollment,
             &aggregator,
+            speaker_id_config,
         )
         .await
         {
             warn!(%session_id, error = %e, "segment speaker-id hook failed");
         }
     });
+}
+
+/// Interpose between the capture source and the rest of the pipeline to
+/// compute a smoothed RMS per chunk and publish it into the enrollment state.
+/// Kept always-on (cheap few-hundred-flops per chunk) so the meter is already
+/// reflecting current audio the moment the user hits "record voiceprint".
+fn install_level_observer(
+    mut rx: mpsc::Receiver<Vec<f32>>,
+    live_enrollment: LiveEnrollment,
+) -> mpsc::Receiver<Vec<f32>> {
+    let (tx, out_rx) = mpsc::channel::<Vec<f32>>(64);
+    tokio::spawn(async move {
+        // Exponential moving average — a single loud sample shouldn't peg
+        // the meter. ~20ms chunks × 0.3 alpha gives roughly a 70ms response.
+        let mut ema = 0.0f32;
+        while let Some(chunk) = rx.recv().await {
+            if !chunk.is_empty() {
+                let sum_sq: f32 = chunk.iter().map(|x| x * x).sum();
+                let rms = (sum_sq / chunk.len() as f32).sqrt();
+                ema = 0.7 * ema + 0.3 * rms;
+                crate::engine::live_enrollment::publish_level(&live_enrollment, ema);
+            }
+            if tx.send(chunk).await.is_err() {
+                break;
+            }
+        }
+    });
+    out_rx
 }
 
 /// Tee a single audio stream into two independent receivers. Used when the
@@ -421,24 +486,27 @@ async fn handle_segment_embedding(
     clips_dir: &Path,
     live_enrollment: &LiveEnrollment,
     aggregator: &Arc<TranscriptAggregator>,
+    speaker_id_config: SpeakerIdConfig,
 ) -> anyhow::Result<Option<String>> {
-    let publish = |speaker_id: Option<String>| {
+    let publish = |speaker_id: Option<String>, confidence: Option<&'static str>| {
         aggregator.publish_speaker_resolved(
             crate::engine::transcript_aggregator::SpeakerResolvedEvent {
                 segment_id: segment_id.to_string(),
                 start_ms,
                 end_ms,
                 speaker_id,
+                confidence,
             },
         );
     };
 
     let Some(model_path) = embedding_model else {
+        info!(start_ms, end_ms, "segment hook: no embedding model — marking UNKNOWN");
         crate::repository::segment::insert_segment(
             pool, session_id, start_ms, end_ms, None, None, None, None,
         )
         .await?;
-        publish(None);
+        publish(None, None);
         return Ok(None);
     };
 
@@ -450,7 +518,7 @@ async fn handle_segment_embedding(
                 pool, session_id, start_ms, end_ms, None, None, None, None,
             )
             .await?;
-            publish(None);
+            publish(None, None);
             return Ok(None);
         }
     };
@@ -481,19 +549,58 @@ async fn handle_segment_embedding(
             None,
         )
         .await?;
-        publish(Some(enrolled_speaker.clone()));
+        // Live-enrolled segment is trusted by construction — publish as Confirmed.
+        publish(
+            Some(enrolled_speaker.clone()),
+            Some(crate::domain::speaker_matcher::MatchConfidence::Confirmed.as_str()),
+        );
         return Ok(Some(enrolled_speaker));
     }
 
-    let result =
-        crate::domain::speaker_matcher::identify_speaker(pool, &emb.values, tenant_id, 5)
-            .await
-            .unwrap_or(crate::domain::speaker_matcher::SpeakerMatchResult {
-                speaker_id: None,
-                similarity_score: 0.0,
-                z_norm_score: 0.0,
-                accepted: false,
-            });
+    // Duration gate: very short VAD segments give noisy embeddings. Skip
+    // the identifier entirely and leave the segment unresolved.
+    if duration_ms < speaker_id_config.min_duration_ms as f64 {
+        info!(
+            duration_ms,
+            min = speaker_id_config.min_duration_ms,
+            "segment hook: skipping speaker-id — too short"
+        );
+        crate::repository::segment::insert_segment(
+            pool,
+            session_id,
+            start_ms,
+            end_ms,
+            None,
+            None,
+            Some(&emb.values),
+            None,
+        )
+        .await?;
+        publish(None, None);
+        return Ok(None);
+    }
+
+    info!(
+        dim = emb.values.len(),
+        start_ms,
+        end_ms,
+        "segment hook: identifying speaker"
+    );
+    let thresholds = crate::domain::speaker_matcher::IdentifyThresholds {
+        confirm: speaker_id_config.confirm_threshold as f64,
+        tentative: speaker_id_config.tentative_threshold as f64,
+    };
+    let result = crate::domain::speaker_matcher::identify_speaker_with_thresholds(
+        pool, &emb.values, tenant_id, thresholds,
+    )
+    .await
+    .unwrap_or(crate::domain::speaker_matcher::SpeakerMatchResult {
+        speaker_id: None,
+        similarity_score: 0.0,
+        z_norm_score: 0.0,
+        accepted: false,
+        confidence: None,
+    });
 
     let speaker_id = result
         .speaker_id
@@ -533,6 +640,9 @@ async fn handle_segment_embedding(
     )
     .await?;
 
-    publish(result.speaker_id.clone());
+    publish(
+        result.speaker_id.clone(),
+        result.confidence.map(|c| c.as_str()),
+    );
     Ok(result.speaker_id)
 }
