@@ -93,17 +93,34 @@ pub fn start_session(&mut self, ... ) -> anyhow::Result<()> {
 
 `InferencePipeline::stop()` stays synchronous (the existing signature). It does not need to lock or clear continuity state because the Arc it held is simply dropped on the next `start_session`. No async-in-sync hazard.
 
-### Ordering — inline serialized processing
+### Ordering — inline serialized processing (forward-first)
 
 The current pipeline spawns per-segment speaker-id work via `tokio::spawn` inside `spawn_segment_hook`, which makes completion order ≠ speech order. With concurrent hooks mutating shared state, a later segment can seed state before an earlier one finishes. That is non-deterministic and unacceptable for a state machine.
 
-**This plan processes speaker-id inline in the VAD consumer loop**, i.e. inside the existing `while let Some(seg) = upstream.recv().await { ... }` bodies of `split_segments_for_speaker_id` and `spawn_speaker_id_only`. The current `spawn_segment_hook` helper is replaced by an `async fn run_segment_hook(...)` awaited directly in the loop. Segments are processed strictly in VAD emission order, so:
+**This plan processes speaker-id inline in the VAD consumer loop**, i.e. inside the existing `while let Some(seg) = upstream.recv().await { ... }` bodies of `split_segments_for_speaker_id` and `spawn_speaker_id_only`. The current `spawn_segment_hook` helper is replaced by an `async fn run_segment_hook(...)` awaited directly in the loop.
 
+**Critical ordering rule — forward to downstream ASR before awaiting the speaker hook.** In `split_segments_for_speaker_id`, the consumer forwards the segment to the offline ASR receiver *first*, then awaits the speaker hook. Otherwise every offline ASR transcript is delayed by the embedding + identify latency (~200–400 ms).
+
+```rust
+// split_segments_for_speaker_id body — offline ASR path
+while let Some(seg) = upstream.recv().await {
+    // 1. Forward to downstream ASR immediately (no back-pressure on transcription).
+    if tx.send(seg.clone()).await.is_err() { break; }
+    // 2. Now run the speaker-id hook serially — the next recv() won't fire
+    //    until this returns, so the state machine sees segments in VAD order.
+    run_segment_hook(seg, ..., &continuity, ...).await;
+}
+```
+
+`spawn_speaker_id_only` (streaming-ASR branch, where ASR consumes raw audio in parallel) has no downstream forward; it just awaits `run_segment_hook` inline and moves on.
+
+Segments are therefore processed strictly in VAD emission order, so:
 - State reads and writes are naturally serialized by the loop.
 - Out-of-order hazards are impossible by construction — no seq counters, no reorder buffer.
 - The clock used by the state machine is `segment.end_ms` (session-relative), not `Instant::now()`.
+- Offline ASR transcription latency is unchanged from today.
 
-**Latency cost.** Embedding (~200–400 ms on CPU) + identify (~5–20 ms) now runs in the VAD consumer loop rather than a detached task. VAD's internal queue is `crossbeam_channel::bounded::<SpeechSegment>(32)`; at typical speech rates (one VAD segment every 1–5 s), this gives 30–160 s of headroom before back-pressure. Acceptable.
+**Back-pressure budget.** Embedding (~200–400 ms on CPU) + identify (~5–20 ms) now runs in the VAD consumer loop rather than a detached task. VAD's internal queue is `crossbeam_channel::bounded::<SpeechSegment>(32)`; at typical speech rates (one VAD segment every 1–5 s), this gives 30–160 s of headroom before the consumer loop falls behind. The downstream-ASR mpsc is also buffered (`mpsc::channel::<SpeechSegment>(32)`), so short-term skew is absorbed even if speaker work momentarily lags.
 
 ### Config plumbing
 
@@ -231,7 +248,7 @@ All run in `continuity.rs` `#[cfg(test)] mod tests`. No async, no pool, no pipel
 7. **Unknown outside window drops.** State `{A, 0}`, window 15000. Unknown at t=20000 → outcome (None, None, false), state unchanged.
 8. **Carry-over does not self-extend.** State `{A, 0}`, window 15000. Unknown at t=10000 (carry), then Unknown at t=25000 → second call returns (None, None, false), confirming the first carry did not refresh the timer.
 9. **Window=0 disables carry-over.** State `{A, 0}`, window 0. Unknown at t=1 → outcome (None, None, false), state unchanged. Confirmed and Tentative rows still behave normally.
-10. **Segment-time clock is monotonic regardless of input ordering.** Confirm Confirmed{A} at t=0 then Confirmed{B} at t=10 produces state `{B, 10}`; calling with Confirmed{A} at t=5 after that *still* computes within-window correctly relative to the current state (t=10), not the original t=0.
+*(A prior draft included a test claiming `next_attribution` is "monotonic regardless of input ordering". That claim is false — the state machine has no stale-segment guard, and in-order execution is a property of the **caller** (the inline VAD consumer loop), not of the pure function. Removed to avoid encoding a guarantee we don't provide. If an offline refiner ever replays segments out of order, it will need its own ordering discipline or an explicit stale-segment rejection rule added here.)*
 
 ### Integration test (pipeline wiring)
 
@@ -266,6 +283,6 @@ Same commit-on-release pattern (`onMouseUp` / `onBlur`) as the other sliders, us
 - No DB migrations.
 - No backfill of existing transcripts.
 - No persisted schema changes (only the value range for `speaker_score` changes: it's now explicitly `NULL` for carry-over rows, which is already a legal value for that column).
-- Takes effect on next pipeline restart, which happens automatically on any audio-settings patch (after the restart-comparison fix) and on hibernate/wake cycles.
+- Takes effect on next pipeline restart. Restart fires when the speaker-ID tuple `(asr_model, speaker_embedding_model, speaker_confirm_threshold, speaker_tentative_threshold, speaker_min_duration_ms, speaker_continuity_window_ms)` changes, or on hibernate/wake cycles. Other `AudioSettings` fields (e.g. `device_name`, `clip_retention_days`) do **not** trigger a restart from this comparison — that's intentional; mic-change handling is out of scope for this spec.
 
 If the behaviour proves wrong or surprising in use, setting `speaker_continuity_window_ms = 0` disables carry-over completely and reverts to pre-continuity behaviour — no code change required.
