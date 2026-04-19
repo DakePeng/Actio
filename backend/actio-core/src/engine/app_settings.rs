@@ -104,16 +104,56 @@ pub fn migrate_legacy_selection(llm: &mut LlmSettings) {
 pub struct AudioSettings {
     pub device_name: Option<String>,
     pub asr_model: Option<String>,
+    /// Selected speaker-embedding model id from the Common Models catalog.
+    /// `None` means no embedding backend chosen yet — the app will reject
+    /// voiceprint enrollment with an actionable error.
+    #[serde(default)]
+    pub speaker_embedding_model: Option<String>,
     #[serde(default)]
     pub download_source: DownloadSource,
     /// Number of days to keep retained voiceprint-candidate clips on disk
     /// before the background cleanup task deletes them.
     #[serde(default = "default_clip_retention_days")]
     pub clip_retention_days: u32,
+    /// Cosine similarity at or above which a match is called "confirmed"
+    /// (rendered with full opacity + colour). Typical 0.50–0.65.
+    #[serde(default = "default_speaker_confirm_threshold")]
+    pub speaker_confirm_threshold: f32,
+    /// Cosine similarity at or above which a match is called "tentative"
+    /// (rendered dimmed with a `?` badge). Typical 0.35–0.45.
+    #[serde(default = "default_speaker_tentative_threshold")]
+    pub speaker_tentative_threshold: f32,
+    /// VAD segments shorter than this many milliseconds are skipped by the
+    /// identifier entirely — short clips yield unstable embeddings and tend
+    /// to produce false negatives regardless of the actual speaker.
+    #[serde(default = "default_speaker_min_duration_ms")]
+    pub speaker_min_duration_ms: u32,
+    /// Milliseconds of time-decay window for the continuity state machine.
+    /// When a Confirmed match is received, subsequent Unknown / weak
+    /// segments within this window inherit that speaker. 0 disables
+    /// carry-over entirely. Clamped to [0, 60000] on patch.
+    #[serde(default = "default_speaker_continuity_window_ms")]
+    pub speaker_continuity_window_ms: u32,
 }
 
 fn default_clip_retention_days() -> u32 {
     3
+}
+
+fn default_speaker_confirm_threshold() -> f32 {
+    0.55
+}
+
+fn default_speaker_tentative_threshold() -> f32 {
+    0.40
+}
+
+fn default_speaker_min_duration_ms() -> u32 {
+    1500
+}
+
+fn default_speaker_continuity_window_ms() -> u32 {
+    15_000
 }
 
 impl Default for AudioSettings {
@@ -121,8 +161,13 @@ impl Default for AudioSettings {
         Self {
             device_name: None,
             asr_model: None,
+            speaker_embedding_model: None,
             download_source: DownloadSource::default(),
             clip_retention_days: default_clip_retention_days(),
+            speaker_confirm_threshold: default_speaker_confirm_threshold(),
+            speaker_tentative_threshold: default_speaker_tentative_threshold(),
+            speaker_min_duration_ms: default_speaker_min_duration_ms(),
+            speaker_continuity_window_ms: default_speaker_continuity_window_ms(),
         }
     }
 }
@@ -260,8 +305,23 @@ impl SettingsManager {
             if let Some(v) = audio.asr_model {
                 settings.audio.asr_model = Some(v);
             }
+            if let Some(v) = audio.speaker_embedding_model {
+                settings.audio.speaker_embedding_model = Some(v);
+            }
             if let Some(v) = audio.download_source {
                 settings.audio.download_source = v;
+            }
+            if let Some(v) = audio.speaker_confirm_threshold {
+                settings.audio.speaker_confirm_threshold = v.clamp(0.0, 1.0);
+            }
+            if let Some(v) = audio.speaker_tentative_threshold {
+                settings.audio.speaker_tentative_threshold = v.clamp(0.0, 1.0);
+            }
+            if let Some(v) = audio.speaker_min_duration_ms {
+                settings.audio.speaker_min_duration_ms = v;
+            }
+            if let Some(v) = audio.speaker_continuity_window_ms {
+                settings.audio.speaker_continuity_window_ms = v.min(60_000);
             }
         }
         if let Some(keyboard) = patch.keyboard {
@@ -316,7 +376,12 @@ pub struct RemoteLlmSettingsPatch {
 pub struct AudioSettingsPatch {
     pub device_name: Option<String>,
     pub asr_model: Option<String>,
+    pub speaker_embedding_model: Option<String>,
     pub download_source: Option<DownloadSource>,
+    pub speaker_confirm_threshold: Option<f32>,
+    pub speaker_tentative_threshold: Option<f32>,
+    pub speaker_min_duration_ms: Option<u32>,
+    pub speaker_continuity_window_ms: Option<u32>,
 }
 
 #[cfg(test)]
