@@ -19,7 +19,7 @@ pub struct ContinuityState {
     pub last_confirmed_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContinuityConfig {
     /// 0 disables carry-over entirely. In practice clamped to [0, 60000]
     /// by the settings layer; the state machine treats any value as-is.
@@ -55,13 +55,77 @@ pub fn next_attribution(
     evidence: MatchEvidence,
     config: ContinuityConfig,
 ) -> (AttributionOutcome, ContinuityState) {
-    let _ = (segment_end_ms, evidence, config);
-    (
-        AttributionOutcome {
-            speaker_id: None,
-            confidence: None,
-            carried_over: false,
-        },
-        *state,
-    )
+    let _ = config;
+    match evidence {
+        MatchEvidence::Confirmed { speaker_id } => (
+            AttributionOutcome {
+                speaker_id: Some(speaker_id),
+                confidence: Some(MatchConfidence::Confirmed),
+                carried_over: false,
+            },
+            ContinuityState {
+                speaker_id: Some(speaker_id),
+                last_confirmed_ms: Some(segment_end_ms),
+            },
+        ),
+        MatchEvidence::Tentative { .. } | MatchEvidence::Unknown => (
+            AttributionOutcome {
+                speaker_id: None,
+                confidence: None,
+                carried_over: false,
+            },
+            *state,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WINDOW: ContinuityConfig = ContinuityConfig { window_ms: 15_000 };
+
+    fn uuid_a() -> Uuid {
+        Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
+    }
+    fn uuid_b() -> Uuid {
+        Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()
+    }
+
+    #[test]
+    fn confirmed_seeds_state_from_empty() {
+        let a = uuid_a();
+        let (outcome, new_state) = next_attribution(
+            &ContinuityState::default(),
+            0,
+            MatchEvidence::Confirmed { speaker_id: a },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(a));
+        assert_eq!(outcome.confidence, Some(MatchConfidence::Confirmed));
+        assert!(!outcome.carried_over);
+        assert_eq!(new_state.speaker_id, Some(a));
+        assert_eq!(new_state.last_confirmed_ms, Some(0));
+    }
+
+    #[test]
+    fn confirmed_flips_to_another_speaker() {
+        let a = uuid_a();
+        let b = uuid_b();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+        };
+        let (outcome, new_state) = next_attribution(
+            &state,
+            5_000,
+            MatchEvidence::Confirmed { speaker_id: b },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(b));
+        assert_eq!(outcome.confidence, Some(MatchConfidence::Confirmed));
+        assert!(!outcome.carried_over);
+        assert_eq!(new_state.speaker_id, Some(b));
+        assert_eq!(new_state.last_confirmed_ms, Some(5_000));
+    }
 }
