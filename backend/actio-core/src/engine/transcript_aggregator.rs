@@ -36,7 +36,7 @@ pub struct SpeakerResolvedEvent {
     /// True when this attribution was inherited from an earlier Confirmed
     /// match rather than produced by the current segment's own evidence.
     /// Clients may render it differently for a v2 polish pass.
-    #[serde(default, skip_serializing_if = "crate::engine::transcript_aggregator::is_false")]
+    #[serde(skip_serializing_if = "crate::engine::transcript_aggregator::is_false")]
     pub carried_over: bool,
 }
 

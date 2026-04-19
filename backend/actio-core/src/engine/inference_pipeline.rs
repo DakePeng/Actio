@@ -1,11 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::engine::asr;
 use crate::engine::audio_capture::{self, AudioCaptureHandle};
+use crate::engine::continuity::{
+    self, AttributionOutcome, ContinuityConfig, ContinuityState, MatchEvidence,
+};
 use crate::engine::live_enrollment::LiveEnrollment;
 use crate::engine::model_manager::ModelPaths;
 use crate::engine::transcript_aggregator::TranscriptAggregator;
@@ -92,6 +96,12 @@ impl InferencePipeline {
             None => info!("Speaker embedding model not loaded — segments will stay [UNKNOWN]"),
         }
 
+        // Session-scoped state: a fresh Arc each call. Dropping this
+        // handle on the next start_session isolates stale in-flight tasks
+        // from the new session's state automatically.
+        let continuity: Arc<Mutex<ContinuityState>> =
+            Arc::new(Mutex::new(ContinuityState::default()));
+
         // Helper: start VAD, then fan each speech segment into (a) a per-segment
         // speaker-identification task and (b) the downstream offline ASR
         // consumer. Streaming ASR paths use the parallel-VAD variant below
@@ -117,6 +127,7 @@ impl InferencePipeline {
                 live_enrollment.clone(),
                 aggregator_for_hooks.clone(),
                 speaker_id_config,
+                continuity.clone(),
             ))
         };
 
@@ -145,6 +156,7 @@ impl InferencePipeline {
                     live_enrollment.clone(),
                     aggregator_for_hooks.clone(),
                     speaker_id_config,
+                    continuity.clone(),
                 );
                 Ok(())
             };
@@ -297,12 +309,11 @@ impl Drop for InferencePipeline {
 }
 
 /// Interpose between VAD output and the downstream (offline-ASR) consumer.
-/// Each `SpeechSegment` is forwarded unchanged to the returned receiver AND
-/// a detached task is spawned to extract a speaker embedding, identify the
-/// speaker, and persist an `audio_segments` row.
-///
-/// When the embedding model is absent, the task still writes a segment row
-/// with a NULL speaker so retroactive tagging has something to point at.
+/// Each `SpeechSegment` is forwarded FIRST to the downstream ASR consumer so
+/// transcription is not delayed by the embedding + identify hop. Then
+/// `run_segment_hook` is awaited inline so the continuity state machine sees
+/// segments in strict VAD emission order.
+#[allow(clippy::too_many_arguments)]
 fn split_segments_for_speaker_id(
     mut upstream: mpsc::Receiver<SpeechSegment>,
     session_id: Uuid,
@@ -313,12 +324,21 @@ fn split_segments_for_speaker_id(
     live_enrollment: LiveEnrollment,
     aggregator: Arc<TranscriptAggregator>,
     speaker_id_config: SpeakerIdConfig,
+    continuity: Arc<Mutex<ContinuityState>>,
 ) -> mpsc::Receiver<SpeechSegment> {
     let (tx, rx) = mpsc::channel::<SpeechSegment>(32);
     tokio::spawn(async move {
         while let Some(seg) = upstream.recv().await {
-            spawn_segment_hook(
-                seg.clone(),
+            // 1. Forward to downstream offline ASR FIRST so transcription
+            //    is not delayed by the embedding + identify hop.
+            if tx.send(seg.clone()).await.is_err() {
+                break; // downstream ASR consumer went away
+            }
+            // 2. Run the speaker-id hook inline. The next recv() does not
+            //    fire until this returns, so the state machine sees
+            //    segments strictly in VAD emission order.
+            run_segment_hook(
+                seg,
                 session_id,
                 tenant_id,
                 pool.clone(),
@@ -327,11 +347,9 @@ fn split_segments_for_speaker_id(
                 live_enrollment.clone(),
                 aggregator.clone(),
                 speaker_id_config,
-            );
-
-            if tx.send(seg).await.is_err() {
-                break; // downstream ASR consumer went away
-            }
+                continuity.clone(),
+            )
+            .await;
         }
     });
     rx
@@ -340,6 +358,7 @@ fn split_segments_for_speaker_id(
 /// Streaming-mode variant: runs speaker-id over VAD segments but does NOT
 /// forward them anywhere (there's no downstream ASR — the streaming
 /// recognizer is consuming the raw audio in parallel).
+#[allow(clippy::too_many_arguments)]
 fn spawn_speaker_id_only(
     mut upstream: mpsc::Receiver<SpeechSegment>,
     session_id: Uuid,
@@ -350,10 +369,11 @@ fn spawn_speaker_id_only(
     live_enrollment: LiveEnrollment,
     aggregator: Arc<TranscriptAggregator>,
     speaker_id_config: SpeakerIdConfig,
+    continuity: Arc<Mutex<ContinuityState>>,
 ) {
     tokio::spawn(async move {
         while let Some(seg) = upstream.recv().await {
-            spawn_segment_hook(
+            run_segment_hook(
                 seg,
                 session_id,
                 tenant_id,
@@ -363,13 +383,15 @@ fn spawn_speaker_id_only(
                 live_enrollment.clone(),
                 aggregator.clone(),
                 speaker_id_config,
-            );
+                continuity.clone(),
+            )
+            .await;
         }
     });
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_segment_hook(
+async fn run_segment_hook(
     seg: SpeechSegment,
     session_id: Uuid,
     tenant_id: Uuid,
@@ -379,32 +401,32 @@ fn spawn_segment_hook(
     live_enrollment: LiveEnrollment,
     aggregator: Arc<TranscriptAggregator>,
     speaker_id_config: SpeakerIdConfig,
+    continuity: Arc<Mutex<ContinuityState>>,
 ) {
     let start_ms = (seg.start_sample as i64 * 1000) / 16000;
     let end_ms = (seg.end_sample as i64 * 1000) / 16000;
     let segment_id = seg.segment_id;
     let audio = seg.audio;
 
-    tokio::spawn(async move {
-        if let Err(e) = handle_segment_embedding(
-            &pool,
-            embedding_model,
-            session_id,
-            tenant_id,
-            segment_id,
-            start_ms,
-            end_ms,
-            audio,
-            &clips_dir,
-            &live_enrollment,
-            &aggregator,
-            speaker_id_config,
-        )
-        .await
-        {
-            warn!(%session_id, error = %e, "segment speaker-id hook failed");
-        }
-    });
+    if let Err(e) = handle_segment_embedding(
+        &pool,
+        embedding_model,
+        session_id,
+        tenant_id,
+        segment_id,
+        start_ms,
+        end_ms,
+        audio,
+        &clips_dir,
+        &live_enrollment,
+        &aggregator,
+        speaker_id_config,
+        &continuity,
+    )
+    .await
+    {
+        warn!(%session_id, error = %e, "segment speaker-id hook failed");
+    }
 }
 
 /// Interpose between the capture source and the rest of the pipeline to
@@ -460,19 +482,103 @@ fn tee_audio(
 /// `audio_quality::score`.
 const VOICEPRINT_CANDIDATE_QUALITY: f32 = 0.6;
 
+/// Shared tail for every path that wants to participate in continuity:
+/// too-short, below-threshold, Tentative, and Confirmed. Runs the state
+/// machine, persists the segment row with the outcome's speaker_id, and
+/// publishes the corresponding WS event.
+///
+/// `match_similarity` is `Some` only for paths whose `evidence` came from
+/// `identify_speaker_with_thresholds` and where `carried_over == false`.
+/// Carry-over / too-short / matcher-error paths persist a NULL
+/// `speaker_score` so downstream consumers don't see a fabricated value.
+#[allow(clippy::too_many_arguments)]
+async fn finalize_segment(
+    pool: &sqlx::SqlitePool,
+    session_id: Uuid,
+    start_ms: i64,
+    end_ms: i64,
+    embedding: Option<&[f32]>,
+    audio: &[f32],
+    audio_quality: f32,
+    clips_dir: &Path,
+    evidence: MatchEvidence,
+    match_similarity: Option<f64>,
+    continuity: &Arc<Mutex<ContinuityState>>,
+    config: ContinuityConfig,
+    aggregator: &Arc<TranscriptAggregator>,
+    segment_id: Uuid,
+) -> anyhow::Result<Option<String>> {
+    // Run the state machine under a short-lived lock.
+    let outcome: AttributionOutcome = {
+        let mut guard = continuity.lock().await;
+        let (outcome, new_state) =
+            continuity::next_attribution(&*guard, end_ms, evidence, config);
+        *guard = new_state;
+        outcome
+    };
+
+    let persisted_score: Option<f64> = if outcome.carried_over {
+        None
+    } else {
+        match_similarity
+    };
+
+    // Candidate-clip retention keys off the FINAL outcome, not the raw
+    // matcher result. Carry-over turns an unknown into an attributed
+    // segment, so we should not retain its audio as a Phase-A candidate.
+    let audio_ref: Option<String> = if outcome.speaker_id.is_none()
+        && audio_quality >= VOICEPRINT_CANDIDATE_QUALITY
+    {
+        let candidate_id = Uuid::new_v4().to_string();
+        match crate::engine::clip_storage::write_clip(clips_dir, &candidate_id, audio) {
+            Ok(name) => Some(name),
+            Err(err) => {
+                warn!(?err, ?clips_dir, "failed to retain voiceprint-candidate clip");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    crate::repository::segment::insert_segment(
+        pool,
+        session_id,
+        start_ms,
+        end_ms,
+        outcome.speaker_id,
+        persisted_score,
+        embedding,
+        audio_ref.as_deref(),
+    )
+    .await?;
+
+    aggregator.publish_speaker_resolved(
+        crate::engine::transcript_aggregator::SpeakerResolvedEvent {
+            segment_id: segment_id.to_string(),
+            start_ms,
+            end_ms,
+            speaker_id: outcome.speaker_id.map(|u| u.to_string()),
+            confidence: outcome.confidence.map(|c| c.as_str()),
+            carried_over: outcome.carried_over,
+        },
+    );
+
+    Ok(outcome.speaker_id.map(|u| u.to_string()))
+}
+
 /// Persist a single VAD segment along with its speaker identification.
 ///
 /// Order of operations:
 /// 1. If no embedding model is loaded: insert the row with NULL speaker +
 ///    NULL embedding so the user can still retroactively tag it.
 /// 2. Extract the embedding; on failure, same outcome as step 1.
-/// 3. Run `identify_speaker` against the tenant's enrolled voiceprints. If
-///    `accepted`, write the matched speaker id; otherwise NULL. In both
-///    cases the embedding is persisted on the row.
-/// 4. When the segment is unknown AND passes the voiceprint-candidate
-///    quality bar, also retain the raw audio on disk so the app can later
-///    prompt the user to identify who was speaking (Phase A). A `sha` of
-///    the resulting file name is stored in `audio_segments.audio_ref`.
+/// 3. Live-enrollment short-circuit: synthetic Confirmed publish, no
+///    continuity touch.
+/// 4. Duration gate: very short segments pass Unknown through continuity
+///    so a carry-over can rescue the attribution.
+/// 5. Run `identify_speaker_with_thresholds`; funnel result through
+///    `finalize_segment` which drives the continuity state machine.
 #[allow(clippy::too_many_arguments)]
 async fn handle_segment_embedding(
     pool: &sqlx::SqlitePool,
@@ -487,8 +593,11 @@ async fn handle_segment_embedding(
     live_enrollment: &LiveEnrollment,
     aggregator: &Arc<TranscriptAggregator>,
     speaker_id_config: SpeakerIdConfig,
+    continuity: &Arc<Mutex<ContinuityState>>,
 ) -> anyhow::Result<Option<String>> {
-    let publish = |speaker_id: Option<String>, confidence: Option<&'static str>, carried_over: bool| {
+    // Raw-publish helper for paths that must not touch continuity.
+    let publish_raw = |speaker_id: Option<String>,
+                       confidence: Option<&'static str>| {
         aggregator.publish_speaker_resolved(
             crate::engine::transcript_aggregator::SpeakerResolvedEvent {
                 segment_id: segment_id.to_string(),
@@ -496,7 +605,7 @@ async fn handle_segment_embedding(
                 end_ms,
                 speaker_id,
                 confidence,
-                carried_over,
+                carried_over: false,
             },
         );
     };
@@ -507,7 +616,7 @@ async fn handle_segment_embedding(
             pool, session_id, start_ms, end_ms, None, None, None, None,
         )
         .await?;
-        publish(None, None, false);
+        publish_raw(None, None);
         return Ok(None);
     };
 
@@ -519,16 +628,16 @@ async fn handle_segment_embedding(
                 pool, session_id, start_ms, end_ms, None, None, None, None,
             )
             .await?;
-            publish(None, None, false);
+            publish_raw(None, None);
             return Ok(None);
         }
     };
 
-    // Live-enrollment short-circuit: if the user is actively reading passages
-    // to enroll a speaker, consume this segment as a voiceprint for them and
-    // skip normal identification / candidate retention.
     let duration_ms = (end_ms - start_ms) as f64;
     let quality = crate::engine::audio_quality::score(&audio);
+
+    // Live-enrollment short-circuit: synthetic Confirmed publish, no
+    // continuity touch.
     if let Some(enrolled_speaker) = crate::engine::live_enrollment::consume_segment(
         live_enrollment,
         duration_ms,
@@ -550,36 +659,43 @@ async fn handle_segment_embedding(
             None,
         )
         .await?;
-        // Live-enrolled segment is trusted by construction — publish as Confirmed.
-        publish(
+        publish_raw(
             Some(enrolled_speaker.clone()),
             Some(crate::domain::speaker_matcher::MatchConfidence::Confirmed.as_str()),
-            false,
         );
         return Ok(Some(enrolled_speaker));
     }
 
+    let config = ContinuityConfig {
+        window_ms: speaker_id_config.continuity_window_ms,
+    };
+
     // Duration gate: very short VAD segments give noisy embeddings. Skip
-    // the identifier entirely and leave the segment unresolved.
+    // the identifier entirely, but still pass Unknown through continuity
+    // so a carry-over can rescue the attribution.
     if duration_ms < speaker_id_config.min_duration_ms as f64 {
         info!(
             duration_ms,
             min = speaker_id_config.min_duration_ms,
             "segment hook: skipping speaker-id — too short"
         );
-        crate::repository::segment::insert_segment(
+        return finalize_segment(
             pool,
             session_id,
             start_ms,
             end_ms,
-            None,
-            None,
             Some(&emb.values),
+            &audio,
+            quality,
+            clips_dir,
+            MatchEvidence::Unknown,
             None,
+            continuity,
+            config,
+            aggregator,
+            segment_id,
         )
-        .await?;
-        publish(None, None, false);
-        return Ok(None);
+        .await;
     }
 
     info!(
@@ -604,48 +720,43 @@ async fn handle_segment_embedding(
         confidence: None,
     });
 
-    let speaker_id = result
-        .speaker_id
-        .as_ref()
-        .and_then(|s| Uuid::parse_str(s).ok());
-
-    // Phase-A candidate retention: only when the segment is unknown AND
-    // passes the quality gate. Known-speaker segments are redundant
-    // (we already have their voiceprint), low-quality unknown segments
-    // aren't worth asking the user about.
-    let audio_ref = if speaker_id.is_none() {
-        if quality >= VOICEPRINT_CANDIDATE_QUALITY {
-            let candidate_id = Uuid::new_v4().to_string();
-            match crate::engine::clip_storage::write_clip(clips_dir, &candidate_id, &audio) {
-                Ok(name) => Some(name),
-                Err(err) => {
-                    warn!(?err, ?clips_dir, "failed to retain voiceprint-candidate clip");
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
+    let evidence = match (
+        result.confidence,
+        result
+            .speaker_id
+            .as_ref()
+            .and_then(|s| Uuid::parse_str(s).ok()),
+    ) {
+        (
+            Some(crate::domain::speaker_matcher::MatchConfidence::Confirmed),
+            Some(id),
+        ) => MatchEvidence::Confirmed { speaker_id: id },
+        (
+            Some(crate::domain::speaker_matcher::MatchConfidence::Tentative),
+            Some(id),
+        ) => MatchEvidence::Tentative { speaker_id: id },
+        _ => MatchEvidence::Unknown,
+    };
+    let match_similarity = match evidence {
+        MatchEvidence::Unknown => None,
+        _ => Some(result.similarity_score),
     };
 
-    crate::repository::segment::insert_segment(
+    finalize_segment(
         pool,
         session_id,
         start_ms,
         end_ms,
-        speaker_id,
-        Some(result.similarity_score),
         Some(&emb.values),
-        audio_ref.as_deref(),
+        &audio,
+        quality,
+        clips_dir,
+        evidence,
+        match_similarity,
+        continuity,
+        config,
+        aggregator,
+        segment_id,
     )
-    .await?;
-
-    publish(
-        result.speaker_id.clone(),
-        result.confidence.map(|c| c.as_str()),
-        false,
-    );
-    Ok(result.speaker_id)
+    .await
 }
