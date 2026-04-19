@@ -13,7 +13,7 @@ use crate::engine::vad::{self, SpeechSegment, VadConfig};
 
 /// Tunable knobs for the per-segment speaker identifier. Values live in
 /// AudioSettings so the user can adjust them without rebuilding.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpeakerIdConfig {
     pub confirm_threshold: f32,
     pub tentative_threshold: f32,
@@ -488,7 +488,7 @@ async fn handle_segment_embedding(
     aggregator: &Arc<TranscriptAggregator>,
     speaker_id_config: SpeakerIdConfig,
 ) -> anyhow::Result<Option<String>> {
-    let publish = |speaker_id: Option<String>, confidence: Option<&'static str>| {
+    let publish = |speaker_id: Option<String>, confidence: Option<&'static str>, carried_over: bool| {
         aggregator.publish_speaker_resolved(
             crate::engine::transcript_aggregator::SpeakerResolvedEvent {
                 segment_id: segment_id.to_string(),
@@ -496,6 +496,7 @@ async fn handle_segment_embedding(
                 end_ms,
                 speaker_id,
                 confidence,
+                carried_over,
             },
         );
     };
@@ -506,7 +507,7 @@ async fn handle_segment_embedding(
             pool, session_id, start_ms, end_ms, None, None, None, None,
         )
         .await?;
-        publish(None, None);
+        publish(None, None, false);
         return Ok(None);
     };
 
@@ -518,7 +519,7 @@ async fn handle_segment_embedding(
                 pool, session_id, start_ms, end_ms, None, None, None, None,
             )
             .await?;
-            publish(None, None);
+            publish(None, None, false);
             return Ok(None);
         }
     };
@@ -553,6 +554,7 @@ async fn handle_segment_embedding(
         publish(
             Some(enrolled_speaker.clone()),
             Some(crate::domain::speaker_matcher::MatchConfidence::Confirmed.as_str()),
+            false,
         );
         return Ok(Some(enrolled_speaker));
     }
@@ -576,7 +578,7 @@ async fn handle_segment_embedding(
             None,
         )
         .await?;
-        publish(None, None);
+        publish(None, None, false);
         return Ok(None);
     }
 
@@ -643,6 +645,7 @@ async fn handle_segment_embedding(
     publish(
         result.speaker_id.clone(),
         result.confidence.map(|c| c.as_str()),
+        false,
     );
     Ok(result.speaker_id)
 }

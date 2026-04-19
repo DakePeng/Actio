@@ -14,6 +14,10 @@ use uuid::Uuid;
 use crate::repository::session;
 use crate::AppState;
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Serialize)]
 struct WsTranscriptEvent {
     kind: &'static str,
@@ -32,6 +36,10 @@ struct WsSpeakerResolvedEvent {
     start_ms: i64,
     end_ms: i64,
     speaker_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confidence: Option<&'static str>,
+    #[serde(skip_serializing_if = "is_false")]
+    carried_over: bool,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -139,6 +147,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
                                 start_ms: sr.start_ms,
                                 end_ms: sr.end_ms,
                                 speaker_id: sr.speaker_id,
+                                confidence: sr.confidence,
+                                carried_over: sr.carried_over,
                             };
                             match serde_json::to_string(&msg) {
                                 Ok(json) => {

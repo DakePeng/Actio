@@ -3,6 +3,11 @@ use uuid::Uuid;
 
 use crate::repository::{speaker, transcript};
 
+/// Serde helper so `carried_over: false` is omitted from the wire format.
+pub(crate) fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AggregatedTranscript {
     pub id: String,
@@ -24,6 +29,15 @@ pub struct SpeakerResolvedEvent {
     pub start_ms: i64,
     pub end_ms: i64,
     pub speaker_id: Option<String>,
+    /// `"confirmed"` or `"tentative"` when a speaker was matched; None when
+    /// the segment was left unresolved (unknown or below threshold).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<&'static str>,
+    /// True when this attribution was inherited from an earlier Confirmed
+    /// match rather than produced by the current segment's own evidence.
+    /// Clients may render it differently for a v2 polish pass.
+    #[serde(default, skip_serializing_if = "crate::engine::transcript_aggregator::is_false")]
+    pub carried_over: bool,
 }
 
 pub struct TranscriptAggregator {
