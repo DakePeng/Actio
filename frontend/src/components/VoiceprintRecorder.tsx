@@ -4,13 +4,18 @@ import * as speakerApi from '../api/speakers';
 import { useVoiceStore } from '../store/use-voice-store';
 import type { LiveEnrollmentState } from '../types/speaker';
 
+// Longer, more varied passages give the embedding model a better chance to
+// capture a speaker's prosody. Five clips × ~5 seconds each lands around
+// the 25 s total that the 3D-Speaker family typically recommends.
 const PASSAGES = [
-  'The quick brown fox jumps over the lazy dog.',
-  'She sells seashells by the seashore under a clear blue sky.',
-  'A journey of a thousand miles begins with a single step.',
+  'The quick brown fox jumps over the lazy dog, and then sits down for a long rest.',
+  'She sells seashells by the seashore under a clear blue sky on a warm summer afternoon.',
+  'A journey of a thousand miles begins with a single step, though most journeys are rarely that simple.',
+  'Peter Piper picked a peck of pickled peppers, and the whole kitchen smelled like vinegar for days.',
+  'How much wood would a woodchuck chuck if a woodchuck could chuck wood all afternoon?',
 ];
 
-const TARGET = 3;
+const TARGET = 5;
 const POLL_MS = 700;
 
 /**
