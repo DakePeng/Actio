@@ -142,16 +142,33 @@ pub async fn patch_settings(
     Json(patch): Json<SettingsPatch>,
 ) -> Json<AppSettings> {
     // Snapshot before applying the patch.
-    let old_model = state.settings_manager.get().await.audio.asr_model.clone();
+    // Snapshot all audio fields that affect speaker identification. Any
+    // change in this tuple warrants a pipeline restart because SpeakerIdConfig
+    // is copied by value into spawned tasks — a running pipeline will not see
+    // threshold or window edits until it restarts.
+    let old = state.settings_manager.get().await;
+    let old_speaker_tuple = (
+        old.audio.asr_model.clone(),
+        old.audio.speaker_confirm_threshold,
+        old.audio.speaker_tentative_threshold,
+        old.audio.speaker_min_duration_ms,
+        old.audio.speaker_continuity_window_ms,
+    );
     let llm_changed = patch.llm.is_some();
     let new_settings = state.settings_manager.update(patch).await;
-    let new_model = new_settings.audio.asr_model.clone();
+    let new_speaker_tuple = (
+        new_settings.audio.asr_model.clone(),
+        new_settings.audio.speaker_confirm_threshold,
+        new_settings.audio.speaker_tentative_threshold,
+        new_settings.audio.speaker_min_duration_ms,
+        new_settings.audio.speaker_continuity_window_ms,
+    );
 
-    if old_model != new_model {
+    if old_speaker_tuple != new_speaker_tuple {
         tracing::info!(
-            old = ?old_model,
-            new = ?new_model,
-            "ASR model changed in settings — signalling pipeline restart"
+            ?old_speaker_tuple,
+            ?new_speaker_tuple,
+            "Speaker-ID settings changed — signalling pipeline restart"
         );
         state.pipeline_restart.notify_one();
     }
