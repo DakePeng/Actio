@@ -28,6 +28,14 @@ pub async fn get_available_models(State(state): State<AppState>) -> Json<Vec<Asr
     Json(state.model_manager.available_asr_models())
 }
 
+/// GET /settings/models/embeddings — lists speaker-embedding models (the
+/// Common Models section of Settings → Models).
+pub async fn get_available_embedding_models(
+    State(state): State<AppState>,
+) -> Json<Vec<crate::engine::model_manager::SpeakerEmbeddingModelInfo>> {
+    Json(state.model_manager.available_embedding_models())
+}
+
 /// GET /settings/audio-devices — lists available audio input devices.
 pub async fn list_audio_devices() -> Json<Vec<AudioDeviceInfo>> {
     Json(audio_capture::list_devices())
@@ -153,6 +161,7 @@ pub async fn patch_settings(
         old.audio.speaker_tentative_threshold,
         old.audio.speaker_min_duration_ms,
         old.audio.speaker_continuity_window_ms,
+        old.audio.speaker_embedding_model.clone(),
     );
     let llm_changed = patch.llm.is_some();
     let new_settings = state.settings_manager.update(patch).await;
@@ -162,6 +171,7 @@ pub async fn patch_settings(
         new_settings.audio.speaker_tentative_threshold,
         new_settings.audio.speaker_min_duration_ms,
         new_settings.audio.speaker_continuity_window_ms,
+        new_settings.audio.speaker_embedding_model.clone(),
     );
 
     if old_speaker_tuple != new_speaker_tuple {

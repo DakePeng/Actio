@@ -18,11 +18,14 @@ use crate::engine::llm_catalog::DownloadSource;
 /// - `Model(id)`: a specific ASR model pack (e.g. "zh_zipformer_14m",
 ///   "en_zipformer_20m", "moonshine_tiny_en", "sense_voice_multi",
 ///   "funasr_nano").
+/// - `Embedding(id)`: a specific speaker-embedding model from the catalog
+///   (e.g. "campplus_zh_en", "eres2netv2", "titanet_small_en").
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "id", rename_all = "snake_case")]
 pub enum DownloadTarget {
     Shared,
     Model(String),
+    Embedding(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +67,18 @@ pub struct AsrModelInfo {
     /// Downloadable models that aren't yet wired up can still appear in the
     /// catalog but won't be selectable until this flag flips to true.
     pub runtime_supported: bool,
+}
+
+/// Speaker-embedding model surfaced to the Settings UI.
+#[derive(Debug, Clone, Serialize)]
+pub struct SpeakerEmbeddingModelInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub languages: String,
+    pub size_mb: u32,
+    pub embedding_dim: u32,
+    pub downloaded: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +384,97 @@ fn find_transducer(id: &str) -> Option<&'static StreamingTransducerDef> {
     STREAMING_TRANSDUCERS.iter().find(|d| d.id == id)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Speaker-embedding model catalog
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Users pick one active model in Settings → Common Models. Switching models
+// invalidates existing voiceprints because embeddings from different models
+// live in different spaces (and different dimensions). The DB already tracks
+// `embedding_dimension` per row so cross-model rows are silently ignored at
+// query time; the UI surfaces a confirm dialog on switch.
+//
+// NOTE: the upstream release tag `speaker-recongition-models` is spelled
+// with a typo (missing 'g'). Keep it — it is the canonical URL.
+
+struct SpeakerEmbeddingModelDef {
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
+    languages: &'static str,
+    size_mb: u32,
+    dim: u32,
+    url: &'static str,
+    dest_name: &'static str,
+}
+
+const SPEAKER_EMBEDDING_MODELS: &[SpeakerEmbeddingModelDef] = &[
+    SpeakerEmbeddingModelDef {
+        id: "campplus_zh_en",
+        name: "CAM++ Advanced (Chinese + English)",
+        description: "Context-aware masking, bilingual. Small, fast, well-balanced. Recommended default.",
+        languages: "Chinese, English",
+        size_mb: 27,
+        dim: 192,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+        dest_name: "speaker_campplus_zh_en.onnx",
+    },
+    SpeakerEmbeddingModelDef {
+        id: "campplus_zh",
+        name: "CAM++ (Chinese)",
+        description: "Chinese-optimised CAM++. Slightly crisper on native zh speech than the bilingual variant.",
+        languages: "Chinese",
+        size_mb: 27,
+        dim: 192,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+        dest_name: "speaker_campplus_zh.onnx",
+    },
+    SpeakerEmbeddingModelDef {
+        id: "campplus_en",
+        name: "CAM++ (English)",
+        description: "English-only CAM++ trained on VoxCeleb. Use for English-only scenarios where you want CAM++'s speed.",
+        languages: "English",
+        size_mb: 27,
+        dim: 192,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+        dest_name: "speaker_campplus_en.onnx",
+    },
+    SpeakerEmbeddingModelDef {
+        id: "eres2net_base",
+        name: "ERes2Net Base (Chinese)",
+        description: "Multi-scale Res2Net blocks. More accurate than CAM++ on varied audio, slightly slower. 512-dim embeddings (4x per-voiceprint storage).",
+        languages: "Chinese",
+        size_mb: 38,
+        dim: 512,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx",
+        dest_name: "speaker_eres2net_base.onnx",
+    },
+    SpeakerEmbeddingModelDef {
+        id: "eres2netv2",
+        name: "ERes2Net v2 (Chinese)",
+        description: "Newer ERes2Net architecture. Best accuracy in this set; largest file.",
+        languages: "Chinese",
+        size_mb: 68,
+        dim: 192,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx",
+        dest_name: "speaker_eres2netv2.onnx",
+    },
+    SpeakerEmbeddingModelDef {
+        id: "titanet_small_en",
+        name: "NeMo TitaNet Small (English)",
+        description: "NVIDIA NeMo, English-tuned. Different architecture than CAM++/ERes2Net; useful if you want a non-3D-Speaker alternative.",
+        languages: "English",
+        size_mb: 38,
+        dim: 192,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx",
+        dest_name: "speaker_titanet_small.onnx",
+    },
+];
+
+fn find_embedding_model(id: &str) -> Option<&'static SpeakerEmbeddingModelDef> {
+    SPEAKER_EMBEDDING_MODELS.iter().find(|d| d.id == id)
+}
+
 // ---------------------------------------------------------------------------
 // Whisper base (offline, multilingual — 99 languages)
 // ---------------------------------------------------------------------------
@@ -530,6 +636,14 @@ fn files_for_target(target: &DownloadTarget) -> Result<Vec<ModelFile>> {
             };
             Ok(slice.to_vec())
         }
+        DownloadTarget::Embedding(id) => {
+            let def = find_embedding_model(id)
+                .ok_or_else(|| anyhow!("Unknown speaker embedding model: {}", id))?;
+            Ok(vec![ModelFile {
+                url: def.url,
+                dest_name: def.dest_name,
+            }])
+        }
     }
 }
 
@@ -539,6 +653,11 @@ fn model_downloaded(model_dir: &PathBuf, files: &[ModelFile]) -> bool {
         let p = model_dir.join(f.dest_name);
         p.exists() && std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false)
     })
+}
+
+fn embedding_downloaded(model_dir: &PathBuf, def: &SpeakerEmbeddingModelDef) -> bool {
+    let p = model_dir.join(def.dest_name);
+    p.exists() && std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false)
 }
 
 /// Check whether a streaming transducer's files are present on disk.
@@ -712,22 +831,38 @@ impl ModelManager {
         models
     }
 
+    /// Return the speaker-embedding catalog with on-disk status.
+    pub fn available_embedding_models(&self) -> Vec<SpeakerEmbeddingModelInfo> {
+        SPEAKER_EMBEDDING_MODELS
+            .iter()
+            .map(|d| SpeakerEmbeddingModelInfo {
+                id: d.id.to_string(),
+                name: d.name.to_string(),
+                description: d.description.to_string(),
+                languages: d.languages.to_string(),
+                size_mb: d.size_mb,
+                embedding_dim: d.dim,
+                downloaded: embedding_downloaded(&self.model_dir, d),
+            })
+            .collect()
+    }
+
     /// Return paths to model files if the shared tier is present. Callers must
     /// still verify that at least one language pack is downloaded before
     /// attempting to start ASR.
     ///
-    /// The `_speaker_embedding_id` parameter is reserved for future multi-
-    /// embedding-model selection. Today the speaker embedding resolves from
-    /// a fixed on-disk filename (`speaker_eres2net.onnx`); the argument is
-    /// accepted and ignored so callers can thread their selection through
-    /// without the signature churning when the catalog lands.
+    /// `speaker_embedding_id` selects which catalog entry resolves
+    /// `ModelPaths.speaker_embedding`. Pass the id from
+    /// `AudioSettings.speaker_embedding_model`. If no id is given or the chosen
+    /// file isn't on disk, `build_paths` falls through to any known embedding
+    /// filename found in `model_dir`.
     pub async fn model_paths(
         &self,
-        _speaker_embedding_id: Option<&str>,
+        speaker_embedding_id: Option<&str>,
     ) -> Option<ModelPaths> {
         let status = self.status.read().await;
         match &*status {
-            ModelStatus::Ready => Some(build_paths(&self.model_dir)),
+            ModelStatus::Ready => Some(build_paths(&self.model_dir, speaker_embedding_id)),
             _ => None,
         }
     }
@@ -743,6 +878,8 @@ impl ModelManager {
     pub async fn delete_model(&self, id: &str) -> Result<u32> {
         let files: Vec<ModelFile> = if id == "shared" {
             SHARED_FILES.to_vec()
+        } else if find_embedding_model(id).is_some() {
+            files_for_target(&DownloadTarget::Embedding(id.to_string()))?
         } else {
             files_for_target(&DownloadTarget::Model(id.to_string()))?
         };
@@ -933,7 +1070,7 @@ fn build_transducer(model_dir: &PathBuf, prefix: &str) -> Option<TransducerFiles
     }
 }
 
-fn build_paths(model_dir: &PathBuf) -> ModelPaths {
+fn build_paths(model_dir: &PathBuf, speaker_embedding_id: Option<&str>) -> ModelPaths {
     let opt = |name: &str| {
         let path = model_dir.join(name);
         if path.exists() {
@@ -1077,13 +1214,15 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
         whisper_base,
         whisper_turbo,
         pyannote_segmentation: opt("pyannote-seg3.onnx"),
-        // Accept any of the known embedding-model filenames. A prior
-        // session shipped a multi-model catalog whose downloads land under
-        // model-specific names; until that catalog is fully restored, fall
-        // through the list and pick the first file present. Order here is
-        // preference — prefer the bilingual CAM++ by default.
-        speaker_embedding: opt("speaker_campplus_zh_en.onnx")
+        // Prefer the caller's selection; fall back to any known embedding
+        // filename on disk so users from the pre-catalog era (or who placed
+        // a file manually) aren't stranded.
+        speaker_embedding: speaker_embedding_id
+            .and_then(find_embedding_model)
+            .and_then(|def| opt(def.dest_name))
+            .or_else(|| opt("speaker_campplus_zh_en.onnx"))
             .or_else(|| opt("speaker_campplus_zh.onnx"))
+            .or_else(|| opt("speaker_campplus_en.onnx"))
             .or_else(|| opt("speaker_eres2netv2.onnx"))
             .or_else(|| opt("speaker_eres2net_base.onnx"))
             .or_else(|| opt("speaker_titanet_small.onnx"))

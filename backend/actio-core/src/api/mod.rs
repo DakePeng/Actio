@@ -151,6 +151,10 @@ pub fn router(state: AppState) -> Router {
             get(settings::get_available_models),
         )
         .route(
+            "/settings/models/embeddings",
+            get(settings::get_available_embedding_models),
+        )
+        .route(
             "/settings/models/download",
             post(settings::start_model_download),
         )
