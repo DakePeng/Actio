@@ -1077,7 +1077,17 @@ fn build_paths(model_dir: &PathBuf) -> ModelPaths {
         whisper_base,
         whisper_turbo,
         pyannote_segmentation: opt("pyannote-seg3.onnx"),
-        speaker_embedding: opt("speaker_eres2net.onnx"),
+        // Accept any of the known embedding-model filenames. A prior
+        // session shipped a multi-model catalog whose downloads land under
+        // model-specific names; until that catalog is fully restored, fall
+        // through the list and pick the first file present. Order here is
+        // preference — prefer the bilingual CAM++ by default.
+        speaker_embedding: opt("speaker_campplus_zh_en.onnx")
+            .or_else(|| opt("speaker_campplus_zh.onnx"))
+            .or_else(|| opt("speaker_eres2netv2.onnx"))
+            .or_else(|| opt("speaker_eres2net_base.onnx"))
+            .or_else(|| opt("speaker_titanet_small.onnx"))
+            .or_else(|| opt("speaker_eres2net.onnx")),
     }
 }
 
