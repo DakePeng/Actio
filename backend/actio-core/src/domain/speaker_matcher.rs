@@ -4,12 +4,39 @@ use uuid::Uuid;
 
 use crate::engine::diarization::cosine_similarity;
 
+/// Confidence tier for a speaker match. Used both in `SpeakerMatchResult`
+/// (returned by `identify_speaker_with_thresholds`) and in the continuity
+/// state machine's `AttributionOutcome`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchConfidence {
+    Confirmed,
+    Tentative,
+}
+
+impl MatchConfidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MatchConfidence::Confirmed => "confirmed",
+            MatchConfidence::Tentative => "tentative",
+        }
+    }
+}
+
+/// Thresholds for `identify_speaker_with_thresholds`. Values are cosine
+/// similarity scores in [0, 1]. `confirm` must be ≥ `tentative`.
+#[derive(Debug, Clone, Copy)]
+pub struct IdentifyThresholds {
+    pub confirm: f64,
+    pub tentative: f64,
+}
+
 #[derive(Debug)]
 pub struct SpeakerMatchResult {
     pub speaker_id: Option<String>,
     pub similarity_score: f64,
     pub z_norm_score: f64,
     pub accepted: bool,
+    pub confidence: Option<MatchConfidence>,
 }
 
 const Z_NORM_THRESHOLD: f64 = 0.0;
@@ -50,6 +77,7 @@ pub async fn identify_speaker(
             similarity_score: 0.0,
             z_norm_score: 0.0,
             accepted: false,
+            confidence: None,
         });
     }
 
@@ -108,6 +136,7 @@ pub async fn identify_speaker(
             similarity_score: sim,
             z_norm_score: z_norm,
             accepted,
+            confidence: accepted.then_some(MatchConfidence::Confirmed),
         })
     } else {
         Ok(SpeakerMatchResult {
@@ -115,8 +144,84 @@ pub async fn identify_speaker(
             similarity_score: 0.0,
             z_norm_score: 0.0,
             accepted: false,
+            confidence: None,
         })
     }
+}
+
+/// Threshold-based variant used by the continuity pipeline. Same scoring
+/// as `identify_speaker` but decision is based on absolute cosine against
+/// the caller-supplied confirm/tentative thresholds, and the returned
+/// `confidence` tier drives the downstream state machine.
+pub async fn identify_speaker_with_thresholds(
+    pool: &SqlitePool,
+    query: &[f32],
+    tenant_id: Uuid,
+    thresholds: IdentifyThresholds,
+) -> Result<SpeakerMatchResult, sqlx::Error> {
+    let query_dim = query.len() as i64;
+    let rows: Vec<(String, Vec<u8>)> = sqlx::query_as(
+        "SELECT e.speaker_id, e.embedding \
+         FROM speaker_embeddings e \
+         JOIN speakers s ON s.id = e.speaker_id \
+         WHERE s.tenant_id = ?1 \
+           AND s.status = 'active' \
+           AND e.embedding_dimension = ?2",
+    )
+    .bind(tenant_id.to_string())
+    .bind(query_dim)
+    .fetch_all(pool)
+    .await?;
+
+    if rows.is_empty() {
+        return Ok(SpeakerMatchResult {
+            speaker_id: None,
+            similarity_score: 0.0,
+            z_norm_score: 0.0,
+            accepted: false,
+            confidence: None,
+        });
+    }
+
+    let mut scored: Vec<(String, f64)> = rows
+        .into_iter()
+        .map(|(speaker_id, blob)| {
+            debug_assert_eq!(
+                blob.as_ptr() as usize % std::mem::align_of::<f32>(),
+                0,
+                "embedding BLOB not 4-byte aligned"
+            );
+            let emb: &[f32] = bytemuck::cast_slice(&blob);
+            (speaker_id, cosine_similarity(query, emb) as f64)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (best_id, best_sim) = scored[0].clone();
+    let confidence = if best_sim >= thresholds.confirm {
+        Some(MatchConfidence::Confirmed)
+    } else if best_sim >= thresholds.tentative {
+        Some(MatchConfidence::Tentative)
+    } else {
+        None
+    };
+    let accepted = confidence.is_some();
+    info!(
+        speaker_id = %best_id,
+        sim = best_sim,
+        confirm = thresholds.confirm,
+        tentative = thresholds.tentative,
+        ?confidence,
+        "Speaker identified (thresholded)"
+    );
+
+    Ok(SpeakerMatchResult {
+        speaker_id: accepted.then_some(best_id),
+        similarity_score: best_sim,
+        z_norm_score: 0.0,
+        accepted,
+        confidence,
+    })
 }
 
 pub async fn save_embedding(

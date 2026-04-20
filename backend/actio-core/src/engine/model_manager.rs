@@ -715,7 +715,16 @@ impl ModelManager {
     /// Return paths to model files if the shared tier is present. Callers must
     /// still verify that at least one language pack is downloaded before
     /// attempting to start ASR.
-    pub async fn model_paths(&self) -> Option<ModelPaths> {
+    ///
+    /// The `_speaker_embedding_id` parameter is reserved for future multi-
+    /// embedding-model selection. Today the speaker embedding resolves from
+    /// a fixed on-disk filename (`speaker_eres2net.onnx`); the argument is
+    /// accepted and ignored so callers can thread their selection through
+    /// without the signature churning when the catalog lands.
+    pub async fn model_paths(
+        &self,
+        _speaker_embedding_id: Option<&str>,
+    ) -> Option<ModelPaths> {
         let status = self.status.read().await;
         match &*status {
             ModelStatus::Ready => Some(build_paths(&self.model_dir)),

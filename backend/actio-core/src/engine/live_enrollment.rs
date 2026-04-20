@@ -83,6 +83,17 @@ pub async fn snapshot(slot: &LiveEnrollment) -> Option<EnrollmentState> {
     slot.lock().await.clone()
 }
 
+/// Publish a smoothed RMS level sampled from the audio capture tap.
+///
+/// Originally used by the enrollment UI's live-meter display (was showing
+/// `rms_level` on `EnrollmentState`). That field is no longer part of the
+/// serialised state, so this function is a no-op stub kept only so the
+/// pipeline-level observer's call site remains valid. If the meter UX is
+/// reintroduced, restore `rms_level` and write to it here.
+pub fn publish_level(_slot: &LiveEnrollment, _rms: f32) {
+    // intentionally empty
+}
+
 /// Called from the pipeline after a segment's embedding has been extracted.
 /// Returns `Some(speaker_id)` if the segment was consumed by enrollment
 /// (in which case the caller should skip the normal identify + candidate
