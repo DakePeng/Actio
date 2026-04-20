@@ -31,9 +31,19 @@ pub struct EnrollmentState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_captured_duration_ms: Option<f64>,
     pub status: Status,
-    /// Monotonic version that bumps on every mutation so the frontend can
-    /// distinguish a fresh state from a stale cached one.
+    /// Monotonic version that bumps on every meaningful mutation (capture,
+    /// reject, status change). NOT bumped on raw level updates so a quiet
+    /// session doesn't spin the counter at audio-chunk rate.
     pub version: u64,
+    /// Smoothed RMS of the latest audio chunks. Drives the live mic-level
+    /// meter in the enrollment UI.
+    #[serde(default)]
+    pub rms_level: f32,
+    /// Most recent reason a VAD segment was rejected by the quality gates —
+    /// `too_short`, `too_long`, or `low_quality`. Cleared when a subsequent
+    /// segment is accepted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_rejected_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
@@ -62,6 +72,8 @@ pub async fn start(
         last_captured_duration_ms: None,
         status: Status::Active,
         version: 1,
+        rms_level: 0.0,
+        last_rejected_reason: None,
     };
     *guard = Some(new_state.clone());
     Ok(new_state)
@@ -84,14 +96,25 @@ pub async fn snapshot(slot: &LiveEnrollment) -> Option<EnrollmentState> {
 }
 
 /// Publish a smoothed RMS level sampled from the audio capture tap.
-///
-/// Originally used by the enrollment UI's live-meter display (was showing
-/// `rms_level` on `EnrollmentState`). That field is no longer part of the
-/// serialised state, so this function is a no-op stub kept only so the
-/// pipeline-level observer's call site remains valid. If the meter UX is
-/// reintroduced, restore `rms_level` and write to it here.
-pub fn publish_level(_slot: &LiveEnrollment, _rms: f32) {
-    // intentionally empty
+/// Cheap hot-path — try-lock only, no version bump, no-op when no
+/// enrollment is armed.
+pub fn publish_level(slot: &LiveEnrollment, rms: f32) {
+    let Ok(mut guard) = slot.try_lock() else { return };
+    if let Some(state) = guard.as_mut() {
+        if state.status == Status::Active {
+            state.rms_level = rms;
+        }
+    }
+}
+
+async fn mark_rejected(slot: &LiveEnrollment, reason: &'static str) {
+    let mut guard = slot.lock().await;
+    if let Some(state) = guard.as_mut() {
+        if state.status == Status::Active {
+            state.last_rejected_reason = Some(reason.to_string());
+            state.version += 1;
+        }
+    }
 }
 
 /// Called from the pipeline after a segment's embedding has been extracted.
@@ -117,10 +140,16 @@ pub async fn consume_segment(
     if snap.status != Status::Active {
         return Ok(None);
     }
-    if duration_ms < MIN_DURATION_MS
-        || duration_ms > MAX_DURATION_MS
-        || quality_score < MIN_QUALITY
-    {
+    if duration_ms < MIN_DURATION_MS {
+        mark_rejected(slot, "too_short").await;
+        return Ok(None);
+    }
+    if duration_ms > MAX_DURATION_MS {
+        mark_rejected(slot, "too_long").await;
+        return Ok(None);
+    }
+    if quality_score < MIN_QUALITY {
+        mark_rejected(slot, "low_quality").await;
         return Ok(None);
     }
 
@@ -139,6 +168,7 @@ pub async fn consume_segment(
         let is_first = state.captured == 0;
         state.captured += 1;
         state.last_captured_duration_ms = Some(duration_ms);
+        state.last_rejected_reason = None;
         state.version += 1;
         let reached = state.captured >= state.target;
         if reached {

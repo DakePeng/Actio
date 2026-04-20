@@ -31,6 +31,12 @@ export interface LiveEnrollmentState {
   last_captured_duration_ms?: number;
   status: LiveEnrollmentStatus;
   version: number;
+  /** Smoothed RMS of recent mic audio (roughly 0..0.3 for normal speech).
+   *  Drives the live mic-level meter in the enrollment UI. */
+  rms_level: number;
+  /** `too_short` / `too_long` / `low_quality` — set when a VAD segment
+   *  failed the quality gates; cleared on the next successful capture. */
+  last_rejected_reason?: string;
 }
 
 /** Phase-C voiceprint-candidate: one cluster of retained unknown-voice clips

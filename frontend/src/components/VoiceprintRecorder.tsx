@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import * as speakerApi from '../api/speakers';
 import { useVoiceStore } from '../store/use-voice-store';
 import type { LiveEnrollmentState } from '../types/speaker';
@@ -16,14 +16,19 @@ const PASSAGES = [
 ];
 
 const TARGET = 5;
-const POLL_MS = 700;
+// Poll fast while active so the meter feels responsive; slow down otherwise.
+const POLL_MS_ACTIVE = 200;
+const POLL_MS_IDLE = 700;
 
-/**
- * Drives live voiceprint enrollment: arms the backend audio pipeline, then
- * polls status until the target count is reached. No getUserMedia — the
- * Rust backend is already capturing audio via cpal, we just tell it to
- * save the next few quality-passing utterances as this speaker's voiceprints.
- */
+// Rough ceiling for normal speech RMS. Normalises the meter bar to 0..1.
+const METER_CEILING = 0.25;
+
+const REJECTION_COPY: Record<string, string> = {
+  too_short: 'That was too short — try reading the whole line.',
+  too_long: 'That was too long — keep each take under 30 seconds.',
+  low_quality: 'Audio was too quiet or noisy — try speaking up a bit.',
+};
+
 export function VoiceprintRecorder({
   speakerId,
   speakerName,
@@ -41,7 +46,6 @@ export function VoiceprintRecorder({
   const pollTimer = useRef<number | null>(null);
   const fetchSpeakers = useVoiceStore((s) => s.fetchSpeakers);
 
-  // Start enrollment on mount; cancel on unmount if we didn't finish.
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -56,37 +60,35 @@ export function VoiceprintRecorder({
     })();
     return () => {
       mounted = false;
-      // Fire-and-forget cancel — if the user closed mid-way, don't leave
-      // enrollment armed for the next unrelated utterance.
       speakerApi.cancelLiveEnrollment(speakerId).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speakerId]);
 
-  // Poll status while active.
   useEffect(() => {
-    if (!state || state.status !== 'active') return;
+    if (!state) return;
+    const interval = state.status === 'active' ? POLL_MS_ACTIVE : POLL_MS_IDLE;
     const tick = async () => {
       try {
         const s = await speakerApi.getLiveEnrollmentStatus();
-        setState(s);
+        if (s) setState(s);
       } catch {
         /* keep polling — transient errors are fine */
       }
     };
-    pollTimer.current = window.setInterval(() => void tick(), POLL_MS);
+    pollTimer.current = window.setInterval(() => void tick(), interval);
     return () => {
       if (pollTimer.current !== null) window.clearInterval(pollTimer.current);
     };
   }, [state]);
 
-  // When the backend reports complete, refresh the speaker list and close.
   useEffect(() => {
     if (!state || state.status !== 'complete' || closing) return;
     setClosing(true);
     void fetchSpeakers();
-    // Give the "3/3 captured" state a beat to render before dismissing.
-    const id = window.setTimeout(onDone, 900);
+    // Longer hold so the success state is clearly readable before the
+    // recorder dismisses itself.
+    const id = window.setTimeout(onDone, 1800);
     return () => window.clearTimeout(id);
   }, [state, closing, fetchSpeakers, onDone]);
 
@@ -94,25 +96,124 @@ export function VoiceprintRecorder({
   const target = state?.target ?? TARGET;
   const currentPassage = PASSAGES[Math.min(captured, PASSAGES.length - 1)];
   const done = captured >= target;
+  const isActive = state?.status === 'active';
+  const level = state?.rms_level ?? 0;
+  const meterPct = Math.min(1, level / METER_CEILING) * 100;
+  // Generous cutoff so even quiet breathing nudges the dot past idle.
+  const hearing = isActive && level > 0.005;
+  const rejectionHint =
+    state?.last_rejected_reason && REJECTION_COPY[state.last_rejected_reason];
+
+  if (done) {
+    return (
+      <div className="voiceprint-recorder voiceprint-recorder--success">
+        <motion.div
+          className="voiceprint-recorder__success-check"
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 18 }}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none">
+            <motion.circle
+              cx="12"
+              cy="12"
+              r="11"
+              fill="#22c55e"
+              initial={{ scale: 0.3 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+            />
+            <motion.path
+              d="M7.5 12.5l3 3 6-6.5"
+              stroke="white"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={{ duration: 0.45, ease: 'easeOut', delay: 0.15 }}
+            />
+          </svg>
+        </motion.div>
+        <motion.h3
+          className="voiceprint-recorder__success-title"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, delay: 0.1 }}
+        >
+          {speakerName} is enrolled!
+        </motion.h3>
+        <motion.p
+          className="voiceprint-recorder__success-sub"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.25, delay: 0.25 }}
+        >
+          Their voice will now be recognised in transcripts.
+        </motion.p>
+      </div>
+    );
+  }
 
   return (
     <div className="voiceprint-recorder">
       <h3 className="voiceprint-recorder__title">
-        {done
-          ? `Got it — voiceprint saved for ${speakerName}`
-          : `Record voiceprint for ${speakerName}`}
+        Record voiceprint for {speakerName}
       </h3>
-      {!done && state?.status === 'active' && (
-        <>
+
+      {isActive && !error && (
+        <div className="voiceprint-recorder__passage-block">
           <p className="voiceprint-recorder__hint">
             Read this aloud at a normal volume:
           </p>
           <p className="voiceprint-recorder__passage">“{currentPassage}”</p>
-        </>
+        </div>
       )}
+
       {!state && !error && (
         <p className="voiceprint-recorder__hint">Arming microphone…</p>
       )}
+
+      {isActive && !error && (
+        <div className="voiceprint-recorder__meter" aria-label="Microphone input level">
+          <div className="voiceprint-recorder__meter-label">
+            <motion.span
+              className={`voiceprint-recorder__dot${hearing ? ' is-hearing' : ''}`}
+              animate={hearing ? { scale: [1, 1.25, 1] } : { scale: 1 }}
+              transition={
+                hearing
+                  ? { duration: 0.9, repeat: Infinity, ease: 'easeInOut' }
+                  : { duration: 0.2 }
+              }
+              aria-hidden="true"
+            />
+            <span>{hearing ? 'Listening…' : 'Waiting for sound…'}</span>
+          </div>
+          <div className="voiceprint-recorder__meter-track">
+            <motion.div
+              className="voiceprint-recorder__meter-fill"
+              animate={{ width: `${meterPct}%` }}
+              transition={{ type: 'tween', duration: 0.12, ease: 'linear' }}
+            />
+          </div>
+        </div>
+      )}
+
+      <AnimatePresence>
+        {isActive && rejectionHint && (
+          <motion.p
+            key={`${state?.version}-rejection`}
+            className="voiceprint-recorder__rejection"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.2 }}
+          >
+            {rejectionHint}
+          </motion.p>
+        )}
+      </AnimatePresence>
 
       <div
         className="voiceprint-recorder__captured"
@@ -123,12 +224,12 @@ export function VoiceprintRecorder({
             key={i}
             className={`voiceprint-recorder__chip${i < captured ? ' is-done' : ''}`}
             animate={
-              i === captured && !done
+              i === captured
                 ? { scale: [1, 1.12, 1], opacity: [0.7, 1, 0.7] }
                 : { scale: 1, opacity: 1 }
             }
             transition={
-              i === captured && !done
+              i === captured
                 ? { duration: 1.3, repeat: Infinity, ease: 'easeInOut' }
                 : { duration: 0.2 }
             }
@@ -143,13 +244,11 @@ export function VoiceprintRecorder({
         <p className="voiceprint-recorder__error">Enrollment cancelled.</p>
       )}
 
-      {!done && (
-        <div className="voiceprint-recorder__actions">
-          <button type="button" className="secondary-button" onClick={onCancel}>
-            Cancel
-          </button>
-        </div>
-      )}
+      <div className="voiceprint-recorder__actions">
+        <button type="button" className="secondary-button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
