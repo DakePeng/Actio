@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 
 type DownloadTarget =
   | { type: 'shared' }
-  | { type: 'model'; id: string };
+  | { type: 'model'; id: string }
+  | { type: 'embedding'; id: string };
 
 interface ModelStatus {
   state: 'not_downloaded' | 'downloading' | 'ready' | 'error';
@@ -10,6 +11,16 @@ interface ModelStatus {
   progress?: number;
   current_file?: string;
   message?: string;
+}
+
+interface SpeakerEmbeddingModelInfo {
+  id: string;
+  name: string;
+  description: string;
+  languages: string;
+  size_mb: number;
+  embedding_dim: number;
+  downloaded: boolean;
 }
 
 interface AsrModelInfo {
@@ -31,6 +42,7 @@ interface Settings {
   audio?: {
     device_name?: string;
     asr_model?: string;
+    speaker_embedding_model?: string;
     download_source?: AsrDownloadSource;
   };
   llm?: Record<string, unknown>;
@@ -71,13 +83,18 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [langTab, setLangTab] = useState<LanguageTab>('all');
   const [downloadSource, setDownloadSource] = useState<AsrDownloadSource>('hugging_face');
+  const [embeddingModels, setEmbeddingModels] = useState<SpeakerEmbeddingModelInfo[]>([]);
+  const [activeEmbedding, setActiveEmbedding] = useState<string>('');
+  const [hasSpeakers, setHasSpeakers] = useState<boolean>(false);
 
   const refreshAll = useCallback(async () => {
     try {
-      const [statusRes, modelsRes, settingsRes] = await Promise.all([
+      const [statusRes, modelsRes, settingsRes, embeddingsRes, speakersRes] = await Promise.all([
         fetch(`${API_BASE}/settings/models`),
         fetch(`${API_BASE}/settings/models/available`),
         fetch(`${API_BASE}/settings`),
+        fetch(`${API_BASE}/settings/models/embeddings`),
+        fetch(`${API_BASE}/speakers`),
       ]);
       if (statusRes.ok) {
         const s: ModelStatus = await statusRes.json();
@@ -89,6 +106,12 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
         const settings: Settings = await settingsRes.json();
         setActiveModel(settings.audio?.asr_model ?? '');
         setDownloadSource(settings.audio?.download_source ?? 'hugging_face');
+        setActiveEmbedding(settings.audio?.speaker_embedding_model ?? '');
+      }
+      if (embeddingsRes.ok) setEmbeddingModels(await embeddingsRes.json());
+      if (speakersRes.ok) {
+        const speakers: unknown[] = await speakersRes.json();
+        setHasSpeakers(speakers.length > 0);
       }
     } catch {
       // Server not ready
@@ -146,6 +169,28 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     }
   };
 
+  const handleSelectEmbedding = async (id: string) => {
+    const next = embeddingModels.find((m) => m.id === id);
+    const prev = embeddingModels.find((m) => m.id === activeEmbedding);
+    const dimChanged = !!prev && !!next && prev.embedding_dim !== next.embedding_dim;
+    if (hasSpeakers && prev && prev.id !== id && dimChanged) {
+      const ok = window.confirm(
+        'Switching embedding models will invalidate previously-enrolled voiceprints. Continue?',
+      );
+      if (!ok) return;
+    }
+    setActiveEmbedding(id);
+    try {
+      await fetch(`${API_BASE}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: { speaker_embedding_model: id } }),
+      });
+    } catch {
+      // silent
+    }
+  };
+
   const handleDelete = async (modelId: string, modelName: string) => {
     setError(null);
     const confirmed = window.confirm(
@@ -175,6 +220,16 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
           /* ignore */
         }
       }
+      if (activeEmbedding === modelId) {
+        setActiveEmbedding('');
+        try {
+          await fetch(`${API_BASE}/settings`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audio: { speaker_embedding_model: null } }),
+          });
+        } catch { /* ignore */ }
+      }
       await refreshAll();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Delete failed');
@@ -188,6 +243,9 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     const t = status.target;
     if (!t) return 'Preparing...';
     if (t.type === 'shared') return 'Shared files (VAD)'; // unreachable in UI, kept for type safety
+    if (t.type === 'embedding') {
+      return embeddingModels.find((x) => x.id === t.id)?.name ?? t.id;
+    }
     const m = models.find((x) => x.id === t.id);
     return m?.name ?? t.id;
   })();
@@ -244,6 +302,81 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {embeddingModels.length > 0 && (
+        <div className="settings-field">
+          <div className="settings-field__label">Common Models</div>
+          <div
+            className="settings-field__sublabel"
+            style={{ marginBottom: 8, opacity: 0.7 }}
+          >
+            Speaker-embedding model used for voiceprint enrollment and recognition.
+            Switching models invalidates previous enrollments.
+          </div>
+          <div className="model-list">
+            {embeddingModels.map((m) => {
+              const isActive = activeEmbedding === m.id;
+              const selectDisabled = !m.downloaded;
+              return (
+                <div key={m.id} className="model-list__item">
+                  <label
+                    className={`model-list__row${selectDisabled ? ' model-list__row--disabled' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="embedding-model"
+                      value={m.id}
+                      checked={isActive}
+                      disabled={selectDisabled}
+                      onChange={() => void handleSelectEmbedding(m.id)}
+                    />
+                    <span className="model-list__info">
+                      <span className="model-list__name">
+                        {m.name}
+                        {m.downloaded && (
+                          <span className="model-list__check" title="Downloaded">
+                            {' \u2713'}
+                          </span>
+                        )}
+                      </span>
+                      <span className="model-list__lang">{m.languages}</span>
+                      <span className="model-list__spec">
+                        {m.size_mb} MB · {m.embedding_dim}-dim embeddings
+                      </span>
+                      <span className="model-list__desc">{m.description}</span>
+                    </span>
+                  </label>
+                  <div className="model-list__actions">
+                    {!m.downloaded && (
+                      <button
+                        type="button"
+                        className="model-list__download-btn"
+                        onClick={() => handleDownload({ type: 'embedding', id: m.id })}
+                        disabled={isDownloading}
+                      >
+                        {isDownloading
+                          ? 'Another download in progress…'
+                          : `Download (${m.size_mb} MB)`}
+                      </button>
+                    )}
+                    {m.downloaded && (
+                      <button
+                        type="button"
+                        className="model-list__delete-btn"
+                        onClick={() => handleDelete(m.id, m.name)}
+                        disabled={isDownloading}
+                        title={`Delete ${m.name} from disk`}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
