@@ -760,3 +760,147 @@ async fn handle_segment_embedding(
     )
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::continuity::{ContinuityConfig, ContinuityState, MatchEvidence};
+    use crate::repository::db::run_migrations;
+    use crate::repository::session::create_session as create_session_row;
+    use crate::repository::speaker::create_speaker;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::PathBuf;
+
+    async fn fresh_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn finalize_segment_carries_over_after_confirmed() {
+        let pool = fresh_pool().await;
+        let speaker = create_speaker(&pool, "Alice", "#E57373", Uuid::nil())
+            .await
+            .unwrap();
+        let speaker_uuid = Uuid::parse_str(&speaker.id).unwrap();
+
+        let aggregator = Arc::new(TranscriptAggregator::new(pool.clone()));
+        let mut speaker_rx = aggregator.subscribe_speaker();
+
+        let continuity: Arc<Mutex<ContinuityState>> =
+            Arc::new(Mutex::new(ContinuityState::default()));
+        let config = ContinuityConfig { window_ms: 15_000 };
+        let clips_dir = PathBuf::from(std::env::temp_dir()).join("actio-test-clips");
+        std::fs::create_dir_all(&clips_dir).unwrap();
+        // audio_segments.session_id has a FK to audio_sessions(id), so the
+        // test must create a real session row before inserting segments.
+        let session_row = create_session_row(&pool, Uuid::nil(), "microphone", "test")
+            .await
+            .unwrap();
+        let session_id = Uuid::parse_str(&session_row.id).unwrap();
+        let audio: Vec<f32> = vec![0.0; 16_000]; // 1s of silence — won't trigger clip retention
+        let embedding: Vec<f32> = vec![0.1_f32; 192];
+
+        // 1. Confirmed match for our speaker at segment ending at 3_000 ms.
+        let seg_id_1 = Uuid::new_v4();
+        finalize_segment(
+            &pool,
+            session_id,
+            0,
+            3_000,
+            Some(&embedding),
+            &audio,
+            0.5, // quality below retention threshold — no clip write
+            &clips_dir,
+            MatchEvidence::Confirmed { speaker_id: speaker_uuid },
+            Some(0.72),
+            &continuity,
+            config,
+            &aggregator,
+            seg_id_1,
+        )
+        .await
+        .unwrap();
+
+        // 2. Unknown evidence 5_000 ms later — well within 15_000 window.
+        let seg_id_2 = Uuid::new_v4();
+        finalize_segment(
+            &pool,
+            session_id,
+            3_000,
+            8_000,
+            Some(&embedding),
+            &audio,
+            0.5,
+            &clips_dir,
+            MatchEvidence::Unknown,
+            None,
+            &continuity,
+            config,
+            &aggregator,
+            seg_id_2,
+        )
+        .await
+        .unwrap();
+
+        // Assert the persisted rows.
+        let rows: Vec<(String, Option<String>, Option<f64>)> = sqlx::query_as(
+            "SELECT id, speaker_id, speaker_score FROM audio_segments \
+             WHERE session_id = ?1 ORDER BY start_ms",
+        )
+        .bind(session_id.to_string())
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2, "two segments should be persisted");
+
+        let row1 = &rows[0];
+        assert_eq!(
+            row1.1.as_deref(),
+            Some(speaker.id.as_str()),
+            "Confirmed row should carry the matched speaker id"
+        );
+        assert!(row1.2.is_some(), "Confirmed row should persist the similarity");
+        assert!((row1.2.unwrap() - 0.72).abs() < 1e-6);
+
+        let row2 = &rows[1];
+        assert_eq!(
+            row2.1.as_deref(),
+            Some(speaker.id.as_str()),
+            "Unknown-within-window row should carry over the previous speaker"
+        );
+        assert!(
+            row2.2.is_none(),
+            "carry-over rows must persist speaker_score = NULL"
+        );
+
+        // Assert both speaker_resolved events fired with the expected flags.
+        let ev1 = speaker_rx
+            .try_recv()
+            .expect("first event should be buffered");
+        assert_eq!(ev1.speaker_id.as_deref(), Some(speaker.id.as_str()));
+        assert_eq!(ev1.confidence, Some("confirmed"));
+        assert!(!ev1.carried_over);
+
+        let ev2 = speaker_rx
+            .try_recv()
+            .expect("second event should be buffered");
+        assert_eq!(ev2.speaker_id.as_deref(), Some(speaker.id.as_str()));
+        assert_eq!(ev2.confidence, Some("tentative"));
+        assert!(ev2.carried_over, "second event should be flagged as carried over");
+
+        // Continuity state should still point at Alice and still hold the
+        // Confirmed timestamp (carry-over did not self-extend).
+        let state = continuity.lock().await;
+        assert_eq!(state.speaker_id, Some(speaker_uuid));
+        assert_eq!(state.last_confirmed_ms, Some(3_000));
+    }
+}
