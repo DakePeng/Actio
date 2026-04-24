@@ -17,6 +17,12 @@ pub struct ContinuityState {
     /// recent event that seeded or refreshed state. Uses segment time, not
     /// processing time, so out-of-order task completion cannot corrupt it.
     pub last_confirmed_ms: Option<i64>,
+    /// A different speaker's tentative match we've seen once while `speaker_id`
+    /// was still set. Requires a second consecutive tentative for the same
+    /// candidate (or any confirmed evidence) to flip state — a single noisy
+    /// segment (cross-talk, cough, laugh) no longer mis-attributes the next
+    /// several segments.
+    pub pending_tentative: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,8 +55,6 @@ pub struct AttributionOutcome {
 /// state unchanged (no self-reinforcement).
 ///
 /// See the design spec's decision table for the full set of invariants.
-/// Task 4 fills in the Unknown carry-over arm; Confirmed and Tentative
-/// are already implemented.
 pub fn next_attribution(
     state: &ContinuityState,
     segment_end_ms: i64,
@@ -67,12 +71,26 @@ pub fn next_attribution(
             ContinuityState {
                 speaker_id: Some(speaker_id),
                 last_confirmed_ms: Some(segment_end_ms),
+                pending_tentative: None,
             },
         ),
         MatchEvidence::Tentative { speaker_id } => {
-            let within = within_window(state, segment_end_ms, config);
-            match state.speaker_id {
-                Some(active) if within && active == speaker_id => (
+            // Tentative is positive-but-weak evidence. Rules:
+            //   * No carry-over in progress → accept immediately (seed state).
+            //   * Same speaker as current → refresh timer, clear any pending.
+            //   * Different speaker, state stale (outside window) → accept;
+            //     the carry-over would have dropped anyway.
+            //   * Different speaker, state fresh, pending matches → flip
+            //     (two consecutive tentatives for the new speaker).
+            //   * Different speaker, state fresh, pending doesn't match →
+            //     carry current; stash candidate as pending so a second
+            //     tentative for the same new speaker promotes to flip.
+            let current = state.speaker_id;
+            let fresh = within_window(state, segment_end_ms, config);
+            let same_current = current == Some(speaker_id);
+
+            if current.is_none() || same_current || !fresh {
+                return (
                     AttributionOutcome {
                         speaker_id: Some(speaker_id),
                         confidence: Some(MatchConfidence::Tentative),
@@ -81,26 +99,39 @@ pub fn next_attribution(
                     ContinuityState {
                         speaker_id: Some(speaker_id),
                         last_confirmed_ms: Some(segment_end_ms),
+                        pending_tentative: None,
                     },
-                ),
-                Some(active) if within => (
-                    AttributionOutcome {
-                        speaker_id: Some(active),
-                        confidence: Some(MatchConfidence::Tentative),
-                        carried_over: true,
-                    },
-                    *state,
-                ),
-                // No live state (either never seeded or window expired):
-                // accept the Tentative speaker but do not seed state.
-                _ => (
+                );
+            }
+
+            // Fresh carry-over for a different speaker. Require corroboration
+            // before flipping.
+            if state.pending_tentative == Some(speaker_id) {
+                (
                     AttributionOutcome {
                         speaker_id: Some(speaker_id),
                         confidence: Some(MatchConfidence::Tentative),
                         carried_over: false,
                     },
-                    *state,
-                ),
+                    ContinuityState {
+                        speaker_id: Some(speaker_id),
+                        last_confirmed_ms: Some(segment_end_ms),
+                        pending_tentative: None,
+                    },
+                )
+            } else {
+                (
+                    AttributionOutcome {
+                        speaker_id: current,
+                        confidence: Some(MatchConfidence::Tentative),
+                        carried_over: true,
+                    },
+                    ContinuityState {
+                        speaker_id: current,
+                        last_confirmed_ms: state.last_confirmed_ms,
+                        pending_tentative: Some(speaker_id),
+                    },
+                )
             }
         }
         MatchEvidence::Unknown => {
@@ -131,12 +162,18 @@ fn within_window(state: &ContinuityState, now: i64, config: ContinuityConfig) ->
     if config.window_ms == 0 {
         return false;
     }
-    // If `now < t` (segment received out of order), `now - t` is negative
-    // and the comparison is trivially true; in-order processing is the
-    // caller's responsibility (enforced by the VAD consumer loop).
-    state
-        .last_confirmed_ms
-        .map_or(false, |t| now - t <= config.window_ms as i64)
+    // Reject out-of-order segments explicitly instead of letting `now - t`
+    // underflow into a negative number that trivially passes the <= test.
+    // In-order delivery is the caller's responsibility, but the cached
+    // embedding-worker pool can in theory resolve two segments for the same
+    // session out of order — defend against it here rather than trust the
+    // upstream invariant.
+    state.last_confirmed_ms.map_or(false, |t| {
+        if now < t {
+            return false;
+        }
+        now.saturating_sub(t) <= config.window_ms as i64
+    })
 }
 
 #[cfg(test)]
@@ -150,6 +187,9 @@ mod tests {
     }
     fn uuid_b() -> Uuid {
         Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()
+    }
+    fn uuid_c() -> Uuid {
+        Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap()
     }
 
     #[test]
@@ -175,6 +215,7 @@ mod tests {
         let state = ContinuityState {
             speaker_id: Some(a),
             last_confirmed_ms: Some(0),
+            pending_tentative: None,
         };
         let (outcome, new_state) = next_attribution(
             &state,
@@ -187,6 +228,25 @@ mod tests {
         assert!(!outcome.carried_over);
         assert_eq!(new_state.speaker_id, Some(b));
         assert_eq!(new_state.last_confirmed_ms, Some(5_000));
+        assert_eq!(new_state.pending_tentative, None);
+    }
+
+    #[test]
+    fn confirmed_clears_pending_tentative() {
+        let a = uuid_a();
+        let b = uuid_b();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+            pending_tentative: Some(b),
+        };
+        let (_, new_state) = next_attribution(
+            &state,
+            3_000,
+            MatchEvidence::Confirmed { speaker_id: a },
+            WINDOW,
+        );
+        assert_eq!(new_state.pending_tentative, None);
     }
 
     #[test]
@@ -195,6 +255,7 @@ mod tests {
         let state = ContinuityState {
             speaker_id: Some(a),
             last_confirmed_ms: Some(0),
+            pending_tentative: None,
         };
         let (outcome, new_state) = next_attribution(
             &state,
@@ -214,12 +275,16 @@ mod tests {
     }
 
     #[test]
-    fn different_speaker_tentative_ignored_when_state_live() {
+    fn single_tentative_for_different_speaker_does_not_flip() {
+        // A single tentative match for a different speaker (noisy segment,
+        // cross-talk, cough that happens to score tentative against someone
+        // else) carries current and stashes the candidate as pending.
         let a = uuid_a();
         let b = uuid_b();
         let state = ContinuityState {
             speaker_id: Some(a),
             last_confirmed_ms: Some(0),
+            pending_tentative: None,
         };
         let (outcome, new_state) = next_attribution(
             &state,
@@ -227,10 +292,88 @@ mod tests {
             MatchEvidence::Tentative { speaker_id: b },
             WINDOW,
         );
-        assert_eq!(outcome.speaker_id, Some(a), "A should stay attributed");
+        assert_eq!(outcome.speaker_id, Some(a));
         assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
         assert!(outcome.carried_over);
-        assert_eq!(new_state, state, "weak contrary evidence must not update state");
+        assert_eq!(new_state.speaker_id, Some(a));
+        assert_eq!(new_state.last_confirmed_ms, Some(0));
+        assert_eq!(new_state.pending_tentative, Some(b));
+    }
+
+    #[test]
+    fn two_consecutive_tentatives_flip_state() {
+        // Speaker B really has started talking — two consecutive tentative
+        // matches for B promote to a flip even without a confirmed.
+        let a = uuid_a();
+        let b = uuid_b();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+            pending_tentative: None,
+        };
+        let (_, after_first) = next_attribution(
+            &state,
+            5_000,
+            MatchEvidence::Tentative { speaker_id: b },
+            WINDOW,
+        );
+        let (outcome, new_state) = next_attribution(
+            &after_first,
+            7_000,
+            MatchEvidence::Tentative { speaker_id: b },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(b));
+        assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
+        assert!(!outcome.carried_over);
+        assert_eq!(new_state.speaker_id, Some(b));
+        assert_eq!(new_state.last_confirmed_ms, Some(7_000));
+        assert_eq!(new_state.pending_tentative, None);
+    }
+
+    #[test]
+    fn tentative_for_different_speaker_outside_window_flips_immediately() {
+        // The carry-over window has expired, so there's nothing to defend —
+        // accept the new speaker right away instead of requiring a second.
+        let a = uuid_a();
+        let b = uuid_b();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+            pending_tentative: None,
+        };
+        let (outcome, new_state) = next_attribution(
+            &state,
+            20_000, // outside the 15_000ms window
+            MatchEvidence::Tentative { speaker_id: b },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(b));
+        assert!(!outcome.carried_over);
+        assert_eq!(new_state.speaker_id, Some(b));
+    }
+
+    #[test]
+    fn pending_candidate_is_replaced_by_newer_candidate() {
+        // If we see tentative(B) then tentative(C) — neither gets promoted.
+        // Pending tracks only the most-recently-seen candidate.
+        let a = uuid_a();
+        let b = uuid_b();
+        let c = uuid_c();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(0),
+            pending_tentative: Some(b),
+        };
+        let (outcome, new_state) = next_attribution(
+            &state,
+            5_000,
+            MatchEvidence::Tentative { speaker_id: c },
+            WINDOW,
+        );
+        assert_eq!(outcome.speaker_id, Some(a));
+        assert!(outcome.carried_over);
+        assert_eq!(new_state.pending_tentative, Some(c));
     }
 
     #[test]
@@ -245,11 +388,8 @@ mod tests {
         assert_eq!(outcome.speaker_id, Some(b));
         assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
         assert!(!outcome.carried_over);
-        assert_eq!(
-            new_state,
-            ContinuityState::default(),
-            "Tentative alone must not seed state"
-        );
+        assert_eq!(new_state.speaker_id, Some(b));
+        assert_eq!(new_state.last_confirmed_ms, Some(7_000));
     }
 
     #[test]
@@ -258,13 +398,9 @@ mod tests {
         let state = ContinuityState {
             speaker_id: Some(a),
             last_confirmed_ms: Some(0),
+            pending_tentative: None,
         };
-        let (outcome, new_state) = next_attribution(
-            &state,
-            10_000,
-            MatchEvidence::Unknown,
-            WINDOW,
-        );
+        let (outcome, new_state) = next_attribution(&state, 10_000, MatchEvidence::Unknown, WINDOW);
         assert_eq!(outcome.speaker_id, Some(a));
         assert_eq!(outcome.confidence, Some(MatchConfidence::Tentative));
         assert!(outcome.carried_over);
@@ -277,6 +413,7 @@ mod tests {
         let state = ContinuityState {
             speaker_id: Some(a),
             last_confirmed_ms: Some(0),
+            pending_tentative: None,
         };
         let (outcome, new_state) = next_attribution(
             &state,
@@ -296,17 +433,16 @@ mod tests {
         let state = ContinuityState {
             speaker_id: Some(a),
             last_confirmed_ms: Some(0),
+            pending_tentative: None,
         };
         // First Unknown carries (10_000 within 15_000 window).
-        let (carry, after_carry) =
-            next_attribution(&state, 10_000, MatchEvidence::Unknown, WINDOW);
+        let (carry, after_carry) = next_attribution(&state, 10_000, MatchEvidence::Unknown, WINDOW);
         assert!(carry.carried_over);
         assert_eq!(after_carry, state, "carry must leave state alone");
 
         // Second Unknown at 25_000 — still only 15_000 from the original
         // last_confirmed_ms of 0, so outside window → drops.
-        let (drop, _) =
-            next_attribution(&after_carry, 25_000, MatchEvidence::Unknown, WINDOW);
+        let (drop, _) = next_attribution(&after_carry, 25_000, MatchEvidence::Unknown, WINDOW);
         assert!(drop.speaker_id.is_none());
         assert!(!drop.carried_over);
     }
@@ -317,10 +453,10 @@ mod tests {
         let state = ContinuityState {
             speaker_id: Some(a),
             last_confirmed_ms: Some(0),
+            pending_tentative: None,
         };
         let off = ContinuityConfig { window_ms: 0 };
-        let (outcome, _) =
-            next_attribution(&state, 1, MatchEvidence::Unknown, off);
+        let (outcome, _) = next_attribution(&state, 1, MatchEvidence::Unknown, off);
         assert!(outcome.speaker_id.is_none());
         assert!(!outcome.carried_over);
 
@@ -333,5 +469,27 @@ mod tests {
             off,
         );
         assert_eq!(c_out.speaker_id, Some(b));
+    }
+
+    #[test]
+    fn out_of_order_segment_does_not_trivially_carry() {
+        // If a segment resolves with end_ms earlier than last_confirmed_ms
+        // (which the cached worker pool now makes structurally possible),
+        // within_window must reject rather than treat the negative delta
+        // as passing the <= test.
+        let a = uuid_a();
+        let state = ContinuityState {
+            speaker_id: Some(a),
+            last_confirmed_ms: Some(10_000),
+            pending_tentative: None,
+        };
+        let (outcome, _) = next_attribution(
+            &state,
+            5_000, // earlier than last_confirmed_ms
+            MatchEvidence::Unknown,
+            WINDOW,
+        );
+        assert!(outcome.speaker_id.is_none(), "out-of-order must not carry");
+        assert!(!outcome.carried_over);
     }
 }

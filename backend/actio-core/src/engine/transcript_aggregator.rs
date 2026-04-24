@@ -65,9 +65,7 @@ impl TranscriptAggregator {
     /// Subscribe to speaker-resolved events — pushed after the per-segment
     /// identification task finishes, so the WS client can fill in speaker
     /// labels on transcript lines that were emitted a beat earlier.
-    pub fn subscribe_speaker(
-        &self,
-    ) -> tokio::sync::broadcast::Receiver<SpeakerResolvedEvent> {
+    pub fn subscribe_speaker(&self) -> tokio::sync::broadcast::Receiver<SpeakerResolvedEvent> {
         self.speaker_events.subscribe()
     }
 

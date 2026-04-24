@@ -23,7 +23,11 @@ pub fn write_clip(dir: &Path, segment_id: &str, audio: &[f32]) -> anyhow::Result
         writer.write_sample(*s)?;
     }
     writer.finalize()?;
-    debug!(?path, samples = audio.len(), "voiceprint candidate clip retained");
+    debug!(
+        ?path,
+        samples = audio.len(),
+        "voiceprint candidate clip retained"
+    );
     Ok(file_name)
 }
 
@@ -45,15 +49,14 @@ pub fn start_cleanup_task(dir: PathBuf, retention_days: u32) {
 }
 
 fn sweep(dir: &Path, retention_days: u32) {
-    let cutoff = match SystemTime::now().checked_sub(Duration::from_secs(
-        retention_days as u64 * 86_400,
-    )) {
-        Some(t) => t,
-        None => {
-            warn!("clip cleanup cutoff computation underflowed — skipping sweep");
-            return;
-        }
-    };
+    let cutoff =
+        match SystemTime::now().checked_sub(Duration::from_secs(retention_days as u64 * 86_400)) {
+            Some(t) => t,
+            None => {
+                warn!("clip cleanup cutoff computation underflowed — skipping sweep");
+                return;
+            }
+        };
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
@@ -65,15 +68,10 @@ fn sweep(dir: &Path, retention_days: u32) {
     let mut removed = 0usize;
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_file()
-            || path.extension().and_then(|s| s.to_str()) != Some("wav")
-        {
+        if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("wav") {
             continue;
         }
-        let modified = entry
-            .metadata()
-            .ok()
-            .and_then(|m| m.modified().ok());
+        let modified = entry.metadata().ok().and_then(|m| m.modified().ok());
         let Some(modified) = modified else { continue };
         if modified < cutoff {
             match std::fs::remove_file(&path) {
@@ -83,7 +81,10 @@ fn sweep(dir: &Path, retention_days: u32) {
         }
     }
     if removed > 0 {
-        info!(removed, retention_days, "pruned stale voiceprint-candidate clips");
+        info!(
+            removed,
+            retention_days, "pruned stale voiceprint-candidate clips"
+        );
     }
 }
 
@@ -95,7 +96,9 @@ mod tests {
     #[test]
     fn write_clip_produces_valid_wav() {
         let tmp = tempfile::tempdir().unwrap();
-        let audio: Vec<f32> = (0..16_000).map(|i| (i as f32 / 100.0).sin() * 0.2).collect();
+        let audio: Vec<f32> = (0..16_000)
+            .map(|i| (i as f32 / 100.0).sin() * 0.2)
+            .collect();
         let name = write_clip(tmp.path(), "abc-123", &audio).unwrap();
         assert_eq!(name, "abc-123.wav");
 

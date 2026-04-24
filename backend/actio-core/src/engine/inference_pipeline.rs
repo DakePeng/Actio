@@ -71,6 +71,7 @@ impl InferencePipeline {
         aggregator: Arc<TranscriptAggregator>,
         device_name: Option<&str>,
         asr_model: Option<&str>,
+        _asr_language: Option<&str>,
         clips_dir: PathBuf,
         live_enrollment: LiveEnrollment,
         speaker_id_config: SpeakerIdConfig,
@@ -115,8 +116,7 @@ impl InferencePipeline {
                     "Silero VAD not found — required for offline models"
                 ));
             }
-            let upstream =
-                vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)?;
+            let upstream = vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)?;
             Ok(split_segments_for_speaker_id(
                 upstream,
                 session_id,
@@ -141,11 +141,8 @@ impl InferencePipeline {
                     warn!("Silero VAD missing — streaming mode will have no speaker attribution");
                     return Ok(());
                 }
-                let upstream = vad::start_vad(
-                    &model_paths.silero_vad,
-                    VadConfig::default(),
-                    audio_rx,
-                )?;
+                let upstream =
+                    vad::start_vad(&model_paths.silero_vad, VadConfig::default(), audio_rx)?;
                 spawn_speaker_id_only(
                     upstream,
                     session_id,
@@ -511,8 +508,7 @@ async fn finalize_segment(
     // Run the state machine under a short-lived lock.
     let outcome: AttributionOutcome = {
         let mut guard = continuity.lock().await;
-        let (outcome, new_state) =
-            continuity::next_attribution(&*guard, end_ms, evidence, config);
+        let (outcome, new_state) = continuity::next_attribution(&*guard, end_ms, evidence, config);
         *guard = new_state;
         outcome
     };
@@ -526,20 +522,23 @@ async fn finalize_segment(
     // Candidate-clip retention keys off the FINAL outcome, not the raw
     // matcher result. Carry-over turns an unknown into an attributed
     // segment, so we should not retain its audio as a Phase-A candidate.
-    let audio_ref: Option<String> = if outcome.speaker_id.is_none()
-        && audio_quality >= VOICEPRINT_CANDIDATE_QUALITY
-    {
-        let candidate_id = Uuid::new_v4().to_string();
-        match crate::engine::clip_storage::write_clip(clips_dir, &candidate_id, audio) {
-            Ok(name) => Some(name),
-            Err(err) => {
-                warn!(?err, ?clips_dir, "failed to retain voiceprint-candidate clip");
-                None
+    let audio_ref: Option<String> =
+        if outcome.speaker_id.is_none() && audio_quality >= VOICEPRINT_CANDIDATE_QUALITY {
+            let candidate_id = Uuid::new_v4().to_string();
+            match crate::engine::clip_storage::write_clip(clips_dir, &candidate_id, audio) {
+                Ok(name) => Some(name),
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        ?clips_dir,
+                        "failed to retain voiceprint-candidate clip"
+                    );
+                    None
+                }
             }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     crate::repository::segment::insert_segment(
         pool,
@@ -596,8 +595,7 @@ async fn handle_segment_embedding(
     continuity: &Arc<Mutex<ContinuityState>>,
 ) -> anyhow::Result<Option<String>> {
     // Raw-publish helper for paths that must not touch continuity.
-    let publish_raw = |speaker_id: Option<String>,
-                       confidence: Option<&'static str>| {
+    let publish_raw = |speaker_id: Option<String>, confidence: Option<&'static str>| {
         aggregator.publish_speaker_resolved(
             crate::engine::transcript_aggregator::SpeakerResolvedEvent {
                 segment_id: segment_id.to_string(),
@@ -611,7 +609,10 @@ async fn handle_segment_embedding(
     };
 
     let Some(model_path) = embedding_model else {
-        info!(start_ms, end_ms, "segment hook: no embedding model — marking UNKNOWN");
+        info!(
+            start_ms,
+            end_ms, "segment hook: no embedding model — marking UNKNOWN"
+        );
         crate::repository::segment::insert_segment(
             pool, session_id, start_ms, end_ms, None, None, None, None,
         )
@@ -700,16 +701,17 @@ async fn handle_segment_embedding(
 
     info!(
         dim = emb.values.len(),
-        start_ms,
-        end_ms,
-        "segment hook: identifying speaker"
+        start_ms, end_ms, "segment hook: identifying speaker"
     );
     let thresholds = crate::domain::speaker_matcher::IdentifyThresholds {
         confirm: speaker_id_config.confirm_threshold as f64,
         tentative: speaker_id_config.tentative_threshold as f64,
     };
     let result = crate::domain::speaker_matcher::identify_speaker_with_thresholds(
-        pool, &emb.values, tenant_id, thresholds,
+        pool,
+        &emb.values,
+        tenant_id,
+        thresholds,
     )
     .await
     .unwrap_or(crate::domain::speaker_matcher::SpeakerMatchResult {
@@ -727,14 +729,12 @@ async fn handle_segment_embedding(
             .as_ref()
             .and_then(|s| Uuid::parse_str(s).ok()),
     ) {
-        (
-            Some(crate::domain::speaker_matcher::MatchConfidence::Confirmed),
-            Some(id),
-        ) => MatchEvidence::Confirmed { speaker_id: id },
-        (
-            Some(crate::domain::speaker_matcher::MatchConfidence::Tentative),
-            Some(id),
-        ) => MatchEvidence::Tentative { speaker_id: id },
+        (Some(crate::domain::speaker_matcher::MatchConfidence::Confirmed), Some(id)) => {
+            MatchEvidence::Confirmed { speaker_id: id }
+        }
+        (Some(crate::domain::speaker_matcher::MatchConfidence::Tentative), Some(id)) => {
+            MatchEvidence::Tentative { speaker_id: id }
+        }
         _ => MatchEvidence::Unknown,
     };
     let match_similarity = match evidence {
@@ -820,7 +820,9 @@ mod tests {
             &audio,
             0.5, // quality below retention threshold — no clip write
             &clips_dir,
-            MatchEvidence::Confirmed { speaker_id: speaker_uuid },
+            MatchEvidence::Confirmed {
+                speaker_id: speaker_uuid,
+            },
             Some(0.72),
             &continuity,
             config,
@@ -868,7 +870,10 @@ mod tests {
             Some(speaker.id.as_str()),
             "Confirmed row should carry the matched speaker id"
         );
-        assert!(row1.2.is_some(), "Confirmed row should persist the similarity");
+        assert!(
+            row1.2.is_some(),
+            "Confirmed row should persist the similarity"
+        );
         assert!((row1.2.unwrap() - 0.72).abs() < 1e-6);
 
         let row2 = &rows[1];
@@ -895,7 +900,10 @@ mod tests {
             .expect("second event should be buffered");
         assert_eq!(ev2.speaker_id.as_deref(), Some(speaker.id.as_str()));
         assert_eq!(ev2.confidence, Some("tentative"));
-        assert!(ev2.carried_over, "second event should be flagged as carried over");
+        assert!(
+            ev2.carried_over,
+            "second event should be flagged as carried over"
+        );
 
         // Continuity state should still point at Alice and still hold the
         // Confirmed timestamp (carry-over did not self-extend).
@@ -903,4 +911,5 @@ mod tests {
         assert_eq!(state.speaker_id, Some(speaker_uuid));
         assert_eq!(state.last_confirmed_ms, Some(3_000));
     }
+
 }

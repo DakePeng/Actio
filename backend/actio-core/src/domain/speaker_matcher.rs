@@ -414,10 +414,11 @@ mod tests {
         .unwrap();
 
         // Query identical to Alice's embedding → cosine ≈ 1.0, well above 0.5.
-        let result = identify_speaker(&pool, &emb, Uuid::nil(), 5)
-            .await
-            .unwrap();
-        assert!(result.accepted, "single enrolled speaker should be accepted");
+        let result = identify_speaker(&pool, &emb, Uuid::nil(), 5).await.unwrap();
+        assert!(
+            result.accepted,
+            "single enrolled speaker should be accepted"
+        );
         assert_eq!(result.speaker_id.as_deref(), Some(alice.id.as_str()));
         assert!(result.similarity_score >= 0.5);
     }

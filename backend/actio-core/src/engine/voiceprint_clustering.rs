@@ -105,6 +105,16 @@ pub fn cluster_candidates(
                 for (slot, x) in b.centroid.iter_mut().zip(seg.embedding.iter()) {
                     *slot += (*x - *slot) / (new_n as f32);
                 }
+                // Re-normalize to unit length. A running mean of L2-normalized
+                // vectors is not itself unit-norm, so outliers can pull the
+                // centroid toward the origin, biasing subsequent cosine
+                // similarities downward over long runs.
+                let n: f32 = b.centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if n > 1e-8 {
+                    for x in b.centroid.iter_mut() {
+                        *x /= n;
+                    }
+                }
                 b.centroid_n = new_n;
                 // Update representative if this segment is longer.
                 let seg_dur = seg.end_ms - seg.start_ms;
@@ -194,7 +204,11 @@ mod tests {
         normalize(&mut a3);
 
         let clusters = cluster_candidates(
-            vec![seg("a1", a1, 5000), seg("a2", a2, 4000), seg("a3", a3, 6000)],
+            vec![
+                seg("a1", a1, 5000),
+                seg("a2", a2, 4000),
+                seg("a3", a3, 6000),
+            ],
             0.5,
         );
         assert_eq!(clusters.len(), 1);
@@ -279,7 +293,11 @@ mod tests {
         let segs: Vec<_> = (0..6)
             .map(|i| {
                 let mut s = seg(&format!("s{i}"), emb.clone(), 12_000);
-                s.session_id = if i < 3 { "sess-a".into() } else { "sess-b".into() };
+                s.session_id = if i < 3 {
+                    "sess-a".into()
+                } else {
+                    "sess-b".into()
+                };
                 s
             })
             .collect();

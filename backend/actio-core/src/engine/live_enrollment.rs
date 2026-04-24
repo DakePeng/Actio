@@ -44,6 +44,12 @@ pub struct EnrollmentState {
     /// segment is accepted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_rejected_reason: Option<String>,
+    /// IDs of `speaker_embeddings` rows saved during this session. If the
+    /// user cancels mid-enrollment we delete exactly these rows instead of
+    /// every row for the speaker — otherwise a cancel would wipe out prior
+    /// successful enrollments too. Not serialized to the frontend.
+    #[serde(skip)]
+    pub saved_embedding_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
@@ -74,6 +80,7 @@ pub async fn start(
         version: 1,
         rms_level: 0.0,
         last_rejected_reason: None,
+        saved_embedding_ids: Vec::new(),
     };
     *guard = Some(new_state.clone());
     Ok(new_state)
@@ -91,6 +98,56 @@ pub async fn cancel(slot: &LiveEnrollment) -> Option<EnrollmentState> {
     None
 }
 
+/// Delete any embedding rows that were saved during an incomplete
+/// enrollment. Called from the cancel handler so a half-finished capture
+/// doesn't leave biased partial voiceprints in the database. Returns the
+/// number of rows removed. Prior successful enrollments for the same
+/// speaker are preserved because we only delete the specific IDs we
+/// recorded during this session.
+pub async fn cleanup_partial_embeddings(
+    slot: &LiveEnrollment,
+    pool: &sqlx::SqlitePool,
+) -> anyhow::Result<usize> {
+    let ids: Vec<String> = {
+        let mut guard = slot.lock().await;
+        match guard.as_mut() {
+            Some(state) if state.status != Status::Complete => {
+                std::mem::take(&mut state.saved_embedding_ids)
+            }
+            _ => return Ok(0),
+        }
+    };
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let mut removed = 0usize;
+    for id in &ids {
+        let result = sqlx::query("DELETE FROM speaker_embeddings WHERE id = ?1")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        removed += result.rows_affected() as usize;
+    }
+    tracing::info!(
+        removed,
+        attempted = ids.len(),
+        "Cleaned up partial enrollment embeddings"
+    );
+    Ok(removed)
+}
+
+/// Returns true if enrollment finished naturally (`Status::Complete`) and
+/// the caller should tear down any pipeline resources they spun up to drive
+/// it. Safe to call repeatedly — the completion is a terminal state and the
+/// frontend polls status anyway, so making teardown idempotent at this layer
+/// lets `get_live_enrollment_status` drive it without extra plumbing.
+pub async fn is_complete(slot: &LiveEnrollment) -> bool {
+    matches!(
+        slot.lock().await.as_ref().map(|s| &s.status),
+        Some(Status::Complete)
+    )
+}
+
 pub async fn snapshot(slot: &LiveEnrollment) -> Option<EnrollmentState> {
     slot.lock().await.clone()
 }
@@ -99,20 +156,12 @@ pub async fn snapshot(slot: &LiveEnrollment) -> Option<EnrollmentState> {
 /// Cheap hot-path — try-lock only, no version bump, no-op when no
 /// enrollment is armed.
 pub fn publish_level(slot: &LiveEnrollment, rms: f32) {
-    let Ok(mut guard) = slot.try_lock() else { return };
+    let Ok(mut guard) = slot.try_lock() else {
+        return;
+    };
     if let Some(state) = guard.as_mut() {
         if state.status == Status::Active {
             state.rms_level = rms;
-        }
-    }
-}
-
-async fn mark_rejected(slot: &LiveEnrollment, reason: &'static str) {
-    let mut guard = slot.lock().await;
-    if let Some(state) = guard.as_mut() {
-        if state.status == Status::Active {
-            state.last_rejected_reason = Some(reason.to_string());
-            state.version += 1;
         }
     }
 }
@@ -133,33 +182,32 @@ pub async fn consume_segment(
     const MAX_DURATION_MS: f64 = 30_000.0;
     const MIN_QUALITY: f32 = 0.6;
 
-    // Quick unlocked check first to avoid hot-path contention when idle.
-    let Some(snap) = snapshot(slot).await else {
-        return Ok(None);
-    };
-    if snap.status != Status::Active {
-        return Ok(None);
-    }
-    if duration_ms < MIN_DURATION_MS {
-        mark_rejected(slot, "too_short").await;
-        return Ok(None);
-    }
-    if duration_ms > MAX_DURATION_MS {
-        mark_rejected(slot, "too_long").await;
-        return Ok(None);
-    }
-    if quality_score < MIN_QUALITY {
-        mark_rejected(slot, "low_quality").await;
-        return Ok(None);
-    }
-
-    // Re-check under the lock and claim this segment.
-    let (speaker_uuid, is_first, target_reached) = {
+    // Every decision — active check, gate evaluation, counter bump — happens
+    // inside a single lock critical section so a concurrent cancel can't
+    // race between a snapshot-taken-outside-the-lock and the mutation that
+    // follows. The previous shape did the gate check against a stale
+    // snapshot and relied on `mark_rejected` re-checking under the lock.
+    let claim = {
         let mut guard = slot.lock().await;
         let Some(state) = guard.as_mut() else {
             return Ok(None);
         };
         if state.status != Status::Active {
+            return Ok(None);
+        }
+        if duration_ms < MIN_DURATION_MS {
+            state.last_rejected_reason = Some("too_short".to_string());
+            state.version += 1;
+            return Ok(None);
+        }
+        if duration_ms > MAX_DURATION_MS {
+            state.last_rejected_reason = Some("too_long".to_string());
+            state.version += 1;
+            return Ok(None);
+        }
+        if quality_score < MIN_QUALITY {
+            state.last_rejected_reason = Some("low_quality".to_string());
+            state.version += 1;
             return Ok(None);
         }
         let Ok(uuid) = Uuid::parse_str(&state.speaker_id) else {
@@ -178,8 +226,10 @@ pub async fn consume_segment(
         (uuid, is_first, reached)
     };
 
+    let (speaker_uuid, is_first, target_reached) = claim;
+
     // Persist as a speaker_embeddings row. First capture becomes primary.
-    crate::domain::speaker_matcher::save_embedding(
+    let embedding_id = crate::domain::speaker_matcher::save_embedding(
         pool,
         speaker_uuid,
         embedding,
@@ -188,6 +238,23 @@ pub async fn consume_segment(
         is_first,
     )
     .await?;
+
+    // Record the saved ID so `cleanup_partial_embeddings` can scope deletion
+    // to this session on cancel. Only retain the list while the session is
+    // still in-flight — once it Completes we don't want cancel-after-complete
+    // (which would be a no-op anyway) to wipe the legitimate voiceprint.
+    {
+        let mut guard = slot.lock().await;
+        if let Some(state) = guard.as_mut() {
+            if state.status == Status::Active {
+                state.saved_embedding_ids.push(embedding_id.to_string());
+            } else if state.status == Status::Complete {
+                // Session just completed; clear the staging list so a stray
+                // cancel can't clobber these rows.
+                state.saved_embedding_ids.clear();
+            }
+        }
+    }
 
     let _ = target_reached; // already reflected in state
     Ok(Some(speaker_uuid.to_string()))
