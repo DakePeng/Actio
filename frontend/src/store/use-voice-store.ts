@@ -8,13 +8,17 @@ export type ClipInterval = 1 | 2 | 5 | 10 | 30;
 
 /** A single finalized transcript line. `speaker_id` starts null and fills
  *  in when the backend emits a `speaker_resolved` WS event whose time
- *  range overlaps this line's [start_ms, end_ms]. */
+ *  range overlaps this line's [start_ms, end_ms]. `resolved` flips true
+ *  when that event arrives — even if the match came back as Unknown
+ *  (speaker_id still null) — so the UI can drop the "Identifying…"
+ *  placeholder and render "Unknown" instead. */
 export interface TranscriptLine {
   id: string;
   text: string;
   start_ms: number;
   end_ms: number;
   speaker_id: string | null;
+  resolved: boolean;
   is_final: boolean;
 }
 
@@ -111,6 +115,72 @@ type StoreSet = (
 
 // --- WS message handlers ---
 
+/** Buffer for `speaker_resolved` events that arrived before any line whose
+ *  midpoint falls inside their [start_ms, end_ms] range. Short utterances
+ *  (enrollment passages, especially) often finish embedding identification
+ *  before the ASR final lands, so a naïve "walk current lines" pass finds
+ *  nothing and the event was silently dropped — leaving the bubble stuck in
+ *  "Identifying…". We replay this buffer whenever a transcript finalizes.
+ *
+ *  Entries age out after PENDING_TTL_MS so a malformed or stray event from a
+ *  prior session doesn't linger forever. Capped at PENDING_MAX to bound
+ *  memory under pathological backend behavior. */
+interface PendingResolution {
+  start_ms: number;
+  end_ms: number;
+  speaker_id: string | null;
+  received_at: number;
+}
+const pendingResolutions: PendingResolution[] = [];
+const PENDING_TTL_MS = 30_000;
+const PENDING_MAX = 64;
+
+function prunePendingResolutions(now: number) {
+  const cutoff = now - PENDING_TTL_MS;
+  let write = 0;
+  for (let read = 0; read < pendingResolutions.length; read++) {
+    if (pendingResolutions[read].received_at >= cutoff) {
+      pendingResolutions[write++] = pendingResolutions[read];
+    }
+  }
+  pendingResolutions.length = write;
+}
+
+function clearPendingResolutionsForSession() {
+  pendingResolutions.length = 0;
+}
+
+/** Apply any buffered `speaker_resolved` events whose range now covers a
+ *  newly-finalized line's midpoint. Mutates the input array of lines and
+ *  returns a fresh array if anything changed, else the original. */
+function applyPendingResolutions(lines: TranscriptLine[]): TranscriptLine[] {
+  if (pendingResolutions.length === 0) return lines;
+  let next: TranscriptLine[] | null = null;
+  const consumedIndices = new Set<number>();
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    if (line.resolved) continue;
+    const mid = (line.start_ms + line.end_ms) / 2;
+    for (let pi = 0; pi < pendingResolutions.length; pi++) {
+      if (consumedIndices.has(pi)) continue;
+      const p = pendingResolutions[pi];
+      if (mid < p.start_ms || mid > p.end_ms) continue;
+      next = next ?? [...lines];
+      next[li] = { ...line, speaker_id: p.speaker_id, resolved: true };
+      consumedIndices.add(pi);
+      break;
+    }
+  }
+  if (consumedIndices.size > 0) {
+    let write = 0;
+    for (let i = 0; i < pendingResolutions.length; i++) {
+      if (!consumedIndices.has(i)) pendingResolutions[write++] = pendingResolutions[i];
+    }
+    pendingResolutions.length = write;
+  }
+  return next ?? lines;
+}
+
 /** `kind: "transcript"` — either a partial (replace in-progress line) or a
  *  final (append to lines, clear partial). Upserts by transcript_id. */
 function handleTranscriptMessage(
@@ -129,12 +199,14 @@ function handleTranscriptMessage(
 
   set((state) => {
     if (!state.currentSession) return state;
+    const speakerId = msg.speaker_id ?? null;
     const line: TranscriptLine = {
       id: msg.transcript_id || `local-${crypto.randomUUID()}`,
       text: msg.text,
       start_ms: msg.start_ms ?? 0,
       end_ms: msg.end_ms ?? 0,
-      speaker_id: msg.speaker_id ?? null,
+      speaker_id: speakerId,
+      resolved: speakerId !== null,
       is_final: isFinal,
     };
 
@@ -152,10 +224,14 @@ function handleTranscriptMessage(
     // from a backfill path), upsert; otherwise append. Clear the partial.
     const lines = state.currentSession.lines;
     const existingIdx = lines.findIndex((l) => l.id === line.id);
-    const nextLines =
+    const nextLinesRaw =
       existingIdx >= 0
         ? lines.map((l, i) => (i === existingIdx ? { ...l, ...line } : l))
         : [...lines, line];
+    // Replay buffered speaker_resolved events whose window now contains
+    // this line's midpoint.
+    prunePendingResolutions(Date.now());
+    const nextLines = applyPendingResolutions(nextLinesRaw);
 
     return {
       currentSession: {
@@ -170,7 +246,9 @@ function handleTranscriptMessage(
 
 /** `kind: "speaker_resolved"` — the per-segment identification task has
  *  decided who was speaking during [start_ms, end_ms]. Fill in speaker_id
- *  on every line whose time range overlaps. */
+ *  on every line whose time range overlaps. If no line matches yet (the
+ *  event outraced the ASR final), buffer it so the next finalize pass can
+ *  claim it. */
 function handleSpeakerResolved(
   set: StoreSet,
   msg: { start_ms?: number; end_ms?: number; speaker_id?: string | null },
@@ -180,22 +258,42 @@ function handleSpeakerResolved(
   const speaker = msg.speaker_id ?? null;
   if (typeof start !== 'number' || typeof end !== 'number') return;
 
+  let claimed = false;
   set((state) => {
     if (!state.currentSession) return state;
     let changed = false;
     const lines = state.currentSession.lines.map((line) => {
-      // Overlap test: two ranges overlap if neither ends before the other
-      // starts. Skip lines that already have a speaker — they're resolved.
-      if (line.speaker_id !== null) return line;
-      if (line.end_ms < start || line.start_ms > end) return line;
+      // Midpoint-in-segment test: attribute a line to whichever segment
+      // contains its center. Any-overlap caused boundary lines to get
+      // labeled by the FIRST arriving neighbor segment, which is wrong
+      // when speakers switch mid-line. Skip lines already resolved — we
+      // don't want to overwrite a known speaker with a later event.
+      if (line.resolved) return line;
+      const mid = (line.start_ms + line.end_ms) / 2;
+      if (mid < start || mid > end) return line;
       changed = true;
-      return { ...line, speaker_id: speaker };
+      claimed = true;
+      return { ...line, speaker_id: speaker, resolved: true };
     });
     if (!changed) return state;
     return {
       currentSession: { ...state.currentSession, lines },
     };
   });
+
+  if (!claimed) {
+    const now = Date.now();
+    prunePendingResolutions(now);
+    pendingResolutions.push({
+      start_ms: start,
+      end_ms: end,
+      speaker_id: speaker,
+      received_at: now,
+    });
+    if (pendingResolutions.length > PENDING_MAX) {
+      pendingResolutions.splice(0, pendingResolutions.length - PENDING_MAX);
+    }
+  }
 }
 
 export const useVoiceStore = create<VoiceState>((set, get) => ({
@@ -246,6 +344,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     const { currentSession, _ws } = get();
     _ws?.close();
     if (currentSession && currentSession.lines.length > 0) get().flushInterval();
+    clearPendingResolutionsForSession();
     set({ isRecording: false, currentSession: null, _ws: null });
   },
 
@@ -260,6 +359,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         start_ms: 0,
         end_ms: 0,
         speaker_id: null,
+        resolved: false,
         is_final: true,
       };
       return {

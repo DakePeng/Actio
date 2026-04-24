@@ -53,6 +53,9 @@ export function mapBackendReminder(dto: BackendReminderDto): Reminder {
     transcript: dto.transcript_excerpt ?? undefined,
     context: dto.context ?? undefined,
     sourceTime: dto.source_time ?? undefined,
+    sourceWindowId: dto.source_window_id ?? undefined,
+    speakerId: dto.speaker_id ?? undefined,
+    status: dto.status,
     createdAt: dto.created_at,
     archivedAt: dto.status === 'archived' ? dto.archived_at ?? dto.updated_at : null,
   };
@@ -69,9 +72,16 @@ export function mapBackendLabel(dto: BackendLabelDto): Label {
 
 export function createActioApiClient() {
   return {
-    async listReminders() {
-      const reminders = await request<BackendReminderDto[]>('/reminders');
+    async listReminders(filter?: { status?: string }) {
+      const qs = filter?.status ? `?status=${encodeURIComponent(filter.status)}` : '';
+      const reminders = await request<BackendReminderDto[]>(`/reminders${qs}`);
       return reminders.map(mapBackendReminder);
+    },
+    async getReminderTrace(id: string) {
+      // Provenance for the "Show context" inspector. Returns window bounds
+      // and in-window transcripts with speaker attribution. Safe to call on
+      // any reminder — non-windowed items come back with empty `lines`.
+      return request<import('../types').ReminderTrace>(`/reminders/${id}/trace`);
     },
     async createReminder(reminder: ReminderDraft) {
       const created = await request<BackendReminderDto>('/reminders', {

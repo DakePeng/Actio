@@ -132,6 +132,5 @@ export async function dismissCandidate(
  *  Resolves the backend base URL lazily so port autodiscovery still works. */
 export async function candidateClipUrl(audioRef: string): Promise<string> {
   const encoded = encodeURIComponent(audioRef);
-  const { getApiUrl } = await import('./backend-url');
   return getApiUrl(`/candidates/audio/${encoded}`);
 }

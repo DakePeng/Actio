@@ -46,7 +46,11 @@ interface AppState {
   setFocusedCard: (index: number | null) => void;
   setDictating: (active: boolean) => void;
   setDictationTranscript: (text: string) => void;
-  setFeedback: (message: string, tone?: 'neutral' | 'success') => void;
+  setFeedback: (
+    message: string,
+    tone?: 'neutral' | 'success',
+    vars?: Record<string, string | number>,
+  ) => void;
   clearFeedback: () => void;
   clearNewFlag: (id: string) => void;
   extractReminders: (text: string, imageDataUrls?: string[]) => Promise<void>;
@@ -95,6 +99,10 @@ const initialUI: UIState = {
 function filterReminders(reminders: Reminder[], filter: FilterState) {
   return reminders.filter((r) => {
     if (r.archivedAt !== null) return false;
+    // Medium-confidence auto-extracted items live in the Needs-review queue,
+    // not the main Board. The Needs-review UI filters on `r.status === 'pending'`
+    // directly; here we exclude them so the Board stays clean.
+    if (r.status === 'pending') return false;
     if (filter.priority && r.priority !== filter.priority) return false;
     if (filter.label && !r.labels.includes(filter.label)) return false;
     if (filter.search) {
@@ -107,6 +115,12 @@ function filterReminders(reminders: Reminder[], filter: FilterState) {
   });
 }
 
+/// Selector used by the Needs-review UI. Kept here (not inlined at call sites)
+/// so the exclusion rules stay in one place.
+export function pendingReminders(reminders: Reminder[]) {
+  return reminders.filter((r) => r.status === 'pending' && r.archivedAt === null);
+}
+
 let feedbackTimer: number | null = null;
 let highlightTimer: number | null = null;
 
@@ -114,9 +128,10 @@ function pushFeedback(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   message: string,
   tone: 'neutral' | 'success' = 'neutral',
+  vars?: Record<string, string | number>,
 ) {
   if (feedbackTimer) window.clearTimeout(feedbackTimer);
-  set((state) => ({ ui: { ...state.ui, feedback: { message, tone } } }));
+  set((state) => ({ ui: { ...state.ui, feedback: { message, vars, tone } } }));
   feedbackTimer = window.setTimeout(() => {
     set((state) => ({ ui: { ...state.ui, feedback: null } }));
     feedbackTimer = null;
@@ -165,7 +180,7 @@ export const useStore = create<AppState>((set) => ({
       set({ labels, reminders });
     } catch {
       set({ labels: [], reminders: [] });
-      pushFeedback(set, 'Unable to load reminders from the backend');
+      pushFeedback(set, 'feedback.loadRemindersFailed');
     }
   },
 
@@ -175,9 +190,9 @@ export const useStore = create<AppState>((set) => ({
     try {
       const created = await api.createReminder(reminder);
       set((state) => ({ reminders: upsertReminder(state.reminders, { ...created, isNew: true }) }));
-      pushFeedback(set, 'Reminder added to the board', 'success');
+      pushFeedback(set, 'feedback.reminderAdded', 'success');
     } catch {
-      pushFeedback(set, 'Unable to save reminder right now');
+      pushFeedback(set, 'feedback.saveReminderFailed');
     }
   },
 
@@ -186,7 +201,7 @@ export const useStore = create<AppState>((set) => ({
       const updated = await api.updateReminder(id, asReminderPatch(patch));
       set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
     } catch {
-      pushFeedback(set, 'Unable to update reminder right now');
+      pushFeedback(set, 'feedback.updateReminderFailed');
     }
   },
 
@@ -194,9 +209,9 @@ export const useStore = create<AppState>((set) => ({
     try {
       const created = await api.createLabel(label);
       set((state) => ({ labels: replaceLabel(state.labels, created) }));
-      pushFeedback(set, 'Label created', 'success');
+      pushFeedback(set, 'feedback.labelCreated', 'success');
     } catch {
-      pushFeedback(set, 'Unable to create label right now');
+      pushFeedback(set, 'feedback.createLabelFailed');
     }
   },
 
@@ -211,9 +226,9 @@ export const useStore = create<AppState>((set) => ({
         })),
         filter: state.filter.label === id ? { ...state.filter, label: null } : state.filter,
       }));
-      pushFeedback(set, 'Label deleted', 'neutral');
+      pushFeedback(set, 'feedback.labelDeleted', 'neutral');
     } catch {
-      pushFeedback(set, 'Unable to delete label right now');
+      pushFeedback(set, 'feedback.deleteLabelFailed');
     }
   },
 
@@ -226,7 +241,7 @@ export const useStore = create<AppState>((set) => ({
       });
       set((state) => ({ labels: replaceLabel(state.labels, updated) }));
     } catch {
-      pushFeedback(set, 'Unable to update label right now');
+      pushFeedback(set, 'feedback.updateLabelFailed');
     }
   },
 
@@ -234,9 +249,9 @@ export const useStore = create<AppState>((set) => ({
     try {
       const updated = await api.updateReminder(id, { status: 'archived' });
       set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
-      pushFeedback(set, 'Reminder archived', 'neutral');
+      pushFeedback(set, 'feedback.reminderArchived', 'neutral');
     } catch {
-      pushFeedback(set, 'Unable to archive reminder right now');
+      pushFeedback(set, 'feedback.archiveReminderFailed');
     }
   },
 
@@ -244,9 +259,9 @@ export const useStore = create<AppState>((set) => ({
     try {
       const updated = await api.updateReminder(id, { status: 'open' });
       set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
-      pushFeedback(set, 'Restored to board', 'success');
+      pushFeedback(set, 'feedback.restoredToBoard', 'success');
     } catch {
-      pushFeedback(set, 'Unable to restore reminder right now');
+      pushFeedback(set, 'feedback.restoreReminderFailed');
     }
   },
 
@@ -254,9 +269,9 @@ export const useStore = create<AppState>((set) => ({
     try {
       await api.deleteReminder(id);
       set((state) => ({ reminders: state.reminders.filter((reminder) => reminder.id !== id) }));
-      pushFeedback(set, 'Deleted permanently', 'neutral');
+      pushFeedback(set, 'feedback.deletedPermanently', 'neutral');
     } catch {
-      pushFeedback(set, 'Unable to delete reminder right now');
+      pushFeedback(set, 'feedback.deleteReminderFailed');
     }
   },
 
@@ -264,9 +279,11 @@ export const useStore = create<AppState>((set) => ({
     try {
       const updated = await api.updateReminder(id, { priority });
       set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
-      pushFeedback(set, `Priority set to ${priority}`, 'success');
+      pushFeedback(set, 'feedback.prioritySet', 'success', {
+        priority, // interpolation token; rendered via i18n
+      });
     } catch {
-      pushFeedback(set, 'Unable to update priority right now');
+      pushFeedback(set, 'feedback.updatePriorityFailed');
     }
   },
 
@@ -274,9 +291,9 @@ export const useStore = create<AppState>((set) => ({
     try {
       const updated = await api.updateReminder(id, { labels });
       set((state) => ({ reminders: upsertReminder(state.reminders, updated) }));
-      pushFeedback(set, 'Labels updated', 'success');
+      pushFeedback(set, 'feedback.labelsUpdated', 'success');
     } catch {
-      pushFeedback(set, 'Unable to update labels right now');
+      pushFeedback(set, 'feedback.updateLabelsFailed');
     }
   },
 
@@ -284,7 +301,7 @@ export const useStore = create<AppState>((set) => ({
 
   clearFilter: () => {
     set({ filter: initialFilter });
-    pushFeedback(set, 'Filters cleared', 'neutral');
+    pushFeedback(set, 'feedback.filtersCleared', 'neutral');
   },
 
   setBoardWindow: (show) =>
@@ -345,8 +362,8 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({ ui: { ...state.ui, hasSeenOnboarding: seen } }));
   },
 
-  setFeedback: (message, tone = 'neutral') => {
-    pushFeedback(set, message, tone);
+  setFeedback: (message, tone = 'neutral', vars) => {
+    pushFeedback(set, message, tone, vars);
   },
 
   clearFeedback: () => {
@@ -388,16 +405,20 @@ export const useStore = create<AppState>((set) => ({
         ],
       }));
       if (extracted.length === 0) {
-        pushFeedback(set, 'No action items found in your note');
+        pushFeedback(set, 'feedback.noActionItems');
+      } else if (extracted.length === 1) {
+        pushFeedback(set, 'feedback.extractedSingle', 'success');
       } else {
-        pushFeedback(set, `Extracted ${extracted.length} reminder${extracted.length > 1 ? 's' : ''}`, 'success');
+        pushFeedback(set, 'feedback.extractedMany', 'success', {
+          count: extracted.length,
+        });
       }
     } catch {
       // Remove placeholders on failure
       set((state) => ({
         reminders: state.reminders.filter((r) => !placeholderIds.includes(r.id)),
       }));
-      pushFeedback(set, "Couldn't extract reminders");
+      pushFeedback(set, 'feedback.extractFailed');
     }
   },
 

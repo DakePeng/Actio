@@ -1,7 +1,9 @@
 export type Priority = 'high' | 'medium' | 'low';
-export type ReminderStatus = 'open' | 'completed' | 'archived';
+// 'pending' is the "Needs review" state for medium-confidence items produced
+// by the windowed extractor. User confirms → 'open', dismisses → 'archived'.
+export type ReminderStatus = 'open' | 'pending' | 'completed' | 'archived';
 
-export type Tab = 'board' | 'archive' | 'settings' | 'recording' | 'people';
+export type Tab = 'board' | 'needs-review' | 'archive' | 'settings' | 'recording' | 'people';
 
 export interface Segment {
   id: string;
@@ -28,6 +30,16 @@ export interface Reminder {
   transcript?: string;
   context?: string;
   sourceTime?: string;
+  /** ID of the `extraction_windows` row that produced this reminder. Only
+   *  set for items from the windowed background extractor — manual POSTs
+   *  and legacy session-end generation leave this null. Drives the "Show
+   *  context" trace inspector. */
+  sourceWindowId?: string;
+  /** Speaker the backend inferred from the evidence quote. UI renders a
+   *  speaker chip on the card when present. */
+  speakerId?: string;
+  /** Review-queue state for medium-confidence auto-extracted items. */
+  status?: ReminderStatus;
   isNew?: boolean;
   isExtracting?: boolean;
   isAiGenerated?: boolean;
@@ -91,9 +103,30 @@ export interface BackendReminderDto {
   transcript_excerpt: string | null;
   context: string | null;
   source_time: string | null;
+  source_window_id: string | null;
   labels: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ReminderTraceLine {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  speaker_id: string | null;
+  speaker_name: string | null;
+}
+
+export interface ReminderTrace {
+  reminder_id: string;
+  session_id: string | null;
+  window_id: string | null;
+  window_start_ms: number | null;
+  window_end_ms: number | null;
+  session_started_at: string | null;
+  transcript_excerpt: string | null;
+  source_time: string | null;
+  lines: ReminderTraceLine[];
 }
 
 export interface BackendLabelDto {
@@ -134,7 +167,11 @@ export interface UIState {
   isDictationTranscribing: boolean;
   dictationTranscript: string;
   feedback: {
+    /** Translation key for the toast message. Raw strings are also accepted
+     *  (they fall through untranslated). */
     message: string;
+    /** Optional interpolation vars for the translation. */
+    vars?: Record<string, string | number>;
     tone: 'neutral' | 'success';
   } | null;
 }

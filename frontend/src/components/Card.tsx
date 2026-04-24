@@ -1,9 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
-import type { Reminder, Priority } from '../types';
+import type { Reminder, Priority, ReminderTrace } from '../types';
 import { useStore } from '../store/use-store';
 import { getLabelById } from '../utils/labels';
 import { formatTimeShort } from '../utils/time';
 import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion';
+import { useT, type TKey } from '../i18n';
+import { translateLabelName } from '../i18n/label-names';
+import { createActioApiClient } from '../api/actio-api';
+
+const apiClient = createActioApiClient();
+
+function formatTraceTs(ms: number): string {
+  // Hours-minutes-seconds clock from a 0-based session-relative timestamp.
+  // Matches the format the LLM sees in the attributed transcript.
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
 
 /** Convert an ISO 8601 timestamp to the `YYYY-MM-DDTHH:MM` format that
  *  `<input type="datetime-local">` expects, in the browser's local tz. */
@@ -32,6 +48,8 @@ interface CardProps {
 }
 
 export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: CardProps) {
+  const t = useT();
+
   // Skeleton variant — mirrors the collapsed-card structure so the layout
   // doesn't jump when the real content arrives. Every piece shimmers in unison.
   if (reminder.isExtracting) {
@@ -45,13 +63,13 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
         <article
           className="reminder-card card--skeleton"
           aria-busy="true"
-          aria-label="Extracting reminder…"
+          aria-label={t('card.aria.extracting')}
         >
           <div className="reminder-accent" />
           <div className="card-shell">
             <div className="card-head">
               <span className="skeleton-badge" />
-              <span className="mini-badge mini-badge--ai skeleton-ai-badge">AI</span>
+              <span className="mini-badge mini-badge--ai skeleton-ai-badge">{t('card.aiBadge')}</span>
             </div>
             <div className="skeleton-line skeleton-line--title" />
             <div className="skeleton-line skeleton-line--desc" />
@@ -86,15 +104,19 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
 
   const { title, description, priority: p, labels, dueTime, transcript, context } = reminder;
   const displayLabels = labels.slice(0, 3);
-  const timeDisplay = dueTime ? formatTimeShort(dueTime) : 'No deadline';
+  const timeDisplay = dueTime ? formatTimeShort(dueTime) : t('card.noDeadline');
   const isHighlighted = highlightedCardId === reminder.id;
 
   const priority = p || 'medium';
-  const priorityColors = {
-    high: { accent: '#dc2626', bg: '#fef2f2', text: '#b91c1c', label: 'High priority' },
-    medium: { accent: '#d97706', bg: '#fff7df', text: '#a16207', label: 'Medium priority' },
-    low: { accent: '#1e7a53', bg: '#edf9f1', text: '#166534', label: 'Low priority' },
-  }[priority];
+  const PRIORITY_COLORS_BY_ID: Record<
+    'high' | 'medium' | 'low',
+    { accent: string; bg: string; text: string; labelKey: TKey }
+  > = {
+    high: { accent: '#dc2626', bg: '#fef2f2', text: '#b91c1c', labelKey: 'card.priority.high' },
+    medium: { accent: '#d97706', bg: '#fff7df', text: '#a16207', labelKey: 'card.priority.medium' },
+    low: { accent: '#1e7a53', bg: '#edf9f1', text: '#166534', labelKey: 'card.priority.low' },
+  };
+  const priorityColors = PRIORITY_COLORS_BY_ID[priority];
 
   // Inline editing state
   const [editTitle, setEditTitle] = useState(title);
@@ -163,10 +185,10 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
 
   const unassignedLabels = allLabels.filter((l) => !labels.includes(l.id));
 
-  const priorityOptions: Array<{ value: Priority; label: string }> = [
-    { value: 'high', label: 'High' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'low', label: 'Low' },
+  const priorityOptions: Array<{ value: Priority; labelKey: TKey }> = [
+    { value: 'high', labelKey: 'card.priorityName.high' },
+    { value: 'medium', labelKey: 'card.priorityName.medium' },
+    { value: 'low', labelKey: 'card.priorityName.low' },
   ];
 
   // Stop drag from eating interactive-element clicks
@@ -187,7 +209,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
       onDragEnd={(_e, { offset, velocity }) => {
         if (Math.abs(offset.x) > 120 || Math.abs(velocity.x) > 400) {
           void archiveReminder(reminder.id);
-          setFeedback(`Archived: ${title}`);
+          setFeedback('card.archivedToast', 'neutral', { title });
         }
       }}
     >
@@ -211,7 +233,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
         >
           <motion.div style={{ scale: dragFeedbackScale, color: '#0f766e', fontWeight: 800, fontSize: '1rem', display: 'flex', gap: '8px', alignItems: 'center', letterSpacing: '-0.03em' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            Mark done
+            {t('card.markDone')}
           </motion.div>
         </motion.div>
 
@@ -223,11 +245,13 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
               className="card-badge"
               style={{ background: priorityColors.bg, color: priorityColors.text }}
             >
-              {priorityColors.label}
+              {t(priorityColors.labelKey)}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {reminder.isAiGenerated && <span className="mini-badge mini-badge--ai">AI</span>}
-              {reminder.isNew && <span className="mini-badge">New</span>}
+              {reminder.isAiGenerated && (
+                <span className="mini-badge mini-badge--ai">{t('card.aiBadge')}</span>
+              )}
+              {reminder.isNew && <span className="mini-badge">{t('card.newBadge')}</span>}
             </div>
           </div>
 
@@ -240,8 +264,8 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
               onBlur={() => void commitEdits()}
               onPointerDown={stopDrag}
               onClick={(e) => e.stopPropagation()}
-              placeholder="Reminder title"
-              aria-label="Edit title"
+              placeholder={t('card.titlePlaceholder')}
+              aria-label={t('card.aria.editTitle')}
             />
           ) : (
             <div className="card-title">{title}</div>
@@ -257,8 +281,8 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
               onPointerDown={stopDrag}
               onClick={(e) => e.stopPropagation()}
               rows={3}
-              placeholder="Add a description…"
-              aria-label="Edit description"
+              placeholder={t('card.descPlaceholder')}
+              aria-label={t('card.aria.editDescription')}
               style={{ lineHeight: '1.6' }}
             />
           ) : description ? (
@@ -278,7 +302,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
           {/* Subtle edit hint shown briefly when expanded */}
           {isExpanded && (
             <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)', marginTop: '2px', letterSpacing: '0.01em' }}>
-              Tap title or description to edit
+              {t('card.editHint')}
             </div>
           )}
 
@@ -297,13 +321,15 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
                   onBlur={() => void commitEdits()}
                   onPointerDown={stopDrag}
                   onClick={(e) => e.stopPropagation()}
-                  aria-label="Edit due time"
+                  aria-label={t('card.aria.editDueTime')}
                 />
               ) : (
                 <span>{timeDisplay}</span>
               )}
             </div>
-            <span className="card-meta__count">{labels.length} labels</span>
+            <span className="card-meta__count">
+              {t('card.labelCount', { count: labels.length })}
+            </span>
           </div>
 
           {/* Label chips */}
@@ -319,7 +345,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
                   className="label-chip"
                   style={{ background: label.bgColor, color: label.color, borderColor: `${label.color}22` }}
                 >
-                  {label.name}
+                  {translateLabelName(t, label.name)}
                 </button>
               );
             })}
@@ -340,6 +366,14 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
             )}
           </AnimatePresence>
 
+          {/* Trace inspector — only offered for auto-extracted cards that
+              carry a source_window_id. The trace is fetched lazily the first
+              time the user expands the panel so we don't hit the endpoint
+              for every card they open. */}
+          {isExpanded && reminder.sourceWindowId && (
+            <TraceInspector reminderId={reminder.id} />
+          )}
+
           <AnimatePresence>
             {isExpanded && (
               <motion.div
@@ -353,7 +387,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
               >
                 {/* Priority row */}
                 <div className="card-edit__row">
-                  <span className="card-edit__label">Priority</span>
+                  <span className="card-edit__label">{t('card.priorityLabel')}</span>
                   <div style={{ display: 'flex', gap: '6px' }}>
                     {priorityOptions.map((opt) => {
                       const isActive = priority === opt.value;
@@ -370,7 +404,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
                           style={isActive ? { background: colors.bg, color: colors.text } : undefined}
                           onClick={() => void setPriority(reminder.id, opt.value)}
                         >
-                          {opt.label}
+                          {t(opt.labelKey)}
                         </button>
                       );
                     })}
@@ -379,21 +413,22 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
 
                 {/* Labels row */}
                 <div className="card-edit__row">
-                  <span className="card-edit__label">Labels</span>
+                  <span className="card-edit__label">{t('card.labelsLabel')}</span>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', flex: 1, position: 'relative' }} ref={dropdownRef}>
                     {labels.map((labelId) => {
                       const label = getLabelById(allLabels, labelId);
                       if (!label) return null;
+                      const displayName = translateLabelName(t, label.name);
                       return (
                         <span
                           key={labelId}
                           className="label-chip"
                           style={{ background: label.bgColor, color: label.color, borderColor: `${label.color}22`, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                         >
-                          {label.name}
+                          {displayName}
                           <button
                             type="button"
-                            aria-label={`Remove ${label.name}`}
+                            aria-label={t('card.aria.removeLabel', { name: displayName })}
                             onClick={() => void setLabels(reminder.id, labels.filter((id) => id !== labelId))}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1, color: 'inherit', opacity: 0.7 }}
                           >
@@ -411,7 +446,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
                         aria-haspopup="listbox"
                         aria-expanded={labelDropdownOpen}
                       >
-                        + add
+                        {t('card.addLabel')}
                       </button>
                     )}
 
@@ -438,7 +473,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
                                 flexShrink: 0,
                               }}
                             />
-                            {label.name}
+                            {translateLabelName(t, label.name)}
                           </button>
                         ))}
                       </div>
@@ -451,5 +486,69 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
         </div>
       </article>
     </motion.div>
+  );
+}
+
+/** Collapsible provenance viewer. Fetches `GET /reminders/:id/trace` the
+ *  first time it's opened and caches the result for the card's lifetime. */
+function TraceInspector({ reminderId }: { reminderId: string }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [trace, setTrace] = useState<ReminderTrace | null>(null);
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  const onToggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !trace && state !== 'loading') {
+      setState('loading');
+      try {
+        const t2 = await apiClient.getReminderTrace(reminderId);
+        setTrace(t2);
+        setState('idle');
+      } catch {
+        setState('error');
+      }
+    }
+  };
+
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      <button type="button" className="trace-toggle" onClick={() => void onToggle()}>
+        {open ? t('card.trace.hide') : t('card.trace.show')}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="trace-panel"
+          >
+            {state === 'loading' && <div>{t('card.trace.loading')}</div>}
+            {state === 'error' && <div>{t('card.trace.error')}</div>}
+            {state === 'idle' && trace && trace.lines.length === 0 && (
+              <div>{t('card.trace.empty')}</div>
+            )}
+            {state === 'idle' && trace && trace.lines.length > 0 && (
+              <div>
+                {trace.lines.map((line, i) => (
+                  <div key={i} className="trace-line">
+                    <span className="trace-line__time">{formatTraceTs(line.start_ms)}</span>
+                    <div className="trace-line__body">
+                      <span className="trace-line__speaker">
+                        {line.speaker_name ?? t('card.trace.unknownSpeaker')}
+                      </span>
+                      <span className="trace-line__text">{line.text}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
