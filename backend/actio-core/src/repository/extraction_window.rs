@@ -73,7 +73,10 @@ pub async fn upsert_pending_window(
     let rows = sqlx::query(
         r#"INSERT INTO extraction_windows (id, session_id, start_ms, end_ms, status)
            VALUES (?1, ?2, ?3, ?4, 'pending')
-           ON CONFLICT (session_id, start_ms) DO NOTHING"#,
+           ON CONFLICT (session_id, start_ms) DO UPDATE
+           SET end_ms = excluded.end_ms
+           WHERE extraction_windows.status = 'pending'
+             AND extraction_windows.end_ms != excluded.end_ms"#,
     )
     .bind(&id)
     .bind(session_id.to_string())
@@ -170,8 +173,7 @@ pub async fn revert_to_pending(
     sqlx::query(
         r#"UPDATE extraction_windows
            SET status = 'pending',
-               last_error = ?2,
-               attempts = attempts - 1
+               last_error = ?2
            WHERE id = ?1 AND status = 'running'"#,
     )
     .bind(id.to_string())
@@ -275,7 +277,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revert_to_pending_decrements_attempts() {
+    async fn upsert_updates_pending_window_end_bound() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+
+        assert!(upsert_pending_window(&pool, sid, 0, 120_000).await.unwrap());
+        assert!(upsert_pending_window(&pool, sid, 0, 300_000).await.unwrap());
+
+        let w = claim_next_pending(&pool).await.unwrap().unwrap();
+        assert_eq!(w.end_ms, 300_000);
+    }
+
+    #[tokio::test]
+    async fn revert_to_pending_keeps_attempts_for_retry_budget() {
         let pool = fresh_pool().await;
         let sid = mk_session(&pool).await;
         upsert_pending_window(&pool, sid, 0, 300_000).await.unwrap();
@@ -288,8 +302,8 @@ mod tests {
         let got = get_window(&pool, w.id).await.unwrap().unwrap();
         assert_eq!(got.status, "pending");
         assert_eq!(
-            got.attempts, 0,
-            "revert must not count against retry budget"
+            got.attempts, 1,
+            "revert must preserve the consumed claim attempt"
         );
     }
 

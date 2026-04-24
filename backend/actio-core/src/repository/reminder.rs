@@ -292,8 +292,20 @@ pub async fn create_reminders_batch(
     pool: &SqlitePool,
     items: &[NewReminder],
 ) -> Result<Vec<Reminder>, sqlx::Error> {
+    let labeled: Vec<(NewReminder, Vec<Uuid>)> = items
+        .iter()
+        .map(|item| (clone_new_reminder(item), vec![]))
+        .collect();
+    create_reminders_batch_with_labels(pool, &labeled).await
+}
+
+pub async fn create_reminders_batch_with_labels(
+    pool: &SqlitePool,
+    items: &[(NewReminder, Vec<Uuid>)],
+) -> Result<Vec<Reminder>, sqlx::Error> {
     let mut results = Vec::with_capacity(items.len());
-    for item in items {
+    for (item, label_ids) in items {
+        let mut txn = pool.begin().await?;
         let id = Uuid::new_v4().to_string();
         let status = item.status.as_deref().unwrap_or("open");
         let row: Option<ReminderRow> = sqlx::query_as(
@@ -319,19 +331,55 @@ pub async fn create_reminders_batch(
         .bind(item.source_time)
         .bind(item.source_window_id.map(|u| u.to_string()))
         .bind(status)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *txn)
         .await?;
 
         if let Some(r) = row {
-            results.push(r.into_reminder(vec![]));
+            let row_uuid = r.id.parse::<Uuid>().unwrap_or_default();
+            replace_reminder_labels(&mut txn, row_uuid, label_ids).await?;
+            results.push(r.into_reminder(label_ids.clone()));
         }
+        txn.commit().await?;
     }
     Ok(results)
+}
+
+fn clone_new_reminder(item: &NewReminder) -> NewReminder {
+    NewReminder {
+        session_id: item.session_id,
+        tenant_id: item.tenant_id,
+        speaker_id: item.speaker_id,
+        assigned_to: item.assigned_to.clone(),
+        title: item.title.clone(),
+        description: item.description.clone(),
+        priority: item.priority.clone(),
+        due_time: item.due_time,
+        transcript_excerpt: item.transcript_excerpt.clone(),
+        context: item.context.clone(),
+        source_time: item.source_time,
+        status: item.status.clone(),
+        source_window_id: item.source_window_id,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repository::db::run_migrations;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn fresh_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
 
     #[test]
     fn open_to_archived_sets_timestamp() {
@@ -362,5 +410,33 @@ mod tests {
         assert_eq!(archived_at_for_status("pending", "open"), Some(false));
         assert_eq!(archived_at_for_status("pending", "archived"), Some(true));
         assert_eq!(archived_at_for_status("pending", "pending"), None);
+    }
+
+    #[tokio::test]
+    async fn create_reminders_batch_with_labels_persists_label_ids() {
+        let pool = fresh_pool().await;
+        let label_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO labels (id, tenant_id, name, color, bg_color) VALUES (?1, ?2, 'Work', '#000000', '#ffffff')",
+        )
+        .bind(label_id.to_string())
+        .bind(Uuid::nil().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let item = NewReminder {
+            tenant_id: Uuid::nil(),
+            description: "Follow up with Alice".into(),
+            status: Some("open".into()),
+            ..Default::default()
+        };
+
+        let inserted = create_reminders_batch_with_labels(&pool, &[(item, vec![label_id])])
+            .await
+            .unwrap();
+
+        assert_eq!(inserted.len(), 1);
+        assert_eq!(inserted[0].labels, vec![label_id]);
     }
 }

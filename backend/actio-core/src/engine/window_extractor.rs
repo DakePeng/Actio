@@ -22,6 +22,7 @@
 //! atomic `claim_next_pending` + the status check inside the transaction)
 //! so we don't hammer the LLM backend.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -45,6 +46,7 @@ pub const SAFETY_MARGIN_MS: i64 = 30_000;
 pub const MIN_EXTRACTABLE_CHARS: usize = 60;
 /// After this many claim→failed cycles, give up on a window.
 pub const MAX_WINDOW_ATTEMPTS: i64 = 3;
+pub const MAX_WINDOWS_PER_TICK: usize = 5;
 
 pub async fn run_extraction_loop(state: AppState) {
     // Startup housekeeping: windows left in `running` when the process last
@@ -79,9 +81,13 @@ async fn tick_once(state: &AppState) -> anyhow::Result<()> {
     let step_ms = settings.audio.window_step_ms as i64;
 
     schedule_windows_for_active_sessions(&state.pool, length_ms, step_ms).await?;
-    // Drain at most one window per tick — if more accumulate, the next tick
-    // picks the next. This rate-limits the LLM naturally.
-    process_next_window(state).await?;
+    // Drain a bounded backlog per tick;
+    // bounded batches avoid unbounded LLM bursts.
+    for _ in 0..MAX_WINDOWS_PER_TICK {
+        if !process_next_window(state).await? {
+            break;
+        }
+    }
     Ok(())
 }
 
@@ -135,6 +141,37 @@ pub async fn schedule_windows_for_active_sessions(
     Ok(())
 }
 
+/// Schedule every window that can intersect finalized transcript for an ended
+/// session. Unlike active scheduling, this includes the short tail window even
+/// when the session ended before a full window elapsed.
+pub async fn schedule_final_windows_for_session(
+    pool: &SqlitePool,
+    session_id: Uuid,
+    length_ms: i64,
+    step_ms: i64,
+) -> anyhow::Result<usize> {
+    if length_ms <= 0 || step_ms <= 0 || step_ms > length_ms {
+        return Ok(0);
+    }
+    let Some(latest) = latest_final_end_ms(pool, session_id).await? else {
+        return Ok(0);
+    };
+    if latest <= 0 {
+        return Ok(0);
+    }
+
+    let mut start = 0i64;
+    let mut enqueued = 0usize;
+    while start < latest {
+        let end = start + length_ms;
+        if window_repo::upsert_pending_window(pool, session_id, start, end).await? {
+            enqueued += 1;
+        }
+        start += step_ms;
+    }
+    Ok(enqueued)
+}
+
 async fn latest_final_end_ms(pool: &SqlitePool, session_id: Uuid) -> anyhow::Result<Option<i64>> {
     let row: Option<(Option<i64>,)> = sqlx::query_as(
         "SELECT MAX(end_ms) FROM transcripts WHERE session_id = ?1 AND is_final = 1",
@@ -145,9 +182,13 @@ async fn latest_final_end_ms(pool: &SqlitePool, session_id: Uuid) -> anyhow::Res
     Ok(row.and_then(|(v,)| v))
 }
 
-async fn process_next_window(state: &AppState) -> anyhow::Result<()> {
+async fn process_next_window(state: &AppState) -> anyhow::Result<bool> {
+    if state.router.read().await.is_disabled() {
+        return Ok(false);
+    }
+
     let Some(window) = window_repo::claim_next_pending(&state.pool).await? else {
-        return Ok(());
+        return Ok(false);
     };
 
     if window.attempts > MAX_WINDOW_ATTEMPTS {
@@ -157,7 +198,7 @@ async fn process_next_window(state: &AppState) -> anyhow::Result<()> {
             "Window exceeded max attempts — marking failed"
         );
         window_repo::mark_failed(&state.pool, window.id, "max attempts exceeded").await?;
-        return Ok(());
+        return Ok(true);
     }
 
     info!(
@@ -183,7 +224,7 @@ async fn process_next_window(state: &AppState) -> anyhow::Result<()> {
         }
         Err(ProcessError::LlmDisabled) => {
             // Not an error — the user hasn't configured an LLM yet. Revert
-            // to pending so a later tick retries; don't count the attempt.
+            // to pending so a later tick can retry if the router changes.
             window_repo::revert_to_pending(&state.pool, window.id, "llm disabled").await?;
         }
         Err(ProcessError::Transient(msg)) => {
@@ -195,7 +236,7 @@ async fn process_next_window(state: &AppState) -> anyhow::Result<()> {
             window_repo::mark_failed(&state.pool, window.id, &msg).await?;
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 enum ProcessOutcome {
@@ -249,6 +290,14 @@ async fn process_window(
             .await
             .unwrap_or_default();
     let label_names: Vec<String> = labels.iter().map(|l| l.name.clone()).collect();
+    let label_lookup: HashMap<String, Uuid> = labels
+        .iter()
+        .filter_map(|l| {
+            Uuid::parse_str(&l.id)
+                .ok()
+                .map(|id| (l.name.to_lowercase(), id))
+        })
+        .collect();
 
     let router = state.router.read().await;
     let items = match router
@@ -266,7 +315,7 @@ async fn process_window(
     }
 
     let tenant_id = session_started_at.tenant_id;
-    let new_reminders: Vec<NewReminder> = items
+    let new_reminders: Vec<(NewReminder, Vec<Uuid>)> = items
         .into_iter()
         .filter_map(|item| {
             gate_action_item(
@@ -275,6 +324,7 @@ async fn process_window(
                 tenant_id,
                 window,
                 &session_started_at.started_at,
+                &label_lookup,
             )
         })
         .collect();
@@ -283,7 +333,7 @@ async fn process_window(
         return Ok(ProcessOutcome::Empty);
     }
 
-    let inserted = reminder_repo::create_reminders_batch(&state.pool, &new_reminders)
+    let inserted = reminder_repo::create_reminders_batch_with_labels(&state.pool, &new_reminders)
         .await
         .map_err(|e| ProcessError::Permanent(format!("insert reminders: {e}")))?;
     Ok(ProcessOutcome::Produced(inserted.len()))
@@ -335,10 +385,22 @@ async fn fetch_attributed_lines(
     // [window_start, window_end]. Left-join to segments → speakers so lines
     // without a resolved speaker still appear with `speaker_name='Unknown'`.
     let rows: Vec<(String, i64, i64, Option<String>, Option<String>)> = sqlx::query_as(
-        r#"SELECT t.text, t.start_ms, t.end_ms, s.id, sp.display_name
+        r#"SELECT t.text, t.start_ms, t.end_ms,
+                  COALESCE(direct.speaker_id, overlap.speaker_id) AS speaker_id,
+                  sp.display_name
            FROM transcripts t
-           LEFT JOIN audio_segments s ON s.id = t.segment_id
-           LEFT JOIN speakers sp      ON sp.id = s.speaker_id
+           LEFT JOIN audio_segments direct ON direct.id = t.segment_id
+           LEFT JOIN audio_segments overlap ON overlap.id = (
+               SELECT os.id
+               FROM audio_segments os
+               WHERE t.segment_id IS NULL
+                 AND os.session_id = t.session_id
+                 AND os.start_ms < t.end_ms
+                 AND os.end_ms > t.start_ms
+               ORDER BY os.start_ms
+               LIMIT 1
+           )
+           LEFT JOIN speakers sp ON sp.id = COALESCE(direct.speaker_id, overlap.speaker_id)
            WHERE t.session_id = ?1
              AND t.is_final = 1
              AND t.start_ms < ?3
@@ -399,7 +461,8 @@ fn gate_action_item(
     tenant_id: Uuid,
     window: &window_repo::ExtractionWindow,
     session_started_at: &DateTime<Utc>,
-) -> Option<NewReminder> {
+    label_lookup: &HashMap<String, Uuid>,
+) -> Option<(NewReminder, Vec<Uuid>)> {
     let confidence = item.confidence.as_deref()?;
     let status = match confidence {
         "high" => "open",
@@ -442,21 +505,30 @@ fn gate_action_item(
     // Trim the excerpt so it fits in a card without blowing up the UI.
     let transcript_excerpt = Some(truncate_excerpt(&evidence, 280));
 
-    Some(NewReminder {
-        session_id: Some(window.session_id),
-        tenant_id,
-        speaker_id,
-        assigned_to: None,
-        title: item.title,
-        description: item.description,
-        priority: item.priority,
-        due_time,
-        transcript_excerpt,
-        context: None,
-        source_time,
-        status: Some(status.to_string()),
-        source_window_id: Some(window.id),
-    })
+    let label_ids = item
+        .labels
+        .iter()
+        .filter_map(|label| label_lookup.get(&label.to_lowercase()).copied())
+        .collect();
+
+    Some((
+        NewReminder {
+            session_id: Some(window.session_id),
+            tenant_id,
+            speaker_id,
+            assigned_to: None,
+            title: item.title,
+            description: item.description,
+            priority: item.priority,
+            due_time,
+            transcript_excerpt,
+            context: None,
+            source_time,
+            status: Some(status.to_string()),
+            source_window_id: Some(window.id),
+        },
+        label_ids,
+    ))
 }
 
 fn truncate_excerpt(s: &str, max: usize) -> String {
@@ -536,6 +608,62 @@ mod tests {
         .unwrap();
     }
 
+    async fn mk_speaker(pool: &SqlitePool, name: &str) -> Uuid {
+        let speaker_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, ?3)")
+            .bind(speaker_id.to_string())
+            .bind(Uuid::nil().to_string())
+            .bind(name)
+            .execute(pool)
+            .await
+            .unwrap();
+        speaker_id
+    }
+
+    async fn mk_segment(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        speaker_id: Uuid,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Uuid {
+        let segment_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO audio_segments (id, session_id, start_ms, end_ms, speaker_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(segment_id.to_string())
+        .bind(session_id.to_string())
+        .bind(start_ms)
+        .bind(end_ms)
+        .bind(speaker_id.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+        segment_id
+    }
+
+    async fn mk_final_transcript_for_segment(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        segment_id: Uuid,
+        text: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) {
+        sqlx::query(
+            "INSERT INTO transcripts (id, session_id, segment_id, start_ms, end_ms, text, is_final) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(session_id.to_string())
+        .bind(segment_id.to_string())
+        .bind(start_ms)
+        .bind(end_ms)
+        .bind(text)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[test]
     fn format_ts_handles_hours() {
         assert_eq!(format_ts(0), "00:00:00");
@@ -576,7 +704,9 @@ mod tests {
             evidence_quote: Some("x".into()),
             speaker_name: None,
         };
-        assert!(gate_action_item(low, &[], Uuid::nil(), &window, &start).is_none());
+        assert!(
+            gate_action_item(low, &[], Uuid::nil(), &window, &start, &HashMap::new()).is_none()
+        );
 
         let missing_quote = LlmActionItem {
             title: None,
@@ -588,7 +718,15 @@ mod tests {
             evidence_quote: None,
             speaker_name: None,
         };
-        assert!(gate_action_item(missing_quote, &[], Uuid::nil(), &window, &start).is_none());
+        assert!(gate_action_item(
+            missing_quote,
+            &[],
+            Uuid::nil(),
+            &window,
+            &start,
+            &HashMap::new()
+        )
+        .is_none());
     }
 
     #[test]
@@ -623,7 +761,8 @@ mod tests {
             evidence_quote: Some("remind me to email Bob tomorrow at 9".into()),
             speaker_name: Some("Alice".into()),
         };
-        let r = gate_action_item(high, &lines, Uuid::nil(), &window, &start).unwrap();
+        let (r, _) =
+            gate_action_item(high, &lines, Uuid::nil(), &window, &start, &HashMap::new()).unwrap();
         assert_eq!(r.status.as_deref(), Some("open"));
         assert_eq!(r.source_window_id, Some(window.id));
         assert!(r.transcript_excerpt.is_some());
@@ -638,7 +777,15 @@ mod tests {
             evidence_quote: Some("remind me to email Bob tomorrow at 9".into()),
             speaker_name: Some("Alice".into()),
         };
-        let r = gate_action_item(medium, &lines, Uuid::nil(), &window, &start).unwrap();
+        let (r, _) = gate_action_item(
+            medium,
+            &lines,
+            Uuid::nil(),
+            &window,
+            &start,
+            &HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(r.status.as_deref(), Some("pending"));
     }
 
@@ -686,6 +833,71 @@ mod tests {
             .unwrap();
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text, "in-window");
+    }
+
+    #[tokio::test]
+    async fn fetch_attributed_lines_uses_actual_speaker_id_from_segment() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let speaker_id = mk_speaker(&pool, "Alice").await;
+        let segment_id = mk_segment(&pool, sid, speaker_id, 10_000, 20_000).await;
+        mk_final_transcript_for_segment(
+            &pool,
+            sid,
+            segment_id,
+            "Alice owns this line",
+            11_000,
+            19_000,
+        )
+        .await;
+
+        let lines = fetch_attributed_lines(&pool, sid, 0, 30_000).await.unwrap();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].speaker_id, Some(speaker_id));
+        assert_eq!(lines[0].speaker_name, "Alice");
+    }
+
+    #[tokio::test]
+    async fn fetch_attributed_lines_falls_back_to_overlapping_segment_without_segment_id() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let speaker_id = mk_speaker(&pool, "Bob").await;
+        mk_segment(&pool, sid, speaker_id, 100_000, 160_000).await;
+        mk_final_transcript(&pool, sid, "Bob overlaps this line", 120_000, 140_000).await;
+
+        let lines = fetch_attributed_lines(&pool, sid, 100_000, 160_000)
+            .await
+            .unwrap();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].speaker_id, Some(speaker_id));
+        assert_eq!(lines[0].speaker_name, "Bob");
+    }
+
+    #[tokio::test]
+    async fn schedule_final_windows_includes_short_ended_session_tail() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        sqlx::query("UPDATE audio_sessions SET ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1")
+            .bind(sid.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        mk_final_transcript(&pool, sid, "short final session", 0, 120_000).await;
+
+        let enqueued = schedule_final_windows_for_session(&pool, sid, 300_000, 240_000)
+            .await
+            .unwrap();
+
+        assert_eq!(enqueued, 1);
+        let row: (i64, i64) =
+            sqlx::query_as("SELECT start_ms, end_ms FROM extraction_windows WHERE session_id = ?1")
+                .bind(sid.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row, (0, 300_000));
     }
 
     #[test]

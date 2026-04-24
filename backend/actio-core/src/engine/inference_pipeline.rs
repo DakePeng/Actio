@@ -252,7 +252,11 @@ impl InferencePipeline {
 
                                 if t.is_final {
                                     if let Err(e) = aggregator.add_final(
-                                        session_id, &t.text, start_ms, end_ms, None,
+                                        session_id,
+                                        &t.text,
+                                        start_ms,
+                                        end_ms,
+                                        t.segment_id,
                                     ).await {
                                         warn!(%session_id, error = %e, "Failed to persist final transcript");
                                     }
@@ -911,5 +915,4 @@ mod tests {
         assert_eq!(state.speaker_id, Some(speaker_uuid));
         assert_eq!(state.last_confirmed_ms, Some(3_000));
     }
-
 }

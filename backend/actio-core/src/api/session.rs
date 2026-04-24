@@ -16,7 +16,7 @@ pub struct TodoListResponse {
     pub todos: Vec<TodoItem>,
     pub generated: bool,
 }
-use crate::engine::todo_generator;
+use crate::engine::window_extractor;
 
 #[derive(Deserialize, ToSchema)]
 pub struct CreateSessionRequest {
@@ -142,28 +142,16 @@ pub async fn end_session(
     // Stop the inference pipeline if running
     state.inference_pipeline.lock().await.stop();
 
-    // Fire-and-forget todo generation (90s timeout)
-    {
-        let router = state.router.clone();
-        let pool = state.pool.clone();
-        let tenant_id = session::get_session(&state.pool, id)
-            .await
-            .map(|session| session.tenant_id.parse::<Uuid>().unwrap_or_default())
-            .map_err(|e| AppApiError::Internal(e.to_string()))?;
-        tokio::spawn(async move {
-            let router_guard = router.read().await;
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(90),
-                todo_generator::generate_session_todos(&pool, &*router_guard, id, tenant_id),
-            )
-            .await;
-            match result {
-                Ok(Ok(())) => info!(session_id = %id, "Todo generation completed"),
-                Ok(Err(e)) => warn!(session_id = %id, error = %e, "Todo generation failed"),
-                Err(_) => warn!(session_id = %id, "Todo generation timed out after 90s"),
-            }
-        });
-    }
+    let settings = state.settings_manager.get().await;
+    let scheduled = window_extractor::schedule_final_windows_for_session(
+        &state.pool,
+        id,
+        settings.audio.window_length_ms as i64,
+        settings.audio.window_step_ms as i64,
+    )
+    .await
+    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    info!(session_id = %id, windows = scheduled, "Scheduled final extraction windows");
 
     Ok(StatusCode::NO_CONTENT)
 }

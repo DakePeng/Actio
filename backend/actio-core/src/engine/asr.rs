@@ -1,5 +1,6 @@
 use tokio::sync::mpsc;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 use crate::engine::model_manager::{
     FunAsrNanoFiles, MoonshineFiles, ParaformerFiles, SenseVoiceFiles, TransducerFiles,
@@ -14,6 +15,7 @@ pub struct TranscriptResult {
     pub is_final: bool,
     pub start_sample: usize,
     pub end_sample: usize,
+    pub segment_id: Option<Uuid>,
 }
 
 /// Start a streaming ASR task fed directly with raw audio chunks (16kHz mono f32).
@@ -113,6 +115,7 @@ pub fn start_streaming_asr(
                                 is_final: false,
                                 start_sample: 0,
                                 end_sample: total_samples,
+                                segment_id: None,
                             });
                         }
                     }
@@ -128,6 +131,7 @@ pub fn start_streaming_asr(
                                     is_final: true,
                                     start_sample: 0,
                                     end_sample: total_samples,
+                                    segment_id: None,
                                 });
                             }
                         }
@@ -372,6 +376,7 @@ fn spawn_offline_asr_loop(
         loop {
             match seg_cb_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(segment) => {
+                    let segment_id = segment.segment_id;
                     let start_sample = segment.start_sample;
                     let end_sample = segment.end_sample;
 
@@ -387,6 +392,7 @@ fn spawn_offline_asr_loop(
                                 is_final: true,
                                 start_sample,
                                 end_sample,
+                                segment_id: Some(segment_id),
                             };
                             if result_cb_tx.send(t).is_err() {
                                 info!(
