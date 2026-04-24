@@ -4,12 +4,37 @@ import { sortByPriority } from '../utils/priority';
 import { Card } from './Card';
 import { EmptyState } from './EmptyState';
 import { AnimatePresence } from 'framer-motion';
+import { useT, type TKey } from '../i18n';
+import { translateLabelName } from '../i18n/label-names';
+
+type BoardPriority = 'high' | 'medium' | 'low';
 
 export function Board() {
-  const priorityOptions: Array<{ id: 'high' | 'medium' | 'low'; label: string; colors: { c: string, b: string } }> = [
-    { id: 'high', label: 'High', colors: { c: '#b91c1c', b: '#fef2f2' } },
-    { id: 'medium', label: 'Medium', colors: { c: '#a16207', b: '#fff7df' } },
-    { id: 'low', label: 'Low', colors: { c: '#166534', b: '#edf9f1' } },
+  const t = useT();
+  const priorityOptions: Array<{
+    id: BoardPriority;
+    labelKey: TKey;
+    showingKey: TKey;
+    colors: { c: string; b: string };
+  }> = [
+    {
+      id: 'high',
+      labelKey: 'board.priority.high',
+      showingKey: 'board.filter.showingHigh',
+      colors: { c: '#b91c1c', b: '#fef2f2' },
+    },
+    {
+      id: 'medium',
+      labelKey: 'board.priority.medium',
+      showingKey: 'board.filter.showingMedium',
+      colors: { c: '#a16207', b: '#fff7df' },
+    },
+    {
+      id: 'low',
+      labelKey: 'board.priority.low',
+      showingKey: 'board.filter.showingLow',
+      colors: { c: '#166534', b: '#edf9f1' },
+    },
   ];
 
   const filtered = useFilteredReminders();
@@ -45,25 +70,23 @@ export function Board() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
           {/* Priority filter row */}
           <div className="board-summary__cluster">
-            <div className="board-summary__label">Priority</div>
+            <div className="board-summary__label">{t('board.filter.priority')}</div>
             <div className="filter-group">
               {priorityOptions.map((priority) => {
                 const isSelected = filter.priority === priority.id;
                 return (
                   <button
-                    key={priority.label}
+                    key={priority.id}
                     type="button"
                     className={`filter-chip${isSelected ? ' is-selected' : ''}`}
                     style={isSelected ? { color: priority.colors.c, background: priority.colors.b, borderColor: `${priority.colors.c}33` } : undefined}
                     onClick={() => {
                       const next = filter.priority === priority.id ? null : priority.id;
                       setFilter({ priority: next });
-                      setFeedback(
-                        next ? `Showing ${priority.label.toLowerCase()} priority notes` : 'Priority filter cleared',
-                      );
+                      setFeedback(next ? priority.showingKey : 'board.filter.priorityCleared');
                     }}
                   >
-                    {priority.label}
+                    {t(priority.labelKey)}
                   </button>
                 );
               })}
@@ -72,10 +95,11 @@ export function Board() {
 
           {/* Label filter row */}
           <div className="board-summary__cluster">
-            <div className="board-summary__label">Labels</div>
+            <div className="board-summary__label">{t('board.filter.labels')}</div>
             <div className="filter-group" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
               {labels.map((label) => {
                 const isSelected = filter.label === label.id;
+                const displayName = translateLabelName(t, label.name);
                 return (
                   <button
                     key={label.id}
@@ -84,12 +108,16 @@ export function Board() {
                     onClick={() => {
                       const next = filter.label === label.id ? null : label.id;
                       setFilter({ label: next });
-                      setFeedback(next ? `${label.name} filter applied` : 'Label filter cleared');
+                      if (next) {
+                        setFeedback('board.filter.labelApplied', 'neutral', { name: displayName });
+                      } else {
+                        setFeedback('board.filter.labelCleared');
+                      }
                     }}
                     style={isSelected ? { color: label.color, background: label.bgColor, borderColor: `${label.color}33` } : undefined}
                   >
                     <span style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: label.color, flexShrink: 0 }} />
-                    {label.name}
+                    {displayName}
                   </button>
                 );
               })}
@@ -104,7 +132,7 @@ export function Board() {
               className="ghost-button board-summary__reset"
               onClick={clearFilter}
             >
-              Clear filters
+              {t('board.filter.clear')}
             </button>
           )}
         </div>

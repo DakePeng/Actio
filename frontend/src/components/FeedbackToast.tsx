@@ -1,8 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '../store/use-store';
+import { useT, type TKey } from '../i18n';
 
 export function FeedbackToast() {
   const feedback = useStore((s) => s.ui.feedback);
+  const t = useT();
 
   return (
     <AnimatePresence>
@@ -15,7 +17,7 @@ export function FeedbackToast() {
           transition={{ duration: 0.2, ease: 'easeOut' }}
         >
           <span className="feedback-toast__dot" aria-hidden="true" />
-          <span>{feedback.message}</span>
+          <span>{t(feedback.message as TKey, feedback.vars)}</span>
         </motion.div>
       )}
     </AnimatePresence>

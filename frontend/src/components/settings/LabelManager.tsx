@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '../../store/use-store';
+import { useT } from '../../i18n';
+import { translateLabelName } from '../../i18n/label-names';
 
 const PALETTE = [
   { c: '#6366F1', b: '#EEF2FF' },
@@ -21,6 +23,7 @@ export function LabelManager() {
   const labels = useStore((s) => s.labels);
   const addLabel = useStore((s) => s.addLabel);
   const deleteLabel = useStore((s) => s.deleteLabel);
+  const t = useT();
 
   const [newLabelText, setNewLabelText] = useState('');
   const [newLabelColor, setNewLabelColor] = useState<{ c: string; b: string } | null>(null);
@@ -58,10 +61,12 @@ export function LabelManager() {
 
   return (
     <section className="settings-section">
-      <div className="settings-section__title">Labels</div>
+      <div className="settings-section__title">{t('settings.labels.title')}</div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-        {labels.map((label) => (
+        {labels.map((label) => {
+          const displayName = translateLabelName(t, label.name);
+          return (
           <div
             key={label.id}
             className="filter-chip"
@@ -77,17 +82,18 @@ export function LabelManager() {
             }}
           >
             <span style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: label.color, flexShrink: 0 }} />
-            {label.name}
+            {displayName}
             <button
               type="button"
-              aria-label={`Delete ${label.name}`}
+              aria-label={t('settings.labels.aria.delete', { name: displayName })}
               onClick={() => void deleteLabel(label.id)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', marginLeft: '2px', lineHeight: 1, fontSize: '14px', color: 'inherit', opacity: 0.7, display: 'inline-flex', alignItems: 'center' }}
             >
               ×
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <form onSubmit={(event) => void handleAddLabel(event)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -98,7 +104,7 @@ export function LabelManager() {
               setShowColorWheel((value) => !value);
               setColorError(false);
             }}
-            aria-label="Choose color"
+            aria-label={t('settings.labels.aria.chooseColor')}
             style={{
               width: '28px',
               height: '28px',
@@ -141,7 +147,7 @@ export function LabelManager() {
                       <button
                         key={palette.c}
                         type="button"
-                        aria-label={`Pick color ${palette.c}`}
+                        aria-label={t('settings.labels.aria.pickColor', { color: palette.c })}
                         onClick={() => {
                           setNewLabelColor(palette);
                           setShowColorWheel(false);
@@ -176,7 +182,7 @@ export function LabelManager() {
           type="text"
           value={newLabelText}
           onChange={(event) => setNewLabelText(event.target.value)}
-          placeholder="Label name…"
+          placeholder={t('settings.labels.namePlaceholder')}
           className="filter-chip"
           style={{ maxWidth: '160px', padding: '0 12px', outline: 'none', cursor: 'text' }}
         />
@@ -192,10 +198,12 @@ export function LabelManager() {
             cursor: newLabelText.trim() ? 'pointer' : 'default',
           }}
         >
-          Add label
+          {t('settings.labels.add')}
         </button>
         {colorError && (
-          <span style={{ fontSize: '0.78rem', color: '#dc2626', whiteSpace: 'nowrap' }}>Pick a color first</span>
+          <span style={{ fontSize: '0.78rem', color: '#dc2626', whiteSpace: 'nowrap' }}>
+            {t('settings.labels.pickColorFirst')}
+          </span>
         )}
       </form>
     </section>

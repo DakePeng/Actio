@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
 import { getApiUrl } from '../api/backend-url';
 import { LiveTranscript } from './LiveTranscript';
+import { useT } from '../i18n';
 
 type WarmupState = 'idle' | 'warming' | 'ready' | 'error';
 
@@ -98,6 +99,7 @@ export function RecordingTab() {
   const currentSession = useVoiceStore((s) => s.currentSession);
   const startRecording = useVoiceStore((s) => s.startRecording);
   const stopRecording = useVoiceStore((s) => s.stopRecording);
+  const t = useT();
 
   const [elapsed, setElapsed] = useState(0);
   const [warmupState, setWarmupState] = useState<WarmupState>('idle');
@@ -175,12 +177,13 @@ export function RecordingTab() {
     if (warming) {
       return (
         <>
-          Loading model<AnimatedDots />
+          {t('recording.loadingModel')}
+          <AnimatedDots />
         </>
       );
     }
-    if (warmupState === 'error') return 'Model load failed — tap to try anyway';
-    return 'Tap to transcribe';
+    if (warmupState === 'error') return t('recording.modelLoadFailed');
+    return t('recording.tapToTranscribe');
   })();
 
   return (
@@ -220,7 +223,11 @@ export function RecordingTab() {
             type="button"
             className={`recording-btn${isRecording ? ' is-recording' : ''}${warming ? ' is-warming' : ''}`}
             onClick={isRecording ? stopRecording : startRecording}
-            aria-label={isRecording ? 'Stop transcribing' : 'Start transcribing'}
+            aria-label={
+              isRecording
+                ? t('recording.aria.stopTranscribing')
+                : t('recording.aria.startTranscribing')
+            }
             aria-busy={warming || pipelineStarting}
             whileHover={{ scale: 1.06 }}
             whileTap={{ scale: 0.95 }}
@@ -297,7 +304,8 @@ export function RecordingTab() {
             currentSession.lines.length === 0 &&
             !currentSession.pendingPartial ? (
               <span className="recording-tab__starting">
-                Starting up<AnimatedDots />
+                {t('recording.startingUp')}
+                <AnimatedDots />
               </span>
             ) : (
               <LiveTranscript

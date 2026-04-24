@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useT, useTMaybe } from '../../i18n';
 
 const API_BASE = 'http://127.0.0.1:3000';
 
@@ -111,6 +112,8 @@ export function LlmSettings() {
   const [testResult, setTestResult] = useState<LlmTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
+  const tMaybe = useTMaybe();
 
   const refreshModels = useCallback(async () => {
     try {
@@ -170,21 +173,21 @@ export function LlmSettings() {
         setLoadStatus({ state: 'idle' });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save');
+      setError(e instanceof Error ? e.message : t('settings.llm.saveFailed'));
     }
   };
 
   const handleApplyPort = async () => {
     const port = parseInt(portInput, 10);
     if (isNaN(port) || port < 1024 || port > 65535) {
-      setPortError('Port must be 1024\u201365535');
+      setPortError(t('settings.llm.portError'));
       return;
     }
     setPortError(null);
     try {
       await patchLlmSettings({ local_endpoint_port: port });
     } catch (e) {
-      setPortError(e instanceof Error ? e.message : 'Failed to apply port');
+      setPortError(e instanceof Error ? e.message : t('settings.llm.applyPortFailed'));
     }
   };
 
@@ -199,7 +202,7 @@ export function LlmSettings() {
         },
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      setError(e instanceof Error ? e.message : t('settings.llm.remoteSaveFailed'));
     }
   };
 
@@ -211,7 +214,7 @@ export function LlmSettings() {
       const result = await testLlm();
       setTestResult(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Test failed');
+      setError(e instanceof Error ? e.message : t('settings.llm.testFailed'));
     } finally {
       setTesting(false);
     }
@@ -219,7 +222,7 @@ export function LlmSettings() {
 
   return (
     <section className="settings-section">
-      <div className="settings-section__title">Language Models</div>
+      <div className="settings-section__title">{t('settings.llm.title')}</div>
 
       {/* Backend radio */}
       <div className="language-model-radio-group">
@@ -229,8 +232,8 @@ export function LlmSettings() {
             checked={selection.kind === 'disabled'}
             onChange={() => handleSelectionChange({ kind: 'disabled' })}
           />
-          <span>Disabled</span>
-          <span className="settings-row__sublabel"> — Action item extraction is off</span>
+          <span>{t('settings.llm.disabled')}</span>
+          <span className="settings-row__sublabel">{t('settings.llm.disabled.sub')}</span>
         </label>
         <label className="language-model-radio-row">
           <input
@@ -241,8 +244,8 @@ export function LlmSettings() {
               patchLlmSettings({ selection: { kind: 'local', id: '' } }).catch(() => {});
             }}
           />
-          <span>Local</span>
-          <span className="settings-row__sublabel"> — Run a model on this machine</span>
+          <span>{t('settings.llm.local')}</span>
+          <span className="settings-row__sublabel">{t('settings.llm.local.sub')}</span>
         </label>
         <label className="language-model-radio-row">
           <input
@@ -250,8 +253,8 @@ export function LlmSettings() {
             checked={selection.kind === 'remote'}
             onChange={() => handleSelectionChange({ kind: 'remote' })}
           />
-          <span>Remote</span>
-          <span className="settings-row__sublabel"> — Use an OpenAI-compatible API</span>
+          <span>{t('settings.llm.remote')}</span>
+          <span className="settings-row__sublabel">{t('settings.llm.remote.sub')}</span>
         </label>
       </div>
 
@@ -259,7 +262,7 @@ export function LlmSettings() {
       {selection.kind === 'local' && (
         <div style={{ marginTop: 16 }}>
           <div className="language-model-source-row">
-            <span className="settings-field__label">Download from</span>
+            <span className="settings-field__label">{t('settings.llm.downloadFrom')}</span>
             <select
               className="settings-input"
               value={downloadSource}
@@ -272,13 +275,13 @@ export function LlmSettings() {
               }}
               style={{ width: 'auto' }}
             >
-              <option value="hugging_face">Hugging Face</option>
-              <option value="hf_mirror">HF Mirror (hf-mirror.com)</option>
-              <option value="model_scope">ModelScope (modelscope.cn)</option>
+              <option value="hugging_face">{t('settings.llm.source.hf')}</option>
+              <option value="hf_mirror">{t('settings.llm.source.hfMirror')}</option>
+              <option value="model_scope">{t('settings.llm.source.modelScope')}</option>
             </select>
           </div>
 
-          <div className="settings-field__label">Local model</div>
+          <div className="settings-field__label">{t('settings.llm.localModel')}</div>
           <div className="model-list">
             {models.map((m) => {
               const isSelected = selection.kind === 'local' && selection.id === m.id;
@@ -311,12 +314,22 @@ export function LlmSettings() {
                       <div className="model-list__name">
                         {m.name}
                         <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginLeft: 6, fontFamily: 'monospace' }}>{m.id}</span>
-                        {isLoaded && <span className="model-list__check" style={{ marginLeft: 8 }}>Loaded</span>}
+                        {isLoaded && (
+                          <span className="model-list__check" style={{ marginLeft: 8 }}>
+                            {t('settings.llm.loaded')}
+                          </span>
+                        )}
                       </div>
                       <div className="model-list__spec">
-                        ~{m.size_mb} MB download · ~{m.ram_mb} MB RAM · {m.recommended_ram_gb} GB+ recommended
+                        {t('settings.llm.spec', {
+                          size: m.size_mb,
+                          ram: m.ram_mb,
+                          recRam: m.recommended_ram_gb,
+                        })}
                       </div>
-                      <div className="model-list__desc">{m.description}</div>
+                      <div className="model-list__desc">
+                        {tMaybe(`model.desc.${m.id}`) ?? m.description}
+                      </div>
                     </div>
                   </label>
                   {isDownloading && (
@@ -332,10 +345,12 @@ export function LlmSettings() {
                           }} />
                         </div>
                         <span style={{ fontSize: 12, minWidth: 36 }}>{Math.round((loadStatus.progress ?? 0) * 100)}%</span>
-                        <button type="button" className="model-list__delete-btn" onClick={cancelAndUnselect}>Cancel</button>
+                        <button type="button" className="model-list__delete-btn" onClick={cancelAndUnselect}>
+                          {t('settings.llm.cancel')}
+                        </button>
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                        Downloading model…
+                        {t('settings.llm.downloading')}
                       </div>
                     </div>
                   )}
@@ -344,10 +359,12 @@ export function LlmSettings() {
                     <div className="model-list__actions" style={{ flexDirection: 'column', gap: 6 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
                         <div className="model-list__loading-bar"><div className="model-list__loading-bar-fill" /></div>
-                        <button type="button" className="model-list__delete-btn" onClick={cancelAndUnselect}>Cancel</button>
+                        <button type="button" className="model-list__delete-btn" onClick={cancelAndUnselect}>
+                          {t('settings.llm.cancel')}
+                        </button>
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                        Loading model…
+                        {t('settings.llm.loadingModel')}
                       </div>
                     </div>
                   )}
@@ -362,7 +379,7 @@ export function LlmSettings() {
                           setLoadStatus(status);
                         }}
                       >
-                        Load model
+                        {t('settings.llm.loadModel')}
                       </button>
                       {hasError && (
                         <span style={{ fontSize: 12, color: 'var(--color-priority-high-text, #d33)' }}>
@@ -389,17 +406,17 @@ export function LlmSettings() {
                 } catch {}
               }}
             />
-            <span>Load model at application startup</span>
+            <span>{t('settings.llm.loadOnStartup')}</span>
           </label>
           <div className="language-model-endpoint-hint">
-            When enabled, the selected model downloads and loads automatically when Actio starts.
+            {t('settings.llm.loadOnStartupHint')}
           </div>
 
           {/* Endpoint port */}
           <div style={{ marginTop: 16 }}>
-            <div className="settings-field__label">Endpoint</div>
+            <div className="settings-field__label">{t('settings.llm.endpoint')}</div>
             <div className="language-model-port-row">
-              <span>Port:</span>
+              <span>{t('settings.llm.port')}</span>
               <input
                 className={`settings-input ${portError ? 'language-model-port-input--bad' : ''}`}
                 type="number"
@@ -414,7 +431,7 @@ export function LlmSettings() {
                 className="settings-btn settings-btn--secondary"
                 onClick={handleApplyPort}
               >
-                Apply
+                {t('settings.llm.apply')}
               </button>
             </div>
             {portError && (
@@ -423,12 +440,13 @@ export function LlmSettings() {
               </div>
             )}
             <div className="language-model-endpoint-url">
-              Other tools can reach this at: <code>http://127.0.0.1:{portInput}/v1</code>
+              {t('settings.llm.endpointUrlPrefix')}{' '}
+              <code>http://127.0.0.1:{portInput}/v1</code>
             </div>
             <div className="language-model-endpoint-hint">
               {parseInt(portInput, 10) === 3000
-                ? 'Currently sharing the actio backend port. Pick a different port to expose the LLM separately.'
-                : 'LLM endpoint is on a separate port. The actio backend remains on port 3000.'}
+                ? t('settings.llm.endpointSharing')
+                : t('settings.llm.endpointSeparate')}
             </div>
           </div>
         </div>
@@ -438,7 +456,9 @@ export function LlmSettings() {
       {selection.kind === 'remote' && (
         <div style={{ marginTop: 16 }}>
           <div className="language-model-input-row">
-            <span className="settings-field__label" style={{ minWidth: 70 }}>Base URL</span>
+            <span className="settings-field__label" style={{ minWidth: 70 }}>
+              {t('settings.llm.field.baseUrl')}
+            </span>
             <input
               className="settings-input"
               type="url"
@@ -449,7 +469,9 @@ export function LlmSettings() {
             />
           </div>
           <div className="language-model-input-row">
-            <span className="settings-field__label" style={{ minWidth: 70 }}>API Key</span>
+            <span className="settings-field__label" style={{ minWidth: 70 }}>
+              {t('settings.llm.field.apiKey')}
+            </span>
             <input
               className="settings-input"
               type="password"
@@ -460,7 +482,9 @@ export function LlmSettings() {
             />
           </div>
           <div className="language-model-input-row">
-            <span className="settings-field__label" style={{ minWidth: 70 }}>Model</span>
+            <span className="settings-field__label" style={{ minWidth: 70 }}>
+              {t('settings.llm.field.model')}
+            </span>
             <input
               className="settings-input"
               type="text"
@@ -499,7 +523,7 @@ export function LlmSettings() {
             onClick={handleTest}
             disabled={testing || loadStatus.state === 'loading'}
           >
-            {testing ? 'Testing...' : 'Test Connection'}
+            {testing ? t('settings.llm.testing') : t('settings.llm.testConnection')}
           </button>
         </div>
       )}

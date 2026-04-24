@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useT } from '../../i18n';
 
 const API_BASE = 'http://127.0.0.1:3000';
 
@@ -13,6 +14,10 @@ interface AudioSettingsShape {
   speaker_tentative_threshold?: number;
   speaker_min_duration_ms?: number;
   speaker_continuity_window_ms?: number;
+  always_listening?: boolean;
+  window_length_ms?: number;
+  window_step_ms?: number;
+  extraction_tick_secs?: number;
 }
 
 async function fetchDevices(): Promise<AudioDeviceInfo[]> {
@@ -37,12 +42,18 @@ async function patchAudio(patch: Partial<AudioSettingsShape>): Promise<void> {
 }
 
 export function AudioSettings() {
+  const t = useT();
   const [devices, setDevices] = useState<AudioDeviceInfo[]>([]);
   const [selected, setSelected] = useState('');
   const [confirmT, setConfirmT] = useState(0.55);
   const [tentativeT, setTentativeT] = useState(0.4);
   const [minMs, setMinMs] = useState(1500);
   const [continuityMs, setContinuityMs] = useState(15000);
+  // Always-listening + windowed extractor params.
+  const [alwaysListening, setAlwaysListening] = useState(true);
+  const [windowLengthMs, setWindowLengthMs] = useState(5 * 60 * 1000);
+  const [windowStepMs, setWindowStepMs] = useState(4 * 60 * 1000);
+  const [extractionTickSecs, setExtractionTickSecs] = useState(60);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -68,6 +79,18 @@ export function AudioSettings() {
         if (typeof settings.audio?.speaker_continuity_window_ms === 'number') {
           setContinuityMs(settings.audio.speaker_continuity_window_ms);
         }
+        if (typeof settings.audio?.always_listening === 'boolean') {
+          setAlwaysListening(settings.audio.always_listening);
+        }
+        if (typeof settings.audio?.window_length_ms === 'number') {
+          setWindowLengthMs(settings.audio.window_length_ms);
+        }
+        if (typeof settings.audio?.window_step_ms === 'number') {
+          setWindowStepMs(settings.audio.window_step_ms);
+        }
+        if (typeof settings.audio?.extraction_tick_secs === 'number') {
+          setExtractionTickSecs(settings.audio.extraction_tick_secs);
+        }
       })
       .catch(() => {});
   }, []);
@@ -78,7 +101,7 @@ export function AudioSettings() {
     try {
       await patchAudio({ device_name: name });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save');
+      setError(e instanceof Error ? e.message : t('settings.audio.saveFailed'));
     }
   };
 
@@ -92,47 +115,44 @@ export function AudioSettings() {
     try {
       await patchAudio({ [key]: v } as Partial<AudioSettingsShape>);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save');
+      setError(e instanceof Error ? e.message : t('settings.audio.saveFailed'));
     }
   };
 
   return (
     <section className="settings-section">
-      <div className="settings-section__title">Audio Input</div>
+      <div className="settings-section__title">{t('settings.audio.inputTitle')}</div>
 
       <label className="settings-row">
-        <span className="settings-row__label">Microphone</span>
+        <span className="settings-row__label">{t('settings.audio.microphone')}</span>
         <select
           className="settings-row__select"
           value={selected}
           onChange={(e) => handleDeviceChange(e.target.value)}
           disabled={devices.length === 0}
         >
-          {devices.length === 0 && <option value="">No devices found</option>}
+          {devices.length === 0 && (
+            <option value="">{t('settings.audio.noDevices')}</option>
+          )}
           {devices.map((d) => (
             <option key={d.name} value={d.name}>
               {d.name}
-              {d.is_default ? ' (default)' : ''}
+              {d.is_default ? t('settings.audio.defaultSuffix') : ''}
             </option>
           ))}
         </select>
       </label>
 
       <div className="settings-section__title" style={{ marginTop: 20 }}>
-        Speaker Recognition
+        {t('settings.audio.speakerTitle')}
       </div>
       <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
-        How confident the app must be before labelling a transcript segment
-        with a known speaker. Tentative matches show a <b>?</b> badge; below
-        the tentative threshold the segment is left unattributed. Continuity
-        window lets a recent confirmed speaker inherit subsequent weak
-        segments so one speech turn renders under one speaker. Changes take
-        effect on the next pipeline restart.
+        {t('settings.audio.speakerHint')}
       </p>
 
       <label className="settings-row">
         <span className="settings-row__label">
-          Confirm threshold <code>{confirmT.toFixed(2)}</code>
+          {t('settings.audio.confirmThreshold')} <code>{confirmT.toFixed(2)}</code>
         </span>
         <input
           type="range"
@@ -149,7 +169,7 @@ export function AudioSettings() {
 
       <label className="settings-row">
         <span className="settings-row__label">
-          Tentative threshold <code>{tentativeT.toFixed(2)}</code>
+          {t('settings.audio.tentativeThreshold')} <code>{tentativeT.toFixed(2)}</code>
         </span>
         <input
           type="range"
@@ -166,7 +186,7 @@ export function AudioSettings() {
 
       <label className="settings-row">
         <span className="settings-row__label">
-          Min speech duration <code>{minMs} ms</code>
+          {t('settings.audio.minSpeechDuration')} <code>{minMs} ms</code>
         </span>
         <input
           type="range"
@@ -183,9 +203,11 @@ export function AudioSettings() {
 
       <label className="settings-row">
         <span className="settings-row__label">
-          Continuity window{' '}
+          {t('settings.audio.continuityWindow')}{' '}
           <code>
-            {continuityMs === 0 ? 'Off' : `${Math.round(continuityMs / 1000)} s`}
+            {continuityMs === 0
+              ? t('settings.audio.continuityOff')
+              : `${Math.round(continuityMs / 1000)} s`}
           </code>
         </span>
         <input
@@ -198,6 +220,91 @@ export function AudioSettings() {
           onMouseUp={() => void commit('speaker_continuity_window_ms', continuityMs)}
           onTouchEnd={() => void commit('speaker_continuity_window_ms', continuityMs)}
           onBlur={() => void commit('speaker_continuity_window_ms', continuityMs)}
+        />
+      </label>
+
+      <div className="settings-section__title" style={{ marginTop: 20 }}>
+        {t('settings.audio.extractionTitle')}
+      </div>
+      <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
+        {t('settings.audio.extractionHint')}
+      </p>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.alwaysListening')}
+        </span>
+        <input
+          type="checkbox"
+          className="settings-check"
+          role="switch"
+          aria-checked={alwaysListening}
+          checked={alwaysListening}
+          onChange={(e) => {
+            setAlwaysListening(e.target.checked);
+            void commit('always_listening', e.target.checked);
+          }}
+        />
+      </label>
+      <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
+        {t('settings.audio.alwaysListeningHint')}
+      </p>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.windowLength')}{' '}
+          <code>{t('settings.audio.minutes', { n: Math.round(windowLengthMs / 60000) })}</code>
+        </span>
+        <input
+          type="range"
+          min={60000}
+          max={15 * 60 * 1000}
+          step={60000}
+          value={windowLengthMs}
+          onChange={(e) => setWindowLengthMs(parseInt(e.target.value, 10))}
+          onMouseUp={() => {
+            // Step must not exceed length — clamp both before committing so
+            // the backend doesn't receive an inconsistent pair.
+            const len = windowLengthMs;
+            const step = Math.min(windowStepMs, len);
+            setWindowStepMs(step);
+            void commit('window_length_ms', len);
+            void commit('window_step_ms', step);
+          }}
+        />
+      </label>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.windowStep')}{' '}
+          <code>{t('settings.audio.minutes', { n: Math.round(windowStepMs / 60000) })}</code>
+        </span>
+        <input
+          type="range"
+          min={30000}
+          max={windowLengthMs}
+          step={30000}
+          value={Math.min(windowStepMs, windowLengthMs)}
+          onChange={(e) => setWindowStepMs(parseInt(e.target.value, 10))}
+          onMouseUp={() =>
+            void commit('window_step_ms', Math.min(windowStepMs, windowLengthMs))
+          }
+        />
+      </label>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.extractionTick')}{' '}
+          <code>{t('settings.audio.seconds', { n: extractionTickSecs })}</code>
+        </span>
+        <input
+          type="range"
+          min={10}
+          max={300}
+          step={5}
+          value={extractionTickSecs}
+          onChange={(e) => setExtractionTickSecs(parseInt(e.target.value, 10))}
+          onMouseUp={() => void commit('extraction_tick_secs', extractionTickSecs)}
         />
       </label>
 

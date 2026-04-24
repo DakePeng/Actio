@@ -1,23 +1,25 @@
 import { useVoiceStore } from '../../store/use-voice-store';
 import type { ClipInterval } from '../../store/use-voice-store';
+import { useT, type TKey } from '../../i18n';
 
-const INTERVAL_OPTIONS: { value: ClipInterval; label: string }[] = [
-  { value: 1, label: '1 minute' },
-  { value: 2, label: '2 minutes' },
-  { value: 5, label: '5 minutes' },
-  { value: 10, label: '10 minutes' },
-  { value: 30, label: '30 minutes' },
+const INTERVAL_OPTIONS: { value: ClipInterval; labelKey: TKey }[] = [
+  { value: 1, labelKey: 'settings.recording.interval.min1' },
+  { value: 2, labelKey: 'settings.recording.interval.min2' },
+  { value: 5, labelKey: 'settings.recording.interval.min5' },
+  { value: 10, labelKey: 'settings.recording.interval.min10' },
+  { value: 30, labelKey: 'settings.recording.interval.min30' },
 ];
 
 export function RecordingSection() {
   const clipInterval = useVoiceStore((s) => s.clipInterval);
   const setClipInterval = useVoiceStore((s) => s.setClipInterval);
+  const t = useT();
 
   return (
     <div className="settings-section">
-      <h3 className="settings-section__title">Recording</h3>
+      <h3 className="settings-section__title">{t('settings.recording.title')}</h3>
       <label className="settings-row">
-        <span className="settings-row__label">Auto-clip interval</span>
+        <span className="settings-row__label">{t('settings.recording.autoClip')}</span>
         <select
           className="settings-row__select"
           value={clipInterval}
@@ -25,7 +27,7 @@ export function RecordingSection() {
         >
           {INTERVAL_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {t(opt.labelKey)}
             </option>
           ))}
         </select>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { Board } from './Board';
+import { NeedsReviewView } from './NeedsReviewView';
 import { ArchiveView } from './ArchiveView';
 import { SettingsView } from './settings/SettingsView';
 import { RecordingTab } from './RecordingTab';
@@ -9,33 +10,35 @@ import { PeopleTab } from './PeopleTab';
 import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { useLanguage, useT, type TKey } from '../i18n';
 
-// Dynamic greetings — picked randomly each time the board opens.
-// Each entry has a `text` and an optional `nameStyle`:
-//   'suffix'  → "Ready to act, Dake?"
-//   'none'    → shown as-is regardless of name
-const GREETINGS: { text: string; nameStyle: 'suffix' | 'none' }[] = [
-  { text: 'Ready to act?', nameStyle: 'suffix' },
-  { text: "Let's get things done", nameStyle: 'suffix' },
-  { text: "What's on the agenda?", nameStyle: 'suffix' },
-  { text: 'Time to make moves', nameStyle: 'suffix' },
-  { text: 'Your board awaits', nameStyle: 'suffix' },
-  { text: "What's next?", nameStyle: 'suffix' },
-  { text: 'Pick up where you left off', nameStyle: 'suffix' },
-  { text: "Let's lock in", nameStyle: 'suffix' },
+// Dynamic greetings — one translation key per slot. The picker chooses a
+// key at random each board open, then we translate it at render time so
+// swapping language re-renders without re-picking.
+const GREETING_KEYS: TKey[] = [
+  'board.greeting.readyToAct',
+  'board.greeting.getThingsDone',
+  'board.greeting.agenda',
+  'board.greeting.makeMoves',
+  'board.greeting.boardAwaits',
+  'board.greeting.whatsNext',
+  'board.greeting.pickUp',
+  'board.greeting.lockIn',
 ];
 
-function pickGreeting(name: string): string {
-  const entry = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
-  if (entry.nameStyle === 'suffix' && name) {
-    // Insert name before trailing punctuation: "Ready to act, Dake?"
-    const punct = entry.text.match(/[?!.]$/);
-    if (punct) {
-      return `${entry.text.slice(0, -1)}, ${name}${punct[0]}`;
-    }
-    return `${entry.text}, ${name}`;
+function formatGreeting(text: string, name: string, lang: 'en' | 'zh-CN'): string {
+  if (!name) return text;
+  if (lang === 'zh-CN') {
+    // In Chinese we prepend the name with a comma, preserving trailing
+    // punctuation: "准备好开始了吗？" → "Dake，准备好开始了吗？"
+    return `${name}，${text}`;
   }
-  return entry.text;
+  // English: insert name before trailing punctuation.
+  const punct = text.match(/[?!.]$/);
+  if (punct) {
+    return `${text.slice(0, -1)}, ${name}${punct[0]}`;
+  }
+  return `${text}, ${name}`;
 }
 
 type ExitTarget = { x: number; y: number; scale: number } | null;
@@ -48,9 +51,18 @@ export function BoardWindow() {
   const setNewReminderBar = useStore((s) => s.setNewReminderBar);
   const clearFeedback = useStore((s) => s.clearFeedback);
 
-  // Re-pick a greeting each time the board opens
+  const { lang } = useLanguage();
+  const t = useT();
+
+  // Re-pick a greeting *key* each time the board opens. We keep the key —
+  // not the rendered text — so flipping language mid-session still
+  // translates without forcing a new random pick.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const greeting = useMemo(() => pickGreeting(profileName), [profileName, showBoardWindow]);
+  const greetingKey = useMemo<TKey>(
+    () => GREETING_KEYS[Math.floor(Math.random() * GREETING_KEYS.length)],
+    [showBoardWindow],
+  );
+  const greeting = formatGreeting(t(greetingKey), profileName, lang);
 
   useKeyboardShortcuts();
 
@@ -188,7 +200,7 @@ export function BoardWindow() {
                     className="secondary-button"
                     onClick={() => void triggerClose()}
                   >
-                    Return to tray
+                    {t('board.action.returnToTray')}
                   </button>
                   <button
                     type="button"
@@ -196,13 +208,14 @@ export function BoardWindow() {
                     disabled={activeTab !== 'board'}
                     onClick={() => setNewReminderBar(true)}
                   >
-                    Capture note
+                    {t('board.action.captureNote')}
                   </button>
                 </div>
               </div>
 
               <div className="desktop-window__body">
                 {activeTab === 'board' && <Board />}
+                {activeTab === 'needs-review' && <NeedsReviewView />}
                 {activeTab === 'archive' && <ArchiveView />}
                 {activeTab === 'settings' && <SettingsView />}
                 {activeTab === 'recording' && <RecordingTab />}

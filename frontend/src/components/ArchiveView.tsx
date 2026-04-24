@@ -3,31 +3,32 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { useVoiceStore } from '../store/use-voice-store';
 import { EmptyState } from './EmptyState';
+import { useLanguage, useT, type TKey } from '../i18n';
 
 type ArchiveSection = 'tasks' | 'clips';
 type ClipFilter = 'all' | 'starred';
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', {
+function formatDate(iso: string, locale: string) {
+  return new Date(iso).toLocaleDateString(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
   });
 }
 
-function formatTimestamp(iso: string): string {
+function formatTimestamp(iso: string, locale: string, todayFormat: (time: string) => string): string {
   const date = new Date(iso);
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (isToday) return `Today ${time}`;
-  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+  const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return todayFormat(time);
+  return `${date.toLocaleDateString(locale, { month: 'short', day: 'numeric' })} ${time}`;
 }
 
-const PRIORITY_COLORS = {
-  high: { bg: '#fef2f2', text: '#b91c1c', label: 'High' },
-  medium: { bg: '#fff7df', text: '#a16207', label: 'Medium' },
-  low: { bg: '#edf9f1', text: '#166534', label: 'Low' },
+const PRIORITY_COLORS: Record<'high' | 'medium' | 'low', { bg: string; text: string; labelKey: TKey }> = {
+  high: { bg: '#fef2f2', text: '#b91c1c', labelKey: 'board.priority.high' },
+  medium: { bg: '#fff7df', text: '#a16207', labelKey: 'board.priority.medium' },
+  low: { bg: '#edf9f1', text: '#166534', labelKey: 'board.priority.low' },
 };
 
 function StarIcon({ filled }: { filled: boolean }) {
@@ -51,9 +52,9 @@ function TrashIcon() {
   );
 }
 
-const SECTION_TABS: { id: ArchiveSection; label: string }[] = [
-  { id: 'tasks', label: 'Tasks' },
-  { id: 'clips', label: 'Clips' },
+const SECTION_TABS: { id: ArchiveSection; labelKey: TKey }[] = [
+  { id: 'tasks', labelKey: 'archive.section.tasks' },
+  { id: 'clips', labelKey: 'archive.section.clips' },
 ];
 
 const listItemVariants = {
@@ -75,6 +76,9 @@ export function ArchiveView() {
   const starSegment = useVoiceStore((s) => s.starSegment);
   const unstarSegment = useVoiceStore((s) => s.unstarSegment);
   const deleteSegment = useVoiceStore((s) => s.deleteSegment);
+  const t = useT();
+  const { lang } = useLanguage();
+  const dateLocale = lang === 'zh-CN' ? 'zh-CN' : 'en-US';
 
   const [section, setSection] = useState<ArchiveSection>('tasks');
   const [clipFilter, setClipFilter] = useState<ClipFilter>('all');
@@ -160,8 +164,12 @@ export function ArchiveView() {
   return (
     <div className="archive-view">
       {/* Section tabs with animated indicator */}
-      <div className="archive-view__section-tabs" role="tablist" aria-label="Archive sections">
-        {SECTION_TABS.map(({ id, label }) => {
+      <div
+        className="archive-view__section-tabs"
+        role="tablist"
+        aria-label={t('archive.aria.sections')}
+      >
+        {SECTION_TABS.map(({ id, labelKey }) => {
           const isActive = section === id;
           return (
             <button
@@ -172,7 +180,7 @@ export function ArchiveView() {
               className={`archive-section-btn${isActive ? ' is-active' : ''}`}
               onClick={() => handleSectionChange(id)}
             >
-              {label}
+              {t(labelKey)}
               {isActive && (
                 <motion.div
                   layoutId="archiveSectionIndicator"
@@ -198,9 +206,9 @@ export function ArchiveView() {
           >
             {archived.length === 0 ? (
               <EmptyState
-                title="Archive is empty"
-                description="Deleted or archived notes will appear here."
-                eyebrow="Clean Slate"
+                title={t('archive.empty.title')}
+                description={t('archive.empty.desc')}
+                eyebrow={t('archive.empty.eyebrow')}
                 icon={
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
                     <path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
@@ -221,16 +229,18 @@ export function ArchiveView() {
                         exit={{ opacity: 0, y: 24 }}
                         transition={{ duration: 0.18, ease: 'easeOut' }}
                       >
-                        <span className="archive-bulk-bar__count">{selectedTaskIds.size} selected</span>
+                        <span className="archive-bulk-bar__count">
+                          {t('archive.selectedCount', { count: selectedTaskIds.size })}
+                        </span>
                         <button type="button" className="archive-bulk-bar__select-all" onClick={toggleAllTasks}>
-                          {allTasksSelected ? 'Deselect all' : 'Select all'}
+                          {allTasksSelected ? t('archive.deselectAll') : t('archive.selectAll')}
                         </button>
                         <div className="archive-bulk-bar__actions">
                           <button type="button" className="ghost-button" onClick={bulkRestoreTasks}>
-                            Restore
+                            {t('archive.action.restore')}
                           </button>
                           <button type="button" className="ghost-button archive-row__delete" onClick={bulkDeleteTasks}>
-                            Delete
+                            {t('archive.action.delete')}
                           </button>
                         </div>
                       </motion.div>
@@ -259,10 +269,12 @@ export function ArchiveView() {
                             className="card-badge"
                             style={{ background: colors.bg, color: colors.text, flexShrink: 0 }}
                           >
-                            {colors.label}
+                            {t(colors.labelKey)}
                           </span>
                           <span className="archive-row__title">{reminder.title}</span>
-                          <span className="archive-row__date">{formatDate(reminder.archivedAt!)}</span>
+                          <span className="archive-row__date">
+                            {formatDate(reminder.archivedAt!, dateLocale)}
+                          </span>
                           <div className="archive-row__actions">
                             <button
                               type="button"
@@ -272,7 +284,7 @@ export function ArchiveView() {
                                 void restoreReminder(reminder.id);
                               }}
                             >
-                              Restore
+                              {t('archive.action.restore')}
                             </button>
                             <button
                               type="button"
@@ -282,7 +294,7 @@ export function ArchiveView() {
                                 void deleteReminder(reminder.id);
                               }}
                             >
-                              Delete
+                              {t('archive.action.delete')}
                             </button>
                           </div>
                         </motion.div>
@@ -304,7 +316,11 @@ export function ArchiveView() {
             transition={{ duration: 0.18 }}
             style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
           >
-            <div className="clips-tab__filters" role="group" aria-label="Filter clips">
+            <div
+              className="clips-tab__filters"
+              role="group"
+              aria-label={t('archive.clips.aria.filter')}
+            >
               {(['all', 'starred'] as const).map((f) => (
                 <button
                   key={f}
@@ -312,7 +328,9 @@ export function ArchiveView() {
                   className={`clips-filter-btn${clipFilter === f ? ' is-active' : ''}`}
                   onClick={() => handleClipFilterChange(f)}
                 >
-                  {f === 'all' ? 'All' : 'Starred'}
+                  {f === 'all'
+                    ? t('archive.clips.filter.all')
+                    : t('archive.clips.filter.starred')}
                 </button>
               ))}
             </div>
@@ -325,8 +343,8 @@ export function ArchiveView() {
                 transition={{ delay: 0.1 }}
               >
                 {clipFilter === 'starred'
-                  ? 'No starred clips yet. Star a clip to save it permanently.'
-                  : 'No clips yet. Start recording to generate clips.'}
+                  ? t('archive.clips.empty.starred')
+                  : t('archive.clips.empty.all')}
               </motion.p>
             ) : (
               <>
@@ -342,9 +360,11 @@ export function ArchiveView() {
                         exit={{ opacity: 0, y: 24 }}
                         transition={{ duration: 0.18, ease: 'easeOut' }}
                       >
-                        <span className="archive-bulk-bar__count">{selectedClipIds.size} selected</span>
+                        <span className="archive-bulk-bar__count">
+                          {t('archive.selectedCount', { count: selectedClipIds.size })}
+                        </span>
                         <button type="button" className="archive-bulk-bar__select-all" onClick={toggleAllClips}>
-                          {allClipsSelected ? 'Deselect all' : 'Select all'}
+                          {allClipsSelected ? t('archive.deselectAll') : t('archive.selectAll')}
                         </button>
                         <div className="archive-bulk-bar__actions">
                           <button
@@ -352,10 +372,12 @@ export function ArchiveView() {
                             className="ghost-button"
                             onClick={selectedClipsAllStarred ? bulkUnstarClips : bulkStarClips}
                           >
-                            {selectedClipsAllStarred ? 'Unstar' : 'Star'}
+                            {selectedClipsAllStarred
+                              ? t('archive.action.unstar')
+                              : t('archive.action.star')}
                           </button>
                           <button type="button" className="ghost-button archive-row__delete" onClick={bulkDeleteClips}>
-                            Delete
+                            {t('archive.action.delete')}
                           </button>
                         </div>
                       </motion.div>
@@ -382,7 +404,11 @@ export function ArchiveView() {
                           onClick={() => toggleClip(segment.id)}
                         >
                           <div className="clip-card__header">
-                            <span className="clip-card__timestamp">{formatTimestamp(segment.createdAt)}</span>
+                            <span className="clip-card__timestamp">
+                              {formatTimestamp(segment.createdAt, dateLocale, (time) =>
+                                t('archive.clip.today', { time }),
+                              )}
+                            </span>
                             <div className="clip-card__actions">
                               <motion.button
                                 type="button"
@@ -391,7 +417,11 @@ export function ArchiveView() {
                                   e.stopPropagation();
                                   segment.starred ? unstarSegment(segment.id) : starSegment(segment.id);
                                 }}
-                                aria-label={segment.starred ? 'Unstar clip' : 'Star clip'}
+                                aria-label={
+                                  segment.starred
+                                    ? t('archive.clip.aria.unstar')
+                                    : t('archive.clip.aria.star')
+                                }
                                 whileHover={{ scale: 1.15 }}
                                 whileTap={{ scale: 0.9 }}
                               >
@@ -404,7 +434,7 @@ export function ArchiveView() {
                                   e.stopPropagation();
                                   deleteSegment(segment.id);
                                 }}
-                                aria-label="Delete clip"
+                                aria-label={t('archive.clip.aria.delete')}
                                 whileHover={{ scale: 1.15 }}
                                 whileTap={{ scale: 0.9 }}
                               >
@@ -424,7 +454,9 @@ export function ArchiveView() {
                                 setExpandedClipId(isExpanded ? null : segment.id);
                               }}
                             >
-                              {isExpanded ? 'Show less' : 'Show more'}
+                              {isExpanded
+                                ? t('archive.clip.showLess')
+                                : t('archive.clip.showMore')}
                             </button>
                           )}
                         </motion.div>

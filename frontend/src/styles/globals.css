@@ -2609,6 +2609,145 @@ body.body--native-board .desktop-window {
   letter-spacing: 0.01em;
 }
 
+/* Count pill shown next to the "Needs review" tab label when there are
+   pending medium-confidence auto-extracted items waiting for triage. */
+.tab-bar__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 6px;
+  border-radius: 9999px;
+  background: #d97706;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Needs-review view */
+.needs-review {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 24px 32px;
+}
+
+.needs-review__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--color-surface-card, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-left: 3px solid #d97706;
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-card-sm, 0 1px 2px rgba(0, 0, 0, 0.04));
+}
+
+.needs-review__title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary, #111827);
+}
+
+.needs-review__desc {
+  color: var(--color-text-secondary, #374151);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.needs-review__meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--color-text-tertiary, #6b7280);
+}
+
+.needs-review__excerpt {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--color-surface-muted, #f9fafb);
+  border-radius: 8px;
+  border-left: 2px solid var(--color-border, #e5e7eb);
+  font-size: 0.86rem;
+  font-style: italic;
+  color: var(--color-text-secondary, #374151);
+}
+
+.needs-review__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.needs-review__empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--color-text-tertiary, #6b7280);
+}
+
+.needs-review__empty-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+  margin-bottom: 6px;
+}
+
+/* Trace inspector */
+.trace-toggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: var(--color-accent-strong, #0f766e);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.trace-toggle:hover { text-decoration: underline; }
+
+.trace-panel {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--color-surface-muted, #f9fafb);
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.trace-line { display: flex; gap: 10px; padding: 3px 0; }
+
+.trace-line__time {
+  flex-shrink: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--color-text-tertiary, #6b7280);
+  font-size: 0.76rem;
+  padding-top: 2px;
+  min-width: 58px;
+}
+
+.trace-line__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trace-line__speaker {
+  font-weight: 600;
+  color: var(--color-text-secondary, #374151);
+  font-size: 0.78rem;
+}
+
+.trace-line__text { color: var(--color-text-primary, #111827); }
+
 .tab-bar__indicator {
   position: absolute;
   bottom: -4px;
@@ -3817,17 +3956,30 @@ body.body--native-board .desktop-window {
 .model-list__item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
-  transition: background 0.15s;
+  background: var(--color-surface-card, #fff);
+  transition: background 0.18s, border-color 0.18s, box-shadow 0.18s;
+}
+
+/* Selected card gets a subtle accent lift — matches the tone of the active
+   radio indicator so the card and the radio read as one state. */
+.model-list__item:has(input[type="radio"]:checked) {
+  border-color: color-mix(in srgb, var(--color-accent, #3b82f6) 45%, var(--color-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent, #3b82f6) 25%, transparent),
+              0 2px 6px -2px color-mix(in srgb, var(--color-accent, #3b82f6) 18%, transparent);
 }
 
 .model-list__row {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  /* center the radio against the first line of info — flex-start buried the
+     dot at the top of a 4-line stack, center drifted it to the middle of
+     the stack. Aligning to top-of-content with a small pad matches the
+     visual target while keeping multi-line info readable. */
+  align-items: center;
+  gap: 14px;
   cursor: pointer;
 }
 
@@ -3936,9 +4088,87 @@ body.body--native-board .desktop-window {
   color: var(--color-text-secondary);
 }
 
+/* Custom radio — browser defaults look toy-like and don't breathe well in
+   dense settings cards. appearance:none + a ring + inner dot via box-shadow
+   gives us a smooth checked transition that keeps working on dark mode. */
 .model-list__item input[type="radio"] {
-  accent-color: var(--color-accent, #3b82f6);
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--color-text-tertiary, #94a3b8) 65%, transparent);
+  background: var(--color-surface, #fff);
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.18s ease, box-shadow 0.2s ease, background 0.18s ease;
 }
+
+.model-list__item input[type="radio"]:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent, #3b82f6) 55%, var(--color-border));
+}
+
+.model-list__item input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #3b82f6) 30%, transparent);
+}
+
+.model-list__item input[type="radio"]:checked {
+  border-color: var(--color-accent, #3b82f6);
+  background: var(--color-accent, #3b82f6);
+  /* Inner dot via inset shadow so we don't need a pseudo-element on the
+     input, which some browsers refuse to render. */
+  box-shadow: inset 0 0 0 3px var(--color-surface, #fff);
+}
+
+.model-list__item input[type="radio"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Premium checkbox used by Settings rows (e.g. always_listening toggle).
+   Opt-in via .settings-check so we don't restyle every checkbox on the app. */
+.settings-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-tertiary, #94a3b8) 32%, transparent);
+  position: relative;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 0.18s ease, box-shadow 0.2s ease;
+  border: none;
+}
+
+.settings-check::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: left 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.settings-check:checked {
+  background: var(--color-accent, #3b82f6);
+}
+
+.settings-check:checked::after { left: 18px; }
+
+.settings-check:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #3b82f6) 25%, transparent);
+}
+
+.settings-check:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .model-list__info {
   display: flex;
@@ -4360,6 +4590,31 @@ body.body--native-board .desktop-window {
   padding: 1rem;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.03);
+}
+.voiceprint-recorder__passage-switcher {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0 0 0.1rem;
+}
+.voiceprint-recorder__passage-chip {
+  appearance: none;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: transparent;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.7));
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.voiceprint-recorder__passage-chip:hover {
+  border-color: rgba(0, 0, 0, 0.24);
+}
+.voiceprint-recorder__passage-chip.is-active {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.45);
 }
 .voiceprint-recorder__passage-block {
   padding: 0.65rem 0.85rem;

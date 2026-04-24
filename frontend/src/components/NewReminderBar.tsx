@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { ChatComposer } from './ChatComposer';
+import { useT } from '../i18n';
 
 type CaptureMode = 'chat' | 'form';
 const MODE_STORAGE_KEY = 'actio-capture-mode';
@@ -22,6 +23,7 @@ export function NewReminderBar() {
   const addReminder = useStore((s) => s.addReminder);
 
   const [mode, setMode] = useState<CaptureMode>(loadInitialMode);
+  const t = useT();
 
   // Persist mode preference across sessions
   useEffect(() => {
@@ -106,16 +108,16 @@ export function NewReminderBar() {
             <div className="quick-add__panel">
               <div className="sheet-header quick-add__header">
                 <div>
-                  <div className="sheet-eyebrow">Quick capture</div>
+                  <div className="sheet-eyebrow">{t('newReminder.quickCapture')}</div>
                   <div className="sheet-title">
                     {mode === 'chat'
-                      ? 'Type, dictate, or attach an image'
-                      : 'Add a note without leaving the board'}
+                      ? t('newReminder.title.chat')
+                      : t('newReminder.title.form')}
                   </div>
                   <div className="sheet-copy">
                     {mode === 'chat'
-                      ? 'Free-form note. Triage and labeling can happen after capture.'
-                      : 'Keep the entry short. Triage and labeling can happen after capture.'}
+                      ? t('newReminder.copy.chat')
+                      : t('newReminder.copy.form')}
                   </div>
                 </div>
                 <div className="quick-add__header-actions">
@@ -123,17 +125,23 @@ export function NewReminderBar() {
                     type="button"
                     className="quick-add__mode-toggle"
                     onClick={() => setMode(mode === 'chat' ? 'form' : 'chat')}
-                    title={mode === 'chat' ? 'Switch to form view' : 'Switch to chat view'}
+                    title={
+                      mode === 'chat'
+                        ? t('newReminder.tooltip.switchToForm')
+                        : t('newReminder.tooltip.switchToChat')
+                    }
                   >
-                    {mode === 'chat' ? 'Switch to form' : 'Switch to chat'}
+                    {mode === 'chat'
+                      ? t('newReminder.switchToForm')
+                      : t('newReminder.switchToChat')}
                   </button>
-                  <div className="active-pill">Cmd/Ctrl + Enter to save</div>
+                  <div className="active-pill">{t('newReminder.saveHint')}</div>
                   <button
                     type="button"
                     className="quick-add__close"
                     onClick={handleClose}
-                    aria-label="Close"
-                    title="Close (Esc)"
+                    aria-label={t('newReminder.aria.close')}
+                    title={t('newReminder.tooltip.close')}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M18 6 6 18" />
@@ -148,11 +156,11 @@ export function NewReminderBar() {
               ) : (
                 <div className="quick-add__grid">
                   <label>
-                    <span className="field-label">Title</span>
+                    <span className="field-label">{t('newReminder.field.title')}</span>
                     <input
                       ref={inputRef}
                       type="text"
-                      placeholder="What needs attention?"
+                      placeholder={t('newReminder.placeholder.title')}
                       value={title}
                       onChange={(event) => setTitle(event.target.value)}
                       onKeyDown={handleKeyDown}
@@ -160,10 +168,10 @@ export function NewReminderBar() {
                     />
                   </label>
                   <label>
-                    <span className="field-label">Details</span>
+                    <span className="field-label">{t('newReminder.field.details')}</span>
                     <textarea
                       rows={2}
-                      placeholder="Optional context, owner, or timing"
+                      placeholder={t('newReminder.placeholder.details')}
                       value={description}
                       onChange={(event) => setDescription(event.target.value)}
                       onKeyDown={handleKeyDown}
@@ -171,10 +179,10 @@ export function NewReminderBar() {
                     />
                   </label>
                   <label>
-                    <span className="field-label">Due time</span>
+                    <span className="field-label">{t('newReminder.field.dueTime')}</span>
                     <input
                       type="text"
-                      placeholder="e.g. 2026-04-09T18:30:00Z"
+                      placeholder={t('newReminder.placeholder.dueTime')}
                       value={dueTime}
                       onChange={(event) => setDueTime(event.target.value)}
                       onKeyDown={handleKeyDown}
@@ -183,7 +191,7 @@ export function NewReminderBar() {
                   </label>
                   <div className="quick-add__actions">
                     <button type="button" onClick={handleClose} className="secondary-button">
-                      Cancel
+                      {t('newReminder.cancel')}
                     </button>
                     <button
                       type="button"
@@ -191,7 +199,7 @@ export function NewReminderBar() {
                       disabled={!title.trim()}
                       className="primary-button"
                     >
-                      Add reminder
+                      {t('newReminder.addReminder')}
                     </button>
                   </div>
                 </div>

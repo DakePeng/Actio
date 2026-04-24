@@ -4,6 +4,7 @@ import { useVoiceStore } from '../store/use-voice-store';
 import { PendingVoicesPanel } from './PendingVoicesPanel';
 import { VoiceprintRecorder } from './VoiceprintRecorder';
 import type { Speaker } from '../types/speaker';
+import { useT } from '../i18n';
 
 const PRESET_COLORS = [
   '#E57373',
@@ -85,6 +86,7 @@ export function PeopleTab() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const t = useT();
 
   useEffect(() => {
     if (speakersStatus === 'idle') void fetchSpeakers();
@@ -155,7 +157,7 @@ export function PeopleTab() {
             whileTap={{ scale: 0.97 }}
           >
             <PlusIcon />
-            Add person
+            {t('people.addPerson')}
           </motion.button>
         )}
 
@@ -171,7 +173,7 @@ export function PeopleTab() {
             <input
               type="text"
               className="person-form__name-input"
-              placeholder="Name"
+              placeholder={t('people.namePlaceholder')}
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoFocus
@@ -180,7 +182,11 @@ export function PeopleTab() {
                 if (e.key === 'Escape') setMode({ kind: 'idle' });
               }}
             />
-            <div className="person-form__swatches" role="group" aria-label="Color">
+            <div
+              className="person-form__swatches"
+              role="group"
+              aria-label={t('people.aria.colorGroup')}
+            >
               {PRESET_COLORS.map((c) => (
                 <motion.button
                   key={c}
@@ -188,7 +194,7 @@ export function PeopleTab() {
                   className={`person-form__swatch${color === c ? ' is-selected' : ''}`}
                   style={{ backgroundColor: c }}
                   onClick={() => setColor(c)}
-                  aria-label={`Select color ${c}`}
+                  aria-label={t('people.aria.swatch', { color: c })}
                   aria-pressed={color === c}
                   whileHover={{ scale: 1.18 }}
                   whileTap={{ scale: 0.92 }}
@@ -204,7 +210,7 @@ export function PeopleTab() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
               >
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? t('people.saving') : t('people.save')}
               </motion.button>
               <motion.button
                 type="button"
@@ -213,14 +219,11 @@ export function PeopleTab() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
               >
-                Cancel
+                {t('people.cancel')}
               </motion.button>
             </div>
             {mode.kind === 'adding' && (
-              <p className="person-form__hint">
-                After saving, you'll be asked to read three short passages so
-                the app learns their voice.
-              </p>
+              <p className="person-form__hint">{t('people.formHint')}</p>
             )}
             {saveError && <p className="person-form__error">{saveError}</p>}
           </motion.div>
@@ -246,10 +249,10 @@ export function PeopleTab() {
 
       {speakersStatus === 'error' && (
         <div className="people-tab__error" role="alert">
-          Backend required to manage speakers.{' '}
+          {t('people.backendRequired')}{' '}
           {speakersError && <span className="people-tab__error-detail">{speakersError}</span>}
           <button type="button" className="secondary-button" onClick={() => void fetchSpeakers()}>
-            Retry
+            {t('people.retry')}
           </button>
         </div>
       )}
@@ -264,7 +267,7 @@ export function PeopleTab() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              Loading…
+              {t('people.loading')}
             </motion.p>
           )}
           {speakersStatus === 'ready' && speakers.length === 0 && !isFormOpen && (
@@ -275,7 +278,7 @@ export function PeopleTab() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              No people added yet.
+              {t('people.empty')}
             </motion.p>
           )}
           {speakers.map((speaker, i) => (
@@ -300,7 +303,7 @@ export function PeopleTab() {
               {pendingDeleteId === speaker.id ? (
                 <>
                   <span className="person-row__confirm-text">
-                    Delete {speaker.display_name}? Voiceprint is removed too.
+                    {t('people.confirmDelete', { name: speaker.display_name })}
                   </span>
                   <div className="person-row__actions">
                     <motion.button
@@ -310,7 +313,7 @@ export function PeopleTab() {
                       whileHover={{ scale: 1.04 }}
                       whileTap={{ scale: 0.96 }}
                     >
-                      Delete
+                      {t('people.delete')}
                     </motion.button>
                     <motion.button
                       type="button"
@@ -319,7 +322,7 @@ export function PeopleTab() {
                       whileHover={{ scale: 1.04 }}
                       whileTap={{ scale: 0.96 }}
                     >
-                      Cancel
+                      {t('people.cancel')}
                     </motion.button>
                   </div>
                 </>
@@ -331,8 +334,8 @@ export function PeopleTab() {
                       type="button"
                       className="person-edit-btn"
                       onClick={() => setMode({ kind: 'enrolling', speaker })}
-                      aria-label={`Record voiceprint for ${speaker.display_name}`}
-                      title="Record voiceprint"
+                      aria-label={t('people.aria.record', { name: speaker.display_name })}
+                      title={t('people.tooltip.record')}
                       whileHover={{ scale: 1.15 }}
                       whileTap={{ scale: 0.9 }}
                     >
@@ -342,7 +345,7 @@ export function PeopleTab() {
                       type="button"
                       className="person-edit-btn"
                       onClick={() => startEdit(speaker)}
-                      aria-label={`Edit ${speaker.display_name}`}
+                      aria-label={t('people.aria.edit', { name: speaker.display_name })}
                       whileHover={{ scale: 1.15 }}
                       whileTap={{ scale: 0.9 }}
                     >
@@ -352,7 +355,7 @@ export function PeopleTab() {
                       type="button"
                       className="person-delete-btn"
                       onClick={() => setPendingDeleteId(speaker.id)}
-                      aria-label={`Delete ${speaker.display_name}`}
+                      aria-label={t('people.aria.delete', { name: speaker.display_name })}
                       whileHover={{ scale: 1.15 }}
                       whileTap={{ scale: 0.9 }}
                     >

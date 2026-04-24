@@ -9,15 +9,16 @@ import { RecordingSection } from './RecordingSection';
 import { LlmSettings } from './LlmSettings';
 import { ModelSetup } from './ModelSetup';
 import { KeyboardSettings } from './KeyboardSettings';
+import { useT } from '../../i18n';
 
 type SettingsTab = 'general' | 'board' | 'voice' | 'ai' | 'shortcuts';
 
-const SECTION_TABS: { id: SettingsTab; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'board', label: 'Board' },
-  { id: 'voice', label: 'Voice' },
-  { id: 'ai', label: 'AI' },
-  { id: 'shortcuts', label: 'Shortcuts' },
+const SECTION_TABS: { id: SettingsTab; labelKey: `settings.tab.${SettingsTab}` }[] = [
+  { id: 'general', labelKey: 'settings.tab.general' },
+  { id: 'board', labelKey: 'settings.tab.board' },
+  { id: 'voice', labelKey: 'settings.tab.voice' },
+  { id: 'ai', labelKey: 'settings.tab.ai' },
+  { id: 'shortcuts', labelKey: 'settings.tab.shortcuts' },
 ];
 
 const panelMotion = {
@@ -29,6 +30,7 @@ const panelMotion = {
 
 export function SettingsView() {
   const [tab, setTab] = useState<SettingsTab>('general');
+  const t = useT();
 
   const panelContent: Record<SettingsTab, React.ReactNode> = {
     general: <><ProfileSection /><PreferencesSection /><TraySection /></>,
@@ -41,7 +43,7 @@ export function SettingsView() {
   return (
     <div className="settings-view">
       <div className="settings-view__section-tabs" role="tablist" aria-label="Settings sections">
-        {SECTION_TABS.map(({ id, label }) => {
+        {SECTION_TABS.map(({ id, labelKey }) => {
           const isActive = tab === id;
           return (
             <button
@@ -52,7 +54,7 @@ export function SettingsView() {
               className={`settings-section-btn${isActive ? ' is-active' : ''}`}
               onClick={() => setTab(id)}
             >
-              {label}
+              {t(labelKey)}
               {isActive && (
                 <motion.div
                   layoutId="settingsSectionIndicator"

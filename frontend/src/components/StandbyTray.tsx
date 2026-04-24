@@ -7,6 +7,7 @@ import { sortByPriority } from '../utils/priority';
 import { formatTimeShort } from '../utils/time';
 import { SwipeActionRow } from './swipe/SwipeActionRow';
 import { SwipeActionCoordinatorProvider } from './swipe/SwipeActionCoordinator';
+import { useT } from '../i18n';
 
 // Context to share tray state with FAB
 export const StandbyTrayContext = createContext({ expanded: false });
@@ -28,6 +29,7 @@ export function StandbyTray() {
   const newCount = reminders.filter((r) => r.isNew && r.archivedAt === null).length;
   const [expanded, setExpanded] = useState(false);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const t = useT();
 
   const topReminders = useMemo(() => {
     return [...reminders].filter((r) => r.archivedAt === null).sort(sortByPriority).slice(0, 6);
@@ -128,7 +130,7 @@ export function StandbyTray() {
           className="tray-drag-handle"
           onMouseDown={handleDragStart}
           role="separator"
-          aria-label="Drag to reposition"
+          aria-label={t('tray.aria.drag')}
         >
           <div className="tray-drag-pill" />
         </div>
@@ -139,7 +141,14 @@ export function StandbyTray() {
               <span className="tray-brand-dot" aria-hidden="true" />
               <div>
                 {isDictating || isDictationTranscribing ? (
-                  <div className="tray-soundwave" aria-label={isDictationTranscribing ? 'Transcribing' : 'Listening'}>
+                  <div
+                    className="tray-soundwave"
+                    aria-label={
+                      isDictationTranscribing
+                        ? t('tray.aria.transcribing')
+                        : t('tray.aria.listening')
+                    }
+                  >
                     {[0, 1, 2, 3, 4].map((i) => (
                       <span key={i} className="tray-soundwave-bar" style={{ animationDelay: `${i * 0.1}s` }} />
                     ))}
@@ -152,10 +161,14 @@ export function StandbyTray() {
                   title={isDictating && dictationTranscript ? dictationTranscript : undefined}
                 >
                   {isDictationTranscribing
-                    ? 'Transcribing...'
+                    ? t('tray.status.transcribing')
                     : isDictating
-                      ? (dictationTranscript || 'Listening...')
-                      : newCount > 0 ? `${newCount} fresh captures waiting` : 'Quiet queue, board ready'}
+                      ? (dictationTranscript || t('tray.status.listening'))
+                      : newCount === 0
+                        ? t('tray.status.quiet')
+                        : newCount === 1
+                          ? t('tray.status.freshCapturesOne')
+                          : t('tray.status.freshCapturesMany', { count: newCount })}
                 </div>
               </div>
             </div>
@@ -163,7 +176,7 @@ export function StandbyTray() {
           <button
             type="button"
             className="tray-chevron-button"
-            aria-label="Open board"
+            aria-label={t('tray.aria.openBoard')}
             onClick={() => {
               setExpanded(false);
               setBoardWindow(true);
@@ -204,7 +217,11 @@ export function StandbyTray() {
             <SwipeActionRow
               key={reminder.id}
               rowId={reminder.id}
-              rightAction={{ label: 'Done', confirmLabel: 'Confirm', onExecute: () => archiveReminder(reminder.id) }}
+              rightAction={{
+                label: t('tray.swipe.done'),
+                confirmLabel: t('tray.swipe.confirm'),
+                onExecute: () => archiveReminder(reminder.id),
+              }}
             >
             <motion.button
               key={reminder.id}
@@ -250,7 +267,7 @@ export function StandbyTray() {
                 setBoardWindow(true);
               }}
             >
-              View full board
+              {t('tray.viewFullBoard')}
             </button>
           </motion.div>
         </motion.div>

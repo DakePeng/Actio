@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useT, type TKey } from '../../i18n';
 
 const API_BASE = 'http://127.0.0.1:3000';
 
@@ -23,19 +24,19 @@ const DEFAULT_SHORTCUTS: ShortcutMap = {
   card_archive: 'Delete',
 };
 
-const ACTION_LABELS: Record<string, string> = {
-  toggle_board_tray: 'Toggle board / tray',
-  start_dictation: 'Start dictation',
-  new_todo: 'New to-do',
-  tab_board: 'Board tab',
-  tab_people: 'People tab',
-  tab_recording: 'Recording tab',
-  tab_archive: 'Archive tab',
-  tab_settings: 'Settings tab',
-  card_up: 'Card up',
-  card_down: 'Card down',
-  card_expand: 'Expand card',
-  card_archive: 'Archive card',
+const ACTION_LABEL_KEYS: Record<string, TKey> = {
+  toggle_board_tray: 'settings.shortcuts.action.toggle_board_tray',
+  start_dictation: 'settings.shortcuts.action.start_dictation',
+  new_todo: 'settings.shortcuts.action.new_todo',
+  tab_board: 'settings.shortcuts.action.tab_board',
+  tab_people: 'settings.shortcuts.action.tab_people',
+  tab_recording: 'settings.shortcuts.action.tab_recording',
+  tab_archive: 'settings.shortcuts.action.tab_archive',
+  tab_settings: 'settings.shortcuts.action.tab_settings',
+  card_up: 'settings.shortcuts.action.card_up',
+  card_down: 'settings.shortcuts.action.card_down',
+  card_expand: 'settings.shortcuts.action.card_expand',
+  card_archive: 'settings.shortcuts.action.card_archive',
 };
 
 const GLOBAL_ACTIONS = new Set(['toggle_board_tray', 'start_dictation', 'new_todo']);
@@ -74,6 +75,7 @@ export function KeyboardSettings() {
   const [editing, setEditing] = useState<string | null>(null);
   const [pendingCombo, setPendingCombo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
 
   useEffect(() => {
     fetchShortcuts()
@@ -92,7 +94,7 @@ export function KeyboardSettings() {
         invoke('reregister_shortcuts', { shortcuts: newShortcuts }).catch(console.error);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save shortcut');
+      setError(e instanceof Error ? e.message : t('settings.shortcuts.saveFailed'));
     }
   };
 
@@ -106,7 +108,7 @@ export function KeyboardSettings() {
         invoke('reregister_shortcuts', { shortcuts: DEFAULT_SHORTCUTS }).catch(console.error);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to reset shortcuts');
+      setError(e instanceof Error ? e.message : t('settings.shortcuts.resetFailed'));
     }
   };
 
@@ -134,80 +136,85 @@ export function KeyboardSettings() {
     }
   };
 
-  const groups = [
+  const groups: { labelKey: TKey; actions: string[] }[] = [
     {
-      label: 'Global shortcuts',
+      labelKey: 'settings.shortcuts.group.global',
       actions: ['toggle_board_tray', 'start_dictation', 'new_todo'],
     },
     {
-      label: 'Tab navigation',
+      labelKey: 'settings.shortcuts.group.tab',
       actions: ['tab_board', 'tab_people', 'tab_recording', 'tab_archive', 'tab_settings'],
     },
     {
-      label: 'Card navigation',
+      labelKey: 'settings.shortcuts.group.card',
       actions: ['card_up', 'card_down', 'card_expand', 'card_archive'],
     },
   ];
 
   return (
     <section className="settings-section">
-      <div className="settings-section__title">Keyboard Shortcuts</div>
+      <div className="settings-section__title">{t('settings.shortcuts.title')}</div>
 
       {groups.map((group) => (
-        <div key={group.label}>
+        <div key={group.labelKey}>
           <div className="settings-row__sublabel" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
-            {group.label}
+            {t(group.labelKey)}
           </div>
-          {group.actions.map((action) => (
-            <label key={action} className="settings-row">
-              <span className="settings-row__label">
-                {ACTION_LABELS[action] ?? action}
-                {GLOBAL_ACTIONS.has(action) && (
-                  <span className="settings-row__sublabel"> (global)</span>
-                )}
-              </span>
-              {editing === action ? (
-                <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <input
-                    className="settings-row__select"
-                    style={{ width: 160, textAlign: 'center', cursor: 'text' }}
-                    readOnly
-                    autoFocus
-                    value={pendingCombo || 'Press keys…'}
-                    onKeyDown={handleKeyDown}
-                    onBlur={() => setEditing(null)}
-                    placeholder="Press keys…"
-                  />
-                  <button
-                    className="btn btn--small"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      if (pendingCombo) saveShortcut(action, pendingCombo);
-                    }}
-                  >
-                    Save
-                  </button>
-                  <button
-                    className="btn btn--small btn--ghost"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setEditing(null);
-                    }}
-                  >
-                    Cancel
-                  </button>
+          {group.actions.map((action) => {
+            const labelKey = ACTION_LABEL_KEYS[action];
+            return (
+              <label key={action} className="settings-row">
+                <span className="settings-row__label">
+                  {labelKey ? t(labelKey) : action}
+                  {GLOBAL_ACTIONS.has(action) && (
+                    <span className="settings-row__sublabel">
+                      {t('settings.shortcuts.globalSuffix')}
+                    </span>
+                  )}
                 </span>
-              ) : (
-                <button
-                  className="settings-row__select"
-                  style={{ cursor: 'pointer', textAlign: 'center' }}
-                  onClick={() => startEditing(action)}
-                >
-                  {shortcuts[action] ?? '—'}
-                </button>
-              )}
-            </label>
-          ))}
+                {editing === action ? (
+                  <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <input
+                      className="settings-row__select"
+                      style={{ width: 160, textAlign: 'center', cursor: 'text' }}
+                      readOnly
+                      autoFocus
+                      value={pendingCombo || t('settings.shortcuts.pressKeys')}
+                      onKeyDown={handleKeyDown}
+                      onBlur={() => setEditing(null)}
+                      placeholder={t('settings.shortcuts.pressKeys')}
+                    />
+                    <button
+                      className="btn btn--small"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (pendingCombo) saveShortcut(action, pendingCombo);
+                      }}
+                    >
+                      {t('settings.shortcuts.save')}
+                    </button>
+                    <button
+                      className="btn btn--small btn--ghost"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setEditing(null);
+                      }}
+                    >
+                      {t('settings.shortcuts.cancel')}
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    className="settings-row__select"
+                    style={{ cursor: 'pointer', textAlign: 'center' }}
+                    onClick={() => startEditing(action)}
+                  >
+                    {shortcuts[action] ?? '—'}
+                  </button>
+                )}
+              </label>
+            );
+          })}
         </div>
       ))}
 
@@ -223,7 +230,7 @@ export function KeyboardSettings() {
       <div className="settings-row" style={{ marginTop: '0.75rem' }}>
         <span />
         <button className="btn btn--small btn--ghost" onClick={resetDefaults}>
-          Reset to defaults
+          {t('settings.shortcuts.reset')}
         </button>
       </div>
     </section>

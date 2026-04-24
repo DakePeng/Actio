@@ -3,26 +3,35 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
 import type { TranscriptLine } from '../store/use-voice-store';
 import type { Speaker } from '../types/speaker';
+import { useT } from '../i18n';
 
 interface Bubble {
   key: string;
   speakerId: string | null;
+  resolved: boolean;
   lines: TranscriptLine[];
 }
 
 /** Group consecutive same-speaker lines into bubbles. Unresolved lines
- *  (speaker_id === null) cluster together, so the "Identifying…" header
- *  doesn't get drawn once per burst. */
+ *  (speaker_id === null, resolved === false) cluster into an "Identifying…"
+ *  group; resolved-but-unmatched lines cluster into a separate "Unknown"
+ *  group — merging them would let a later Unknown event silently relabel
+ *  a still-identifying bubble. */
 function groupLines(lines: TranscriptLine[]): Bubble[] {
   const bubbles: Bubble[] = [];
   for (const line of lines) {
     const last = bubbles[bubbles.length - 1];
-    if (last && last.speakerId === line.speaker_id) {
+    if (
+      last &&
+      last.speakerId === line.speaker_id &&
+      last.resolved === line.resolved
+    ) {
       last.lines.push(line);
     } else {
       bubbles.push({
         key: line.id,
         speakerId: line.speaker_id,
+        resolved: line.resolved,
         lines: [line],
       });
     }
@@ -32,12 +41,15 @@ function groupLines(lines: TranscriptLine[]): Bubble[] {
 
 function SpeakerHeader({
   speakerId,
+  resolved,
   speakers,
 }: {
   speakerId: string | null;
+  resolved: boolean;
   speakers: Speaker[];
 }) {
-  if (speakerId === null) {
+  const t = useT();
+  if (speakerId === null && !resolved) {
     return (
       <div className="live-transcript__header live-transcript__header--unresolved">
         <motion.span
@@ -48,7 +60,20 @@ function SpeakerHeader({
         >
           …
         </motion.span>
-        <span className="live-transcript__name">Identifying…</span>
+        <span className="live-transcript__name">{t('transcript.identifying')}</span>
+      </div>
+    );
+  }
+  if (speakerId === null) {
+    return (
+      <div className="live-transcript__header live-transcript__header--unresolved">
+        <span
+          className="live-transcript__avatar live-transcript__avatar--unresolved"
+          aria-hidden="true"
+        >
+          ?
+        </span>
+        <span className="live-transcript__name">{t('transcript.unknown')}</span>
       </div>
     );
   }
@@ -82,6 +107,7 @@ export function LiveTranscript({
   pendingPartial: TranscriptLine | null;
 }) {
   const speakers = useVoiceStore((s) => s.speakers);
+  const t = useT();
   const bubbles = useMemo(() => groupLines(lines), [lines]);
 
   // If a partial is in flight and its speaker matches the last bubble's
@@ -92,7 +118,8 @@ export function LiveTranscript({
   const partialFitsLast =
     pendingPartial !== null &&
     lastBubble !== undefined &&
-    lastBubble.speakerId === pendingPartial.speaker_id;
+    lastBubble.speakerId === pendingPartial.speaker_id &&
+    lastBubble.resolved === pendingPartial.resolved;
 
   return (
     <div className="live-transcript">
@@ -110,7 +137,11 @@ export function LiveTranscript({
               exit={{ opacity: 0, transition: { duration: 0.1 } }}
               transition={{ type: 'spring', stiffness: 320, damping: 28 }}
             >
-              <SpeakerHeader speakerId={b.speakerId} speakers={speakers} />
+              <SpeakerHeader
+                speakerId={b.speakerId}
+                resolved={b.resolved}
+                speakers={speakers}
+              />
               <div className="live-transcript__body">
                 {b.lines.map((l) => (
                   <span key={l.id} className="live-transcript__line">
@@ -140,6 +171,7 @@ export function LiveTranscript({
           >
             <SpeakerHeader
               speakerId={pendingPartial.speaker_id}
+              resolved={pendingPartial.resolved}
               speakers={speakers}
             />
             <div className="live-transcript__body">
@@ -152,7 +184,9 @@ export function LiveTranscript({
       </AnimatePresence>
 
       {bubbles.length === 0 && !pendingPartial && (
-        <span className="recording-tab__transcript-placeholder">Listening…</span>
+        <span className="recording-tab__transcript-placeholder">
+          {t('recording.listening')}
+        </span>
       )}
     </div>
   );

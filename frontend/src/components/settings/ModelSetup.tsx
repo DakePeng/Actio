@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useT, useTMaybe, type TKey } from '../../i18n';
 
 type DownloadTarget =
   | { type: 'shared' }
@@ -52,13 +53,13 @@ const API_BASE = 'http://127.0.0.1:3000';
 
 type LanguageTab = 'all' | 'chinese' | 'english' | 'korean' | 'french' | 'multilingual';
 
-const LANGUAGE_TABS: { id: LanguageTab; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'chinese', label: 'Chinese' },
-  { id: 'english', label: 'English' },
-  { id: 'korean', label: 'Korean' },
-  { id: 'french', label: 'French' },
-  { id: 'multilingual', label: 'Multilingual' },
+const LANGUAGE_TABS: { id: LanguageTab; labelKey: TKey }[] = [
+  { id: 'all', labelKey: 'settings.models.lang.all' },
+  { id: 'chinese', labelKey: 'settings.models.lang.chinese' },
+  { id: 'english', labelKey: 'settings.models.lang.english' },
+  { id: 'korean', labelKey: 'settings.models.lang.korean' },
+  { id: 'french', labelKey: 'settings.models.lang.french' },
+  { id: 'multilingual', labelKey: 'settings.models.lang.multilingual' },
 ];
 
 function isMultilingual(languages: string): boolean {
@@ -77,6 +78,8 @@ function matchesTab(m: AsrModelInfo, tab: LanguageTab): boolean {
 }
 
 export function ModelSetup({ onReady }: { onReady?: () => void }) {
+  const t = useT();
+  const tMaybe = useTMaybe();
   const [status, setStatus] = useState<ModelStatus>({ state: 'not_downloaded' });
   const [models, setModels] = useState<AsrModelInfo[]>([]);
   const [activeModel, setActiveModel] = useState<string>('');
@@ -174,9 +177,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     const prev = embeddingModels.find((m) => m.id === activeEmbedding);
     const dimChanged = !!prev && !!next && prev.embedding_dim !== next.embedding_dim;
     if (hasSpeakers && prev && prev.id !== id && dimChanged) {
-      const ok = window.confirm(
-        'Switching embedding models will invalidate previously-enrolled voiceprints. Continue?',
-      );
+      const ok = window.confirm(t('settings.models.switchEmbeddingConfirm'));
       if (!ok) return;
     }
     setActiveEmbedding(id);
@@ -194,7 +195,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
   const handleDelete = async (modelId: string, modelName: string) => {
     setError(null);
     const confirmed = window.confirm(
-      `Delete ${modelName}? The files will be removed from disk. You can re-download later.`,
+      t('settings.models.deleteConfirm', { name: modelName }),
     );
     if (!confirmed) return;
     try {
@@ -240,22 +241,22 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
 
   // Describe the current download in the progress bar.
   const downloadLabel = (() => {
-    const t = status.target;
-    if (!t) return 'Preparing...';
-    if (t.type === 'shared') return 'Shared files (VAD)'; // unreachable in UI, kept for type safety
-    if (t.type === 'embedding') {
-      return embeddingModels.find((x) => x.id === t.id)?.name ?? t.id;
+    const target = status.target;
+    if (!target) return t('settings.models.preparing');
+    if (target.type === 'shared') return 'Shared files (VAD)'; // unreachable in UI
+    if (target.type === 'embedding') {
+      return embeddingModels.find((x) => x.id === target.id)?.name ?? target.id;
     }
-    const m = models.find((x) => x.id === t.id);
-    return m?.name ?? t.id;
+    const m = models.find((x) => x.id === target.id);
+    return m?.name ?? target.id;
   })();
 
   return (
     <section className="settings-section">
-      <div className="settings-section__title">Speech Models</div>
+      <div className="settings-section__title">{t('settings.models.title')}</div>
 
       <div className="settings-field" style={{ marginBottom: 8 }}>
-        <span className="settings-field__label">Download from</span>
+        <span className="settings-field__label">{t('settings.models.downloadFrom')}</span>
         <select
           className="settings-input"
           value={downloadSource}
@@ -279,10 +280,17 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
 
       {error && <div className="model-error">{error}</div>}
 
-      {isDownloading && (
+      {/* Per-card progress lives inside each model's own item (see below).
+          A non-specific download (e.g. shared files before a target is
+          picked, or preparing state) still needs a place to live — show
+          a tiny inline strip here for that edge case only. */}
+      {isDownloading && (!status.target || status.target.type === 'shared') && (
         <div className="settings-field" style={{ marginBottom: 12 }}>
           <div className="settings-field__label">
-            Downloading: {downloadLabel} — {status.current_file ?? '...'}
+            {t('settings.models.downloading', {
+              label: downloadLabel,
+              file: status.current_file ?? '...',
+            })}
           </div>
           <div className="model-progress">
             <div className="model-progress__bar">
@@ -298,9 +306,9 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
               type="button"
               className="model-progress__cancel-btn"
               onClick={handleCancelDownload}
-              title="Cancel download"
+              title={t('settings.models.cancelTitle')}
             >
-              Cancel
+              {t('settings.models.cancel')}
             </button>
           </div>
         </div>
@@ -308,18 +316,21 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
 
       {embeddingModels.length > 0 && (
         <div className="settings-field">
-          <div className="settings-field__label">Common Models</div>
+          <div className="settings-field__label">{t('settings.models.commonModels')}</div>
           <div
             className="settings-field__sublabel"
             style={{ marginBottom: 8, opacity: 0.7 }}
           >
-            Speaker-embedding model used for voiceprint enrollment and recognition.
-            Switching models invalidates previous enrollments.
+            {t('settings.models.commonModels.sub')}
           </div>
           <div className="model-list">
             {embeddingModels.map((m) => {
               const isActive = activeEmbedding === m.id;
               const selectDisabled = !m.downloaded;
+              const isDownloadingThis =
+                isDownloading &&
+                status.target?.type === 'embedding' &&
+                status.target.id === m.id;
               return (
                 <div key={m.id} className="model-list__item">
                   <label
@@ -337,7 +348,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
                       <span className="model-list__name">
                         {m.name}
                         {m.downloaded && (
-                          <span className="model-list__check" title="Downloaded">
+                          <span className="model-list__check" title={t('settings.models.downloaded')}>
                             {' \u2713'}
                           </span>
                         )}
@@ -346,11 +357,13 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
                       <span className="model-list__spec">
                         {m.size_mb} MB · {m.embedding_dim}-dim embeddings
                       </span>
-                      <span className="model-list__desc">{m.description}</span>
+                      <span className="model-list__desc">
+                        {tMaybe(`model.desc.${m.id}`) ?? m.description}
+                      </span>
                     </span>
                   </label>
                   <div className="model-list__actions">
-                    {!m.downloaded && (
+                    {!m.downloaded && !isDownloadingThis && (
                       <button
                         type="button"
                         className="model-list__download-btn"
@@ -358,8 +371,8 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
                         disabled={isDownloading}
                       >
                         {isDownloading
-                          ? 'Another download in progress…'
-                          : `Download (${m.size_mb} MB)`}
+                          ? t('settings.models.downloadOther')
+                          : t('settings.models.download', { size: m.size_mb })}
                       </button>
                     )}
                     {m.downloaded && (
@@ -368,12 +381,33 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
                         className="model-list__delete-btn"
                         onClick={() => handleDelete(m.id, m.name)}
                         disabled={isDownloading}
-                        title={`Delete ${m.name} from disk`}
+                        title={t('settings.models.deleteTitle', { name: m.name })}
                       >
-                        Delete
+                        {t('settings.models.delete')}
                       </button>
                     )}
                   </div>
+                  {isDownloadingThis && (
+                    <div className="model-progress" aria-live="polite">
+                      <div className="model-progress__bar">
+                        <div
+                          className="model-progress__fill"
+                          style={{ width: `${Math.round((status.progress ?? 0) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="model-progress__text">
+                        {Math.round((status.progress ?? 0) * 100)}%
+                      </div>
+                      <button
+                        type="button"
+                        className="model-progress__cancel-btn"
+                        onClick={handleCancelDownload}
+                        title={t('settings.models.cancelTitle')}
+                      >
+                        {t('settings.models.cancel')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -383,7 +417,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
 
       {models.length > 0 && (
         <div className="settings-field">
-          <div className="settings-field__label">ASR Models</div>
+          <div className="settings-field__label">{t('settings.models.asrModels')}</div>
           <div className="model-lang-tabs">
             {LANGUAGE_TABS
               .filter((tab) => tab.id === 'all' || models.some((m) => matchesTab(m, tab.id)))
@@ -394,7 +428,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
                   className={`model-lang-tab${langTab === tab.id ? ' is-active' : ''}`}
                   onClick={() => setLangTab(tab.id)}
                 >
-                  {tab.label}
+                  {t(tab.labelKey)}
                 </button>
               ))}
           </div>
@@ -405,6 +439,10 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
               // downloaded and runtime-supported. Downloading is always
               // offered when the file set is missing.
               const selectDisabled = !m.downloaded || !m.runtime_supported;
+              const isDownloadingThis =
+                isDownloading &&
+                status.target?.type === 'model' &&
+                status.target.id === m.id;
               return (
                 <div key={m.id} className="model-list__item">
                   <label
@@ -422,32 +460,36 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
                       <span className="model-list__name">
                         {m.name}
                         {m.downloaded && (
-                          <span className="model-list__check" title="Downloaded">
+                          <span className="model-list__check" title={t('settings.models.downloaded')}>
                             {' \u2713'}
                           </span>
                         )}
                         {!m.runtime_supported && (
                           <span className="model-list__badge" title="Catalog only, not yet runtime-supported">
-                            {' (preview)'}
+                            {t('settings.models.preview')}
                           </span>
                         )}
                       </span>
                       <span className="model-list__lang">{m.languages}</span>
                       <span className="model-list__spec">
-                        {m.streaming ? 'Streaming' : 'Offline'} · {m.size_mb} MB on disk · ~{m.ram_mb} MB RAM · {m.recommended_cpu}
+                        {m.streaming ? t('settings.models.streaming') : t('settings.models.offline')} · {m.size_mb} MB on disk · ~{m.ram_mb} MB RAM · {m.recommended_cpu}
                       </span>
-                      <span className="model-list__desc">{m.description}</span>
+                      <span className="model-list__desc">
+                        {tMaybe(`model.desc.${m.id}`) ?? m.description}
+                      </span>
                     </span>
                   </label>
                   <div className="model-list__actions">
-                    {!m.downloaded && (
+                    {!m.downloaded && !isDownloadingThis && (
                       <button
                         type="button"
                         className="model-list__download-btn"
                         onClick={() => handleDownload({ type: 'model', id: m.id })}
                         disabled={isDownloading}
                       >
-                        {isDownloading ? 'Another download in progress…' : `Download (${m.size_mb} MB)`}
+                        {isDownloading
+                          ? t('settings.models.downloadOther')
+                          : t('settings.models.download', { size: m.size_mb })}
                       </button>
                     )}
                     {m.downloaded && (
@@ -456,12 +498,33 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
                         className="model-list__delete-btn"
                         onClick={() => handleDelete(m.id, m.name)}
                         disabled={isDownloading}
-                        title={`Delete ${m.name} from disk`}
+                        title={t('settings.models.deleteTitle', { name: m.name })}
                       >
-                        Delete
+                        {t('settings.models.delete')}
                       </button>
                     )}
                   </div>
+                  {isDownloadingThis && (
+                    <div className="model-progress" aria-live="polite">
+                      <div className="model-progress__bar">
+                        <div
+                          className="model-progress__fill"
+                          style={{ width: `${Math.round((status.progress ?? 0) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="model-progress__text">
+                        {Math.round((status.progress ?? 0) * 100)}%
+                      </div>
+                      <button
+                        type="button"
+                        className="model-progress__cancel-btn"
+                        onClick={handleCancelDownload}
+                        title={t('settings.models.cancelTitle')}
+                      >
+                        {t('settings.models.cancel')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
