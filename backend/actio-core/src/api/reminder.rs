@@ -6,7 +6,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::api::session::AppApiError;
-use crate::domain::types::{NewReminder, PatchReminderRequest, Reminder, ReminderFilter};
+use crate::domain::types::{
+    NewReminder, PatchReminderRequest, Reminder, ReminderFilter, ReminderTrace, ReminderTraceLine,
+};
 use crate::repository::label as label_repo;
 use crate::repository::reminder as reminder_repo;
 use crate::AppState;
@@ -530,7 +532,9 @@ pub async fn create_reminder(
     Json(req): Json<CreateReminderRequest>,
 ) -> Result<(StatusCode, Json<Reminder>), AppApiError> {
     if req.title.is_none() && req.description.is_none() {
-        return Err(AppApiError::Internal("title or description is required".into()));
+        return Err(AppApiError::Internal(
+            "title or description is required".into(),
+        ));
     }
     let tenant_id = tenant_id_from_headers(&headers);
     let label_ids = req.labels.as_deref().unwrap_or(&[]);
@@ -546,6 +550,8 @@ pub async fn create_reminder(
         transcript_excerpt: None,
         context: req.context,
         source_time: None,
+        status: None,
+        source_window_id: None,
     };
     let reminder = reminder_repo::create_reminder(&state.pool, &new_reminder, label_ids)
         .await
@@ -572,7 +578,9 @@ pub async fn patch_reminder(
     Json(patch): Json<PatchReminderRequest>,
 ) -> Result<Json<Reminder>, AppApiError> {
     if let Some(ref s) = patch.status {
-        if !["open", "completed", "archived"].contains(&s.as_str()) {
+        // 'pending' admits user-confirm (→open) or dismiss (→archived) of
+        // medium-confidence auto-extracted items from the window extractor.
+        if !["open", "pending", "completed", "archived"].contains(&s.as_str()) {
             return Err(AppApiError::Internal(format!("invalid status: {s}")));
         }
     }
@@ -604,6 +612,120 @@ pub async fn delete_reminder(
     }
 }
 
+/// `GET /reminders/{id}/trace` — returns the reminder's provenance: which
+/// extraction window produced it, the time bounds of that window, the
+/// session's wall-clock start, and every finalized transcript line whose
+/// [start,end] overlaps the window, joined to speaker names.
+///
+/// Reminders created outside the windowed extractor (manual POSTs, legacy
+/// session-end generator) have no `source_window_id`; in that case we still
+/// return the envelope with `window_*` fields null and `lines` empty so the
+/// frontend can render a "no context available" state without a separate
+/// error path.
+#[utoipa::path(
+    get,
+    path = "/reminders/{id}/trace",
+    tag = "reminders",
+    params(("id" = Uuid, Path, description = "Reminder ID")),
+    responses(
+        (status = 200, description = "Reminder provenance", body = ReminderTrace),
+        (status = 404, description = "Reminder not found", body = AppApiError),
+    ),
+)]
+pub async fn get_reminder_trace(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ReminderTrace>, AppApiError> {
+    let reminder = reminder_repo::get_reminder(&state.pool, id)
+        .await
+        .map_err(|e| AppApiError::Internal(e.to_string()))?
+        .ok_or_else(|| AppApiError::Internal("not found".into()))?;
+
+    let window_id: Option<Uuid> = reminder
+        .source_window_id
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok());
+
+    let session_id: Option<Uuid> = reminder
+        .session_id
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok());
+
+    let session_started_at: Option<chrono::DateTime<chrono::Utc>> = match session_id {
+        Some(sid) => sqlx::query_as::<_, (chrono::DateTime<chrono::Utc>,)>(
+            "SELECT started_at FROM audio_sessions WHERE id = ?1",
+        )
+        .bind(sid.to_string())
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| AppApiError::Internal(e.to_string()))?
+        .map(|(t,)| t),
+        None => None,
+    };
+
+    // Load the window (if any) to get the time bounds.
+    let (window_start_ms, window_end_ms) = match window_id {
+        Some(wid) => {
+            let row: Option<(i64, i64)> =
+                sqlx::query_as("SELECT start_ms, end_ms FROM extraction_windows WHERE id = ?1")
+                    .bind(wid.to_string())
+                    .fetch_optional(&state.pool)
+                    .await
+                    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+            match row {
+                Some((s, e)) => (Some(s), Some(e)),
+                None => (None, None),
+            }
+        }
+        None => (None, None),
+    };
+
+    // If we have both session + window bounds, fetch the transcripts in-window.
+    let lines = match (session_id, window_start_ms, window_end_ms) {
+        (Some(sid), Some(start), Some(end)) => {
+            sqlx::query_as::<_, (i64, i64, String, Option<String>, Option<String>)>(
+                r#"SELECT t.start_ms, t.end_ms, t.text, sp.id, sp.display_name
+               FROM transcripts t
+               LEFT JOIN audio_segments s ON s.id = t.segment_id
+               LEFT JOIN speakers sp      ON sp.id = s.speaker_id
+               WHERE t.session_id = ?1
+                 AND t.is_final = 1
+                 AND t.start_ms < ?3
+                 AND t.end_ms   > ?2
+               ORDER BY t.start_ms"#,
+            )
+            .bind(sid.to_string())
+            .bind(start)
+            .bind(end)
+            .fetch_all(&state.pool)
+            .await
+            .map_err(|e| AppApiError::Internal(e.to_string()))?
+            .into_iter()
+            .map(|(s_ms, e_ms, text, sid, name)| ReminderTraceLine {
+                start_ms: s_ms,
+                end_ms: e_ms,
+                text,
+                speaker_id: sid,
+                speaker_name: name,
+            })
+            .collect()
+        }
+        _ => Vec::new(),
+    };
+
+    Ok(Json(ReminderTrace {
+        reminder_id: reminder.id,
+        session_id: reminder.session_id,
+        window_id: reminder.source_window_id,
+        window_start_ms,
+        window_end_ms,
+        session_started_at,
+        transcript_excerpt: reminder.transcript_excerpt,
+        source_time: reminder.source_time,
+        lines,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ExtractRemindersRequest {
     pub text: String,
@@ -624,7 +746,9 @@ pub async fn extract_reminders(
 ) -> Result<Json<Vec<Reminder>>, AppApiError> {
     let text = req.text.trim().to_string();
     if text.is_empty() && req.images.is_empty() {
-        return Err(AppApiError::Internal("text or at least one image is required".into()));
+        return Err(AppApiError::Internal(
+            "text or at least one image is required".into(),
+        ));
     }
 
     let tenant_id = tenant_id_from_headers(&headers);
@@ -710,6 +834,8 @@ pub async fn extract_reminders(
             transcript_excerpt: None,
             context: None,
             source_time: None,
+            status: None,
+            source_window_id: None,
         };
 
         match reminder_repo::create_reminder(&state.pool, &new_reminder, &label_ids).await {

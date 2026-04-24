@@ -101,6 +101,7 @@ pub fn router(state: AppState) -> Router {
         .route("/reminders/:id", get(reminder::get_reminder))
         .route("/reminders/:id", patch(reminder::patch_reminder))
         .route("/reminders/:id", delete(reminder::delete_reminder))
+        .route("/reminders/:id/trace", get(reminder::get_reminder_trace))
         // labels
         .route("/labels", get(label::list_labels))
         .route("/labels", post(label::create_label))

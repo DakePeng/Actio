@@ -71,6 +71,7 @@ pub async fn create_session(
                 state.aggregator.clone(),
                 None,
                 asr_model,
+                settings.language.as_deref(),
                 state.clips_dir.clone(),
                 state.live_enrollment.clone(),
                 crate::engine::inference_pipeline::SpeakerIdConfig {
@@ -664,6 +665,7 @@ pub async fn start_live_enrollment(
                     state.aggregator.clone(),
                     None,
                     asr_model,
+                    settings.language.as_deref(),
                     state.clips_dir.clone(),
                     state.live_enrollment.clone(),
                     crate::engine::inference_pipeline::SpeakerIdConfig {
@@ -677,6 +679,59 @@ pub async fn start_live_enrollment(
                 } else {
                     *state.enrollment_owned_session.lock().await = Some(session_uuid);
                     info!(%session_uuid, "Pipeline started for voiceprint enrollment");
+
+                    // Watchdog task: when the enrollment flips to Complete,
+                    // tear down the pipeline and close out the DB session.
+                    // Without this, a naturally-completed enrollment would
+                    // leave an unbounded "enrollment" session open in the DB
+                    // and keep the pipeline running indefinitely — the
+                    // cancel handler was the only teardown path.
+                    let watchdog_state = state.clone();
+                    tokio::spawn(async move {
+                        // Generous ceiling — at 10 clips × 30s max per clip
+                        // + slack. If something goes wrong we eventually
+                        // stop polling rather than leaking the task.
+                        let max_iters = 10 * 30 + 30;
+                        for _ in 0..max_iters {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            let snap = crate::engine::live_enrollment::snapshot(
+                                &watchdog_state.live_enrollment,
+                            )
+                            .await;
+                            let status = snap.as_ref().map(|s| &s.status);
+                            match status {
+                                Some(crate::engine::live_enrollment::Status::Complete) => {
+                                    // Only tear down if this is still the
+                                    // session we started. If cancel already
+                                    // took it, enrollment_owned_session will
+                                    // be None and we leave well enough alone.
+                                    let owned =
+                                        watchdog_state.enrollment_owned_session.lock().await.take();
+                                    if let Some(sid) = owned {
+                                        watchdog_state.inference_pipeline.lock().await.stop();
+                                        if let Err(e) =
+                                            session::end_session(&watchdog_state.pool, sid).await
+                                        {
+                                            warn!(
+                                                error = %e,
+                                                "Failed to end enrollment-owned session on completion"
+                                            );
+                                        } else {
+                                            info!(%sid, "Enrollment completed — pipeline torn down");
+                                        }
+                                    }
+                                    return;
+                                }
+                                Some(crate::engine::live_enrollment::Status::Cancelled) | None => {
+                                    // Cancel handler (or a state wipe) has
+                                    // taken care of teardown. Nothing to do.
+                                    return;
+                                }
+                                _ => { /* still active — keep watching */ }
+                            }
+                        }
+                        warn!("Enrollment watchdog timed out without observing terminal state");
+                    });
                 }
             }
             Err(e) => {
@@ -700,6 +755,19 @@ pub async fn cancel_live_enrollment(
     Path(_id): Path<Uuid>,
 ) -> Result<StatusCode, AppApiError> {
     crate::engine::live_enrollment::cancel(&state.live_enrollment).await;
+
+    // Purge any partial embeddings this incomplete session saved so the
+    // voiceprint matcher isn't biased by the few clips that made it through
+    // before cancel. Only rows this session created are touched — prior
+    // successful enrollments for the same speaker are preserved.
+    if let Err(e) = crate::engine::live_enrollment::cleanup_partial_embeddings(
+        &state.live_enrollment,
+        &state.pool,
+    )
+    .await
+    {
+        warn!(error = %e, "Failed to clean partial enrollment embeddings");
+    }
 
     // If we started the pipeline ourselves to drive enrollment, tear it down
     // now. Sessions started for transcription are left alone.

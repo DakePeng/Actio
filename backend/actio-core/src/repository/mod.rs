@@ -1,4 +1,5 @@
 pub mod db;
+pub mod extraction_window;
 pub mod label;
 pub mod reminder;
 pub mod segment;

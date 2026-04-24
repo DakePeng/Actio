@@ -80,8 +80,7 @@ pub async fn delete_local_llm(
                     selection: Some(LlmSelection::Disabled),
                     ..Default::default()
                 }),
-                audio: None,
-                keyboard: None,
+                ..Default::default()
             };
             state.settings_manager.update(patch).await;
             *state.router.write().await = crate::build_router_from_settings(

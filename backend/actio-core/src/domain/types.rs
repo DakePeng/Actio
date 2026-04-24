@@ -134,6 +134,7 @@ pub struct ReminderRow {
     pub transcript_excerpt: Option<String>,
     pub context: Option<String>,
     pub source_time: Option<DateTime<Utc>>,
+    pub source_window_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -155,6 +156,7 @@ impl ReminderRow {
             transcript_excerpt: self.transcript_excerpt,
             context: self.context,
             source_time: self.source_time,
+            source_window_id: self.source_window_id,
             labels,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -179,13 +181,17 @@ pub struct Reminder {
     pub transcript_excerpt: Option<String>,
     pub context: Option<String>,
     pub source_time: Option<DateTime<Utc>>,
+    /// When set, points at an `extraction_windows` row — i.e. this reminder
+    /// was produced by the background windowed extractor, not by an explicit
+    /// session-end or user POST. Enables the "Show context" trace inspector.
+    pub source_window_id: Option<String>,
     pub labels: Vec<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 /// Input for creating a new reminder (API or LLM generator).
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct NewReminder {
     pub session_id: Option<Uuid>,
     pub tenant_id: Uuid,
@@ -198,6 +204,10 @@ pub struct NewReminder {
     pub transcript_excerpt: Option<String>,
     pub context: Option<String>,
     pub source_time: Option<DateTime<Utc>>,
+    /// Override default `'open'` status. Used by the window extractor to
+    /// route medium-confidence items to the `'pending'` review queue.
+    pub status: Option<String>,
+    pub source_window_id: Option<Uuid>,
 }
 
 /// Query parameters for GET /reminders.
@@ -221,6 +231,36 @@ pub struct PatchReminderRequest {
     pub due_time: Option<DateTime<Utc>>,
     pub status: Option<String>,
     pub labels: Option<Vec<Uuid>>,
+}
+
+// ── Reminder trace (provenance inspector) ─────────────────────────────────
+
+/// Compact view of one transcript line rendered in the trace inspector.
+/// Includes the speaker attribution joined from audio_segments → speakers
+/// so the frontend doesn't need a second query.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReminderTraceLine {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+    pub speaker_id: Option<String>,
+    pub speaker_name: Option<String>,
+}
+
+/// Response body for `GET /reminders/{id}/trace`. Carries the originating
+/// window's time bounds and the finalized transcripts inside it so the UI
+/// can render "where did this card come from?" with speaker + timestamp.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReminderTrace {
+    pub reminder_id: String,
+    pub session_id: Option<String>,
+    pub window_id: Option<String>,
+    pub window_start_ms: Option<i64>,
+    pub window_end_ms: Option<i64>,
+    pub session_started_at: Option<DateTime<Utc>>,
+    pub transcript_excerpt: Option<String>,
+    pub source_time: Option<DateTime<Utc>>,
+    pub lines: Vec<ReminderTraceLine>,
 }
 
 // ── Label ─────────────────────────────────────────────────────────────────

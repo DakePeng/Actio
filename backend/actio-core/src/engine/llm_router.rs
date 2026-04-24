@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::llm_prompt::{build_retry_messages, build_todo_messages};
+use crate::engine::llm_prompt::{build_retry_messages, build_todo_messages, build_window_messages};
 use crate::engine::local_llm_engine::{
     EnginePriority, EngineSlot, GenerationParams, LocalLlmError,
 };
 use crate::engine::remote_llm_client::{
-    LlmTodoItem, LlmTodoResponse, RemoteLlmClient, RemoteLlmError,
+    LlmActionItem, LlmActionResponse, LlmTodoItem, LlmTodoResponse, RemoteLlmClient, RemoteLlmError,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -123,6 +123,105 @@ impl LlmRouter {
             }
         }
     }
+
+    /// Windowed action extraction. Returns items with `confidence`,
+    /// `evidence_quote`, and `speaker_name` so the caller can gate into
+    /// `status='open'` vs `'pending'` and attach the provenance the trace
+    /// inspector needs. Unlike `generate_todos`, this path does NOT retry
+    /// on an empty result — a quiet window legitimately produces no items.
+    pub async fn generate_action_items_with_refs(
+        &self,
+        attributed_transcript: &str,
+        label_names: &[String],
+        window_local_date: &str,
+    ) -> Result<Vec<LlmActionItem>, LlmRouterError> {
+        match self {
+            LlmRouter::Disabled => Err(LlmRouterError::Disabled),
+            LlmRouter::Remote(client) => client
+                .generate_action_items_with_refs(
+                    attributed_transcript,
+                    label_names,
+                    window_local_date,
+                )
+                .await
+                .map_err(LlmRouterError::Remote),
+            LlmRouter::Local { slot, model_id } => {
+                let engine = slot
+                    .get_or_load(model_id)
+                    .await
+                    .map_err(LlmRouterError::Local)?;
+                let params = GenerationParams {
+                    max_tokens: 2000,
+                    temperature: 0.1,
+                    json_mode: true,
+                    thinking_budget: Some((attributed_transcript.len() / 10).clamp(100, 500)),
+                };
+                let messages =
+                    build_window_messages(attributed_transcript, label_names, window_local_date);
+                let json = engine
+                    .chat_completion(messages, params, EnginePriority::Internal)
+                    .await
+                    .map_err(LlmRouterError::Local)?;
+                let json_stripped = strip_think_tags(&json);
+                tracing::info!(raw_json = %json_stripped, "Local LLM windowed raw response");
+                let parsed = parse_action_items_with_fallback(&json_stripped)?;
+                let items: Vec<_> = parsed
+                    .items
+                    .into_iter()
+                    .map(|t| t.validate_and_fix())
+                    .filter(|t| t.is_usable())
+                    .collect();
+                Ok(items)
+            }
+        }
+    }
+}
+
+/// Lenient parser for the windowed response shape. Accepts:
+///   {"items":[...]} (canonical),
+///   bare array [...],
+///   a code-fenced version of either,
+///   {"todos":[...]} as a legacy alias (reshaped into items).
+fn parse_action_items_with_fallback(raw: &str) -> Result<LlmActionResponse, LlmRouterError> {
+    let stripped = strip_code_fences(raw);
+
+    if let Ok(parsed) = serde_json::from_str::<LlmActionResponse>(stripped) {
+        return Ok(parsed);
+    }
+    if let Ok(items) = serde_json::from_str::<Vec<LlmActionItem>>(stripped) {
+        return Ok(LlmActionResponse { items });
+    }
+    // Fallback: {"todos":[...]} — the legacy shape. Deserialize into the
+    // generic Value, pluck "todos" if present, try LlmActionItem parsing.
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(stripped) {
+        if let Some(arr) = val.get("todos").and_then(|v| v.as_array()) {
+            let items: Vec<LlmActionItem> = arr
+                .iter()
+                .filter_map(|v| serde_json::from_value::<LlmActionItem>(v.clone()).ok())
+                .collect();
+            if !items.is_empty() {
+                return Ok(LlmActionResponse { items });
+            }
+        }
+    }
+
+    if let Some(json) = extract_json_block(stripped, '{', '}') {
+        if let Ok(parsed) = serde_json::from_str::<LlmActionResponse>(&json) {
+            return Ok(parsed);
+        }
+    }
+    if let Some(json) = extract_json_block(stripped, '[', ']') {
+        if let Ok(items) = serde_json::from_str::<Vec<LlmActionItem>>(&json) {
+            return Ok(LlmActionResponse { items });
+        }
+    }
+
+    tracing::warn!(
+        response_len = raw.len(),
+        response_prefix = %raw.chars().take(80).collect::<String>(),
+        "Local LLM returned unparseable windowed JSON, returning empty items"
+    );
+    Ok(LlmActionResponse { items: vec![] })
 }
 
 fn strip_think_tags(raw: &str) -> String {

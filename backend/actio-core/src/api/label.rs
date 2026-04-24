@@ -36,7 +36,10 @@ pub async fn create_label(
     match label_repo::create_label(&state.pool, tenant_id, &req).await {
         Ok(label) => Ok((StatusCode::CREATED, Json(label))),
         Err(sqlx::Error::Database(e)) if e.constraint() == Some("labels_tenant_id_name_key") => {
-            Err(AppApiError::Internal(format!("label '{}' already exists", req.name)))
+            Err(AppApiError::Internal(format!(
+                "label '{}' already exists",
+                req.name
+            )))
         }
         Err(e) => Err(AppApiError::Internal(e.to_string())),
     }

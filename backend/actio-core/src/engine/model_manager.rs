@@ -856,10 +856,7 @@ impl ModelManager {
     /// `AudioSettings.speaker_embedding_model`. If no id is given or the chosen
     /// file isn't on disk, `build_paths` falls through to any known embedding
     /// filename found in `model_dir`.
-    pub async fn model_paths(
-        &self,
-        speaker_embedding_id: Option<&str>,
-    ) -> Option<ModelPaths> {
+    pub async fn model_paths(&self, speaker_embedding_id: Option<&str>) -> Option<ModelPaths> {
         let status = self.status.read().await;
         match &*status {
             ModelStatus::Ready => Some(build_paths(&self.model_dir, speaker_embedding_id)),
@@ -1339,16 +1336,23 @@ async fn do_download(
         .error_for_status()
         .with_context(|| format!("HTTP error for {}", url))?;
 
-    let bytes = response
-        .bytes()
-        .await
-        .with_context(|| format!("reading response body from {}", url))?;
-
     // All current model files are plain downloads; no archive extraction is needed.
     let _ = dest_name;
-    tokio::fs::write(dest, &bytes)
+    let mut file = tokio::fs::File::create(dest)
         .await
-        .with_context(|| format!("writing {}", dest.display()))?;
+        .with_context(|| format!("creating {}", dest.display()))?;
+    let mut stream = response.bytes_stream();
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.with_context(|| format!("reading response body from {}", url))?;
+        file.write_all(&chunk)
+            .await
+            .with_context(|| format!("writing {}", dest.display()))?;
+    }
+    file.flush()
+        .await
+        .with_context(|| format!("flushing {}", dest.display()))?;
 
     // Verify non-zero size
     let meta = std::fs::metadata(dest)?;
@@ -1386,3 +1390,4 @@ fn extract_bz2_tar(data: &[u8], inner_name: &str, dest: &PathBuf) -> Result<()> 
         inner_name
     ))
 }
+

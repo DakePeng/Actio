@@ -327,12 +327,10 @@ pub async fn confirm_candidate(
     }
     let tenant_id = tenant_id_from_headers(&headers)?;
 
-    let rows = crate::repository::segment::fetch_segments_by_ids(
-        &state.pool,
-        &body.member_segment_ids,
-    )
-    .await
-    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    let rows =
+        crate::repository::segment::fetch_segments_by_ids(&state.pool, &body.member_segment_ids)
+            .await
+            .map_err(|e| AppApiError::Internal(e.to_string()))?;
     if rows.is_empty() {
         return Err(AppApiError::BadRequest("no matching segments found".into()));
     }
@@ -345,8 +343,8 @@ pub async fn confirm_candidate(
     )
     .await
     .map_err(|e| AppApiError::Internal(e.to_string()))?;
-    let speaker_uuid = Uuid::parse_str(&speaker.id)
-        .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    let speaker_uuid =
+        Uuid::parse_str(&speaker.id).map_err(|e| AppApiError::Internal(e.to_string()))?;
 
     // Promote up to 3 longest-duration members as voiceprint embeddings.
     let mut sorted = rows.clone();
@@ -412,12 +410,10 @@ pub async fn dismiss_candidate(
             "member_segment_ids must not be empty".into(),
         ));
     }
-    let rows = crate::repository::segment::fetch_segments_by_ids(
-        &state.pool,
-        &body.member_segment_ids,
-    )
-    .await
-    .map_err(|e| AppApiError::Internal(e.to_string()))?;
+    let rows =
+        crate::repository::segment::fetch_segments_by_ids(&state.pool, &body.member_segment_ids)
+            .await
+            .map_err(|e| AppApiError::Internal(e.to_string()))?;
     let audio_refs: Vec<String> = rows.iter().filter_map(|r| r.audio_ref.clone()).collect();
 
     crate::repository::segment::mark_segments_dismissed(&state.pool, &body.member_segment_ids)

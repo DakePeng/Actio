@@ -3,7 +3,7 @@ use serde::Deserialize;
 use tracing::{error, info, warn};
 
 use crate::config::LlmConfig;
-use crate::engine::llm_prompt::build_todo_messages;
+use crate::engine::llm_prompt::{build_todo_messages, build_window_messages};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteLlmError {
@@ -132,6 +132,94 @@ impl std::fmt::Display for LlmTodoItem {
     }
 }
 
+/// Output of the windowed extractor — superset of `LlmTodoItem` carrying
+/// traceability fields (`evidence_quote`, `speaker_name`) and a confidence
+/// tier used by the caller to route items into `status='open'` vs `'pending'`
+/// or drop them entirely.
+#[derive(Debug, Deserialize, Clone)]
+pub struct LlmActionItem {
+    #[serde(default)]
+    pub title: Option<String>,
+    pub description: String,
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub due_time: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// "high" | "medium" | "low" — canonical tiers. Missing / unrecognized
+    /// values are normalized by `validate_and_fix` to `None`, which the
+    /// caller treats as low-confidence (drops the item).
+    #[serde(default)]
+    pub confidence: Option<String>,
+    /// Verbatim span from the attributed transcript that motivated this
+    /// item. Empty / None means the LLM failed the prompt contract — the
+    /// caller drops items without a quote so the trace inspector has
+    /// something concrete to show.
+    #[serde(default)]
+    pub evidence_quote: Option<String>,
+    /// Copied from the `[HH:MM:SS • Name]: ` tag of the line that contained
+    /// the evidence quote. `None` or `"Unknown"` → speaker_id stays NULL.
+    #[serde(default)]
+    pub speaker_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LlmActionResponse {
+    #[serde(default)]
+    pub items: Vec<LlmActionItem>,
+}
+
+impl LlmActionItem {
+    /// Share the string-sanitization logic with `LlmTodoItem`. We build a
+    /// synthetic `LlmTodoItem` to reuse its normalization, then copy the
+    /// cleaned fields back plus normalize our own extras.
+    pub fn validate_and_fix(mut self) -> Self {
+        let todo = LlmTodoItem {
+            title: self.title.clone(),
+            description: self.description.clone(),
+            priority: self.priority.clone(),
+            due_time: self.due_time.clone(),
+            labels: self.labels.clone(),
+        }
+        .validate_and_fix();
+        self.title = todo.title;
+        self.description = todo.description;
+        self.priority = todo.priority;
+        self.due_time = todo.due_time;
+        self.labels = todo.labels;
+
+        let none_values = ["None", "none", "null", "N/A", "n/a", "unknown", ""];
+        self.confidence = self
+            .confidence
+            .filter(|v| !none_values.contains(&v.trim()))
+            .and_then(|c| match c.trim().to_lowercase().as_str() {
+                "high" | "h" => Some("high".into()),
+                "medium" | "med" | "m" => Some("medium".into()),
+                // "low" is accepted here but the router drops low items —
+                // keeping it normalized makes logs readable.
+                "low" | "l" => Some("low".into()),
+                _ => None,
+            });
+        self.evidence_quote = self
+            .evidence_quote
+            .map(|q| q.trim().to_string())
+            .filter(|q| !q.is_empty() && !none_values.contains(&q.as_str()));
+        self.speaker_name = self
+            .speaker_name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty() && !none_values.contains(&n.as_str()));
+        self
+    }
+
+    /// Usable = has a description AND a quoted evidence span. We refuse
+    /// un-quoted items because the whole point of the windowed extractor is
+    /// traceability.
+    pub fn is_usable(&self) -> bool {
+        !self.description.is_empty() && self.evidence_quote.is_some()
+    }
+}
+
 pub struct RemoteLlmClient {
     client: Client,
     config: LlmConfig,
@@ -247,6 +335,65 @@ impl RemoteLlmClient {
                 }
             }
         }
+    }
+
+    /// Windowed extractor variant. Sends the attributed transcript (lines
+    /// already prefixed with `[HH:MM:SS • Speaker]:`) and expects the
+    /// `{"items":[...]}` wrapper described in `WINDOW_SYSTEM_PROMPT`.
+    pub async fn generate_action_items_with_refs(
+        &self,
+        attributed_transcript: &str,
+        label_names: &[String],
+        window_local_date: &str,
+    ) -> Result<Vec<LlmActionItem>, RemoteLlmError> {
+        info!(
+            transcript_len = attributed_transcript.len(),
+            "Calling remote LLM for windowed action extraction"
+        );
+
+        let messages = build_window_messages(attributed_transcript, label_names, window_local_date);
+        let openai_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+            .collect();
+
+        let payload = serde_json::json!({
+            "model": self.config.model,
+            "messages": openai_messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+            "max_tokens": 2000,
+        });
+
+        let base = self.config.base_url.trim_end_matches('/');
+        let url = format!("{base}/chat/completions");
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.config.api_key)
+            .json(&payload)
+            .send()
+            .await?;
+
+        let chat_resp: LlmChatResponse = resp.json().await?;
+        let content = chat_resp
+            .choices
+            .first()
+            .map(|c| &c.message.content)
+            .ok_or(RemoteLlmError::InvalidResponse)?;
+        tracing::info!(raw_json = %content, "Remote LLM windowed raw response");
+
+        let parsed: LlmActionResponse =
+            serde_json::from_str(content).map_err(|e| RemoteLlmError::Parse(e.into()))?;
+        let items: Vec<_> = parsed
+            .items
+            .into_iter()
+            .map(|t| t.validate_and_fix())
+            .filter(|t| t.is_usable())
+            .collect();
+        info!(count = items.len(), "Remote LLM returned action items");
+        Ok(items)
     }
 }
 

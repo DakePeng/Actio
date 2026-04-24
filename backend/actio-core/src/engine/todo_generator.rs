@@ -63,6 +63,8 @@ pub async fn generate_session_todos(
             transcript_excerpt: None,
             context: None,
             source_time: None,
+            status: None,
+            source_window_id: None,
         });
     }
 

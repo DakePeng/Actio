@@ -11,11 +11,21 @@ use crate::domain::types::{
 
 /// Compute the new archived_at value given a status transition.
 /// Returns Some(true) = set now(), Some(false) = clear, None = no change.
+///
+/// `'pending'` is a review-queue state: not archived, not active, so
+/// transitions in and out of it clear `archived_at` just like `open` does.
+/// A user dismissing a pending item goes `pending → archived`, which still
+/// sets the timestamp.
 pub fn archived_at_for_status(old_status: &str, new_status: &str) -> Option<bool> {
-    match (old_status, new_status) {
-        (s, "archived") if s != "archived" => Some(true), // set now()
-        (_, "open") | (_, "completed") => Some(false),    // clear
-        _ => None,                                        // no change
+    // Same-status transitions are no-ops first so later arms don't wrongly
+    // clear / set on pending→pending or completed→completed.
+    if old_status == new_status {
+        return None;
+    }
+    match new_status {
+        "archived" => Some(true), // moved into the archive → stamp now()
+        "open" | "completed" | "pending" => Some(false), // back to active/review
+        _ => None,
     }
 }
 
@@ -133,11 +143,13 @@ pub async fn create_reminder(
     let mut txn = pool.begin().await?;
     let id = Uuid::new_v4().to_string();
 
+    let status = item.status.as_deref().unwrap_or("open");
     let row: ReminderRow = sqlx::query_as(
         r#"INSERT INTO reminders
                (id, session_id, tenant_id, speaker_id, assigned_to, title, description,
-                priority, due_time, transcript_excerpt, context, source_time)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                priority, due_time, transcript_excerpt, context, source_time,
+                source_window_id, status)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
            RETURNING *"#,
     )
     .bind(&id)
@@ -152,6 +164,8 @@ pub async fn create_reminder(
     .bind(&item.transcript_excerpt)
     .bind(&item.context)
     .bind(item.source_time)
+    .bind(item.source_window_id.map(|u| u.to_string()))
+    .bind(status)
     .fetch_one(&mut *txn)
     .await?;
 
@@ -271,6 +285,9 @@ pub async fn has_reminders(pool: &SqlitePool, session_id: Uuid) -> Result<bool, 
 }
 
 /// Batch insert reminders from LLM output (no labels, idempotent via ON CONFLICT).
+/// Honors `NewReminder.status` (default 'open') and `source_window_id`, so
+/// the window extractor can park medium-confidence items with status 'pending'
+/// and record their originating window for the trace inspector.
 pub async fn create_reminders_batch(
     pool: &SqlitePool,
     items: &[NewReminder],
@@ -278,11 +295,13 @@ pub async fn create_reminders_batch(
     let mut results = Vec::with_capacity(items.len());
     for item in items {
         let id = Uuid::new_v4().to_string();
+        let status = item.status.as_deref().unwrap_or("open");
         let row: Option<ReminderRow> = sqlx::query_as(
             r#"INSERT INTO reminders
                    (id, session_id, tenant_id, speaker_id, assigned_to, title, description,
-                    priority, due_time, transcript_excerpt, context, source_time)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                    priority, due_time, transcript_excerpt, context, source_time,
+                    source_window_id, status)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                ON CONFLICT (session_id, description) DO NOTHING
                RETURNING *"#,
         )
@@ -298,6 +317,8 @@ pub async fn create_reminders_batch(
         .bind(&item.transcript_excerpt)
         .bind(&item.context)
         .bind(item.source_time)
+        .bind(item.source_window_id.map(|u| u.to_string()))
+        .bind(status)
         .fetch_optional(pool)
         .await?;
 
@@ -330,5 +351,16 @@ mod tests {
     #[test]
     fn archived_to_archived_no_change() {
         assert_eq!(archived_at_for_status("archived", "archived"), None);
+    }
+
+    #[test]
+    fn pending_transitions_clear_archived_at() {
+        // User promoting a review-queue item to active, or a new auto-extract
+        // landing in pending, both need archived_at cleared. The catch-all
+        // `pending → archived` still sets the timestamp.
+        assert_eq!(archived_at_for_status("open", "pending"), Some(false));
+        assert_eq!(archived_at_for_status("pending", "open"), Some(false));
+        assert_eq!(archived_at_for_status("pending", "archived"), Some(true));
+        assert_eq!(archived_at_for_status("pending", "pending"), None);
     }
 }

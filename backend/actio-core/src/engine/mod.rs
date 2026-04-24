@@ -22,3 +22,4 @@ pub mod transcript_aggregator;
 pub mod vad;
 pub mod voiceprint_clustering;
 pub mod wav;
+pub mod window_extractor;

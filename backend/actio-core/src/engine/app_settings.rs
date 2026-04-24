@@ -15,6 +15,13 @@ pub struct AppSettings {
     pub audio: AudioSettings,
     #[serde(default)]
     pub keyboard: KeyboardSettings,
+    /// User-selected UI language. `None` means "not yet chosen" — the
+    /// frontend falls back to the OS locale on first launch. Expected
+    /// values are BCP-47 codes like `"en"` or `"zh-CN"`; the backend
+    /// stores the string as-is and only uses it to drive the default
+    /// ASR / embedding recommender when the language transitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 /// The legacy flat shape had `base_url`, `api_key`, `model` directly on
@@ -134,6 +141,25 @@ pub struct AudioSettings {
     /// carry-over entirely. Clamped to [0, 60000] on patch.
     #[serde(default = "default_speaker_continuity_window_ms")]
     pub speaker_continuity_window_ms: u32,
+    /// Whether the inference pipeline stays running whenever the process is
+    /// up. When false (legacy behaviour), pipeline_supervisor hibernates
+    /// the pipeline any time no WebSocket subscriber is attached. The
+    /// windowed extractor only produces cards for sessions that are still
+    /// recording, so the feature only meaningfully works with this toggle
+    /// on — which is the default.
+    #[serde(default = "default_always_listening")]
+    pub always_listening: bool,
+    /// Window length in milliseconds for the background action extractor.
+    /// Defaults to 5 minutes.
+    #[serde(default = "default_window_length_ms")]
+    pub window_length_ms: u32,
+    /// Step size between consecutive windows. Must be <= window_length_ms;
+    /// overlap is `window_length_ms - window_step_ms`.
+    #[serde(default = "default_window_step_ms")]
+    pub window_step_ms: u32,
+    /// How often the scheduler wakes to check for new windows to process.
+    #[serde(default = "default_extraction_tick_secs")]
+    pub extraction_tick_secs: u32,
 }
 
 fn default_clip_retention_days() -> u32 {
@@ -156,6 +182,22 @@ fn default_speaker_continuity_window_ms() -> u32 {
     15_000
 }
 
+fn default_always_listening() -> bool {
+    true
+}
+
+fn default_window_length_ms() -> u32 {
+    5 * 60 * 1000
+}
+
+fn default_window_step_ms() -> u32 {
+    4 * 60 * 1000
+}
+
+fn default_extraction_tick_secs() -> u32 {
+    60
+}
+
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
@@ -168,6 +210,10 @@ impl Default for AudioSettings {
             speaker_tentative_threshold: default_speaker_tentative_threshold(),
             speaker_min_duration_ms: default_speaker_min_duration_ms(),
             speaker_continuity_window_ms: default_speaker_continuity_window_ms(),
+            always_listening: default_always_listening(),
+            window_length_ms: default_window_length_ms(),
+            window_step_ms: default_window_step_ms(),
+            extraction_tick_secs: default_extraction_tick_secs(),
         }
     }
 }
@@ -212,8 +258,72 @@ impl Default for AppSettings {
             llm: LlmSettings::default(),
             audio: AudioSettings::default(),
             keyboard: KeyboardSettings::default(),
+            language: None,
         }
     }
+}
+
+/// ASR model ids that cover Chinese audio at reasonable latency/quality.
+/// Ordered from preferred to fallback. Anything outside this list is
+/// considered "English-only" for the purpose of the recommender.
+const CHINESE_CAPABLE_ASR: &[&str] = &[
+    "sense_voice_multi",
+    "zipformer_ctc_zh_small",
+    "paraformer_zh_small",
+    "zhen_zipformer_bilingual",
+    "zh_zipformer_14m",
+    "zh_conformer",
+    "zh_lstm",
+    "funasr_nano",
+];
+
+const CHINESE_CAPABLE_EMBEDDING: &[&str] = &[
+    "campplus_zh_en",
+    "campplus_zh",
+    "eres2net_base",
+    "eres2netv2",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LanguageRecommendations {
+    pub asr_model: Option<String>,
+    pub speaker_embedding_model: Option<String>,
+}
+
+/// Recommend ASR + embedding defaults when language transitions. Returns a
+/// suggested id per slot **only when the current selection lacks coverage
+/// for the target language** — so users who have already picked a
+/// compatible model are never silently overridden.
+pub fn recommend_models_for_language(
+    lang: &str,
+    current: &AudioSettings,
+) -> LanguageRecommendations {
+    let wants_zh = lang.to_lowercase().starts_with("zh");
+    let mut recs = LanguageRecommendations::default();
+
+    if wants_zh {
+        let asr_ok = current
+            .asr_model
+            .as_deref()
+            .map(|id| CHINESE_CAPABLE_ASR.contains(&id))
+            .unwrap_or(false);
+        if !asr_ok {
+            recs.asr_model = Some("sense_voice_multi".to_string());
+        }
+        let emb_ok = current
+            .speaker_embedding_model
+            .as_deref()
+            .map(|id| CHINESE_CAPABLE_EMBEDDING.contains(&id))
+            .unwrap_or(false);
+        if !emb_ok {
+            recs.speaker_embedding_model = Some("campplus_zh_en".to_string());
+        }
+    }
+    // For English we leave the current selection alone; multilingual models
+    // still handle English fine, and single-Chinese models simply don't
+    // transcribe English but we don't force-swap — that's a user choice.
+
+    recs
 }
 
 pub struct SettingsManager {
@@ -323,11 +433,46 @@ impl SettingsManager {
             if let Some(v) = audio.speaker_continuity_window_ms {
                 settings.audio.speaker_continuity_window_ms = v.min(60_000);
             }
+            if let Some(v) = audio.always_listening {
+                settings.audio.always_listening = v;
+            }
+            if let Some(v) = audio.window_length_ms {
+                // 1–15 min; below 1 min is useless LLM fodder, above 15 min
+                // blows out token budgets and extraction latency.
+                settings.audio.window_length_ms = v.clamp(60_000, 15 * 60 * 1000);
+            }
+            if let Some(v) = audio.window_step_ms {
+                // step must be <= length so consecutive windows don't skip
+                // audio. Clamp to [30s, length].
+                let max_step = settings.audio.window_length_ms;
+                settings.audio.window_step_ms = v.clamp(30_000, max_step);
+            }
+            if let Some(v) = audio.extraction_tick_secs {
+                // 10s – 5min.
+                settings.audio.extraction_tick_secs = v.clamp(10, 300);
+            }
         }
         if let Some(keyboard) = patch.keyboard {
             if let Some(shortcuts) = keyboard.shortcuts {
                 for (k, v) in shortcuts {
                     settings.keyboard.shortcuts.insert(k, v);
+                }
+            }
+        }
+        if let Some(new_lang) = patch.language {
+            let changed = settings.language.as_deref() != Some(new_lang.as_str());
+            settings.language = Some(new_lang.clone());
+            if changed {
+                // Auto-pick sensible ASR / embedding defaults only when the
+                // current selection doesn't cover the target language.
+                let recs = recommend_models_for_language(&new_lang, &settings.audio);
+                if let Some(asr) = recs.asr_model {
+                    info!(%asr, lang = %new_lang, "auto-selecting ASR for new language");
+                    settings.audio.asr_model = Some(asr);
+                }
+                if let Some(emb) = recs.speaker_embedding_model {
+                    info!(%emb, lang = %new_lang, "auto-selecting speaker embedding for new language");
+                    settings.audio.speaker_embedding_model = Some(emb);
                 }
             }
         }
@@ -341,11 +486,13 @@ impl SettingsManager {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct SettingsPatch {
     pub llm: Option<LlmSettingsPatch>,
     pub audio: Option<AudioSettingsPatch>,
     pub keyboard: Option<KeyboardSettingsPatch>,
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -372,7 +519,7 @@ pub struct RemoteLlmSettingsPatch {
     pub model: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AudioSettingsPatch {
     pub device_name: Option<String>,
     pub asr_model: Option<String>,
@@ -382,6 +529,10 @@ pub struct AudioSettingsPatch {
     pub speaker_tentative_threshold: Option<f32>,
     pub speaker_min_duration_ms: Option<u32>,
     pub speaker_continuity_window_ms: Option<u32>,
+    pub always_listening: Option<bool>,
+    pub window_length_ms: Option<u32>,
+    pub window_step_ms: Option<u32>,
+    pub extraction_tick_secs: Option<u32>,
 }
 
 #[cfg(test)]
@@ -452,5 +603,37 @@ mod tests {
         assert_eq!(settings.llm.selection, LlmSelection::Disabled);
         assert_eq!(settings.llm.local_endpoint_port, 3001);
         assert!(settings.llm.remote.base_url.is_none());
+    }
+
+    #[test]
+    fn zh_recommends_defaults_when_current_is_english_only() {
+        let mut audio = AudioSettings::default();
+        audio.asr_model = Some("whisper_base".to_string());
+        audio.speaker_embedding_model = Some("speaker_something_en".to_string());
+        let recs = recommend_models_for_language("zh-CN", &audio);
+        assert_eq!(recs.asr_model.as_deref(), Some("sense_voice_multi"));
+        assert_eq!(
+            recs.speaker_embedding_model.as_deref(),
+            Some("campplus_zh_en")
+        );
+    }
+
+    #[test]
+    fn zh_keeps_existing_when_already_chinese_capable() {
+        let mut audio = AudioSettings::default();
+        audio.asr_model = Some("zhen_zipformer_bilingual".to_string());
+        audio.speaker_embedding_model = Some("campplus_zh".to_string());
+        let recs = recommend_models_for_language("zh-CN", &audio);
+        assert!(recs.asr_model.is_none());
+        assert!(recs.speaker_embedding_model.is_none());
+    }
+
+    #[test]
+    fn en_does_not_force_any_swap() {
+        let mut audio = AudioSettings::default();
+        audio.asr_model = Some("zh_conformer".to_string());
+        let recs = recommend_models_for_language("en", &audio);
+        assert!(recs.asr_model.is_none());
+        assert!(recs.speaker_embedding_model.is_none());
     }
 }

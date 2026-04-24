@@ -212,6 +212,15 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         });
     }
 
+    // Background windowed action-item extractor. Runs every
+    // `extraction_tick_secs` and drains one pending window per tick.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            crate::engine::window_extractor::run_extraction_loop(state).await;
+        });
+    }
+
     let cors = CorsLayer::new()
         .allow_origin([
             "http://localhost:1420".parse().unwrap(),
@@ -348,6 +357,7 @@ async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
             state.aggregator.clone(),
             None,
             asr_model.as_deref(),
+            settings.language.as_deref(),
             state.clips_dir.clone(),
             state.live_enrollment.clone(),
             crate::engine::inference_pipeline::SpeakerIdConfig {
@@ -388,8 +398,25 @@ async fn pipeline_supervisor(state: AppState) {
         tokio::select! {
             _ = interval.tick() => {
                 // ── Periodic hibernation / wake check ──
+                let always_listening = state.settings_manager.get().await.audio.always_listening;
                 let count = state.aggregator.receiver_count();
                 let running = state.inference_pipeline.lock().await.is_running();
+
+                // Always-listening mode: pipeline stays up whenever the
+                // process is up so the window extractor has transcripts to
+                // read. Subscriber count is irrelevant in this branch.
+                if always_listening {
+                    if idle_since.is_some() {
+                        idle_since = None;
+                    }
+                    if !running {
+                        info!("Always-listening on and pipeline stopped — starting");
+                        if let Err(e) = start_always_on_pipeline(&state).await {
+                            warn!(error = %e, "Failed to start always-listening pipeline");
+                        }
+                    }
+                    continue;
+                }
 
                 if count > 0 {
                     if idle_since.is_some() {
