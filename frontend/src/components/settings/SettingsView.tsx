@@ -5,7 +5,6 @@ import { PreferencesSection } from './PreferencesSection';
 import { TraySection } from './TraySection';
 import { LabelManager } from './LabelManager';
 import { AudioSettings } from './AudioSettings';
-import { RecordingSection } from './RecordingSection';
 import { LlmSettings } from './LlmSettings';
 import { ModelSetup } from './ModelSetup';
 import { KeyboardSettings } from './KeyboardSettings';
@@ -35,7 +34,7 @@ export function SettingsView() {
   const panelContent: Record<SettingsTab, React.ReactNode> = {
     general: <><ProfileSection /><PreferencesSection /><TraySection /></>,
     board: <LabelManager />,
-    voice: <><AudioSettings /><RecordingSection /><ModelSetup /></>,
+    voice: <><AudioSettings /><ModelSetup /></>,
     ai: <><LlmSettings /></>,
     shortcuts: <KeyboardSettings />,
   };
