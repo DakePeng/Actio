@@ -49,9 +49,10 @@ describe('ListeningToggle', () => {
   });
 
   it('clicking calls setListening with the inverted value', () => {
-    const spy = vi.spyOn(useStore.getState(), 'setListening').mockResolvedValue();
+    const setListeningMock = vi.fn().mockResolvedValue(undefined);
+    useStore.setState({ setListening: setListeningMock });
     renderToggle();
     fireEvent.click(screen.getByRole('button'));
-    expect(spy).toHaveBeenCalledWith(false);
+    expect(setListeningMock).toHaveBeenCalledWith(false);
   });
 });

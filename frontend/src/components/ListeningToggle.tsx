@@ -1,4 +1,3 @@
-import { memo } from 'react';
 import { useStore } from '../store/use-store';
 import { useT } from '../i18n';
 
@@ -9,7 +8,7 @@ export interface ListeningToggleProps {
   size?: number;
 }
 
-export const ListeningToggle = memo(function ListeningToggle({
+export function ListeningToggle({
   className,
   size = 28,
 }: ListeningToggleProps) {
@@ -23,7 +22,7 @@ export const ListeningToggle = memo(function ListeningToggle({
     : isOn
       ? t('tray.aria.toggleListening.on')
       : t('tray.aria.toggleListening.off');
-  const tooltip = isOn ? t('tray.tooltip.listening') : t('tray.tooltip.muted');
+  const tooltip = enabled === null ? undefined : isOn ? t('tray.tooltip.listening') : t('tray.tooltip.muted');
 
   return (
     <button
@@ -66,4 +65,4 @@ export const ListeningToggle = memo(function ListeningToggle({
       </svg>
     </button>
   );
-});
+}
