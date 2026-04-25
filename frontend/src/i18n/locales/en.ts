@@ -143,6 +143,7 @@ export const en = {
   'feedback.extractedMany': 'Extracted {count} reminders',
   'feedback.extractFailed': "Couldn't extract reminders",
   'feedback.modelSwitched': 'Switched model to {model} for the new language',
+  'feedback.llmNotConfiguredFormMode': 'Language model is not configured, so quick capture opened in form mode',
 
   // Priority values (for interpolation)
   'priority.low': 'low',
@@ -162,6 +163,16 @@ export const en = {
   'tray.viewFullBoard': 'View full board',
   'tray.swipe.done': 'Done',
   'tray.swipe.confirm': 'Confirm',
+
+  // State descriptors shown beneath the wordmark — they mirror the active
+  // wordmark state so the mark and the text always agree on what Actio is
+  // currently doing.
+  'tray.state.standby': 'standby, at rest',
+  'tray.state.listening': 'listening, actively',
+  'tray.state.transcribing': 'transcribing, in flow',
+  'tray.state.processing': 'processing, reducing',
+  'tray.state.success': 'success, resolved',
+  'tray.state.error': 'error, try again',
 
   // Top-level tab bar
   'tab.people': 'People',
@@ -298,7 +309,7 @@ export const en = {
 
   // New reminder bar
   'newReminder.quickCapture': 'Quick capture',
-  'newReminder.title.chat': 'Type, dictate, or attach an image',
+  'newReminder.title.chat': 'Type or dictate a note',
   'newReminder.title.form': 'Add a note without leaving the board',
   'newReminder.copy.chat': 'Free-form note. Triage and labeling can happen after capture.',
   'newReminder.copy.form': 'Keep the entry short. Triage and labeling can happen after capture.',

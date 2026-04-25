@@ -1013,13 +1013,20 @@ body.body--standby .tray--launcher:hover {
 }
 
 .tray {
+  --tray-collapsed-height: 78px;
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 240;
   border-radius: 14px;
   border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-surface-strong) 86%, transparent),
+      color-mix(in srgb, var(--color-surface) 72%, transparent)
+    ),
+    var(--color-surface);
   box-shadow: var(--shadow-card-md);
   user-select: none;
   overflow: hidden;
@@ -1033,6 +1040,7 @@ body.body--standby .tray--launcher:hover {
 }
 
 .tray--launcher {
+  min-height: var(--tray-collapsed-height);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
@@ -1042,9 +1050,15 @@ body.body--standby .tray--launcher:hover {
 }
 
 .tray-drag-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 18px;
   display: flex;
   justify-content: center;
-  padding: 5px 0 2px;
+  padding: 6px 0 8px;
   cursor: grab;
   -webkit-app-region: no-drag;
 }
@@ -1067,53 +1081,77 @@ body.body--standby .tray--launcher:hover {
 
 .tray-toggle {
   width: 100%;
-  padding: 10px 14px;
+  min-height: var(--tray-collapsed-height);
+  padding: 18px 16px 10px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 16px;
   background: transparent;
   border: 0;
   text-align: left;
   position: relative;
 }
 
+.tray-toggle--live {
+  padding-left: 14px;
+  gap: 10px;
+}
+
 .tray-brand-trigger,
 .tray-chevron-button {
   background: transparent;
   border: 0;
-  padding: 0;
 }
 
 .tray-brand-trigger {
   flex: 1;
   min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
   text-align: left;
+  border-radius: 12px;
+}
+
+.tray-toggle--live .tray-brand-trigger {
+  flex: 0 0 46px;
+  justify-content: center;
 }
 
 .tray-chevron-button {
-  width: 24px;
-  height: 24px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border-radius: 999px;
-  transition: background 0.16s ease, transform 0.16s ease;
+  border: 1px solid transparent;
+  color: var(--color-text-secondary);
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
 .tray-chevron-button:hover {
-  background: var(--color-accent);
-  
+  background: rgba(15, 118, 110, 0.08);
+  border-color: rgba(15, 118, 110, 0.16);
+  color: var(--color-accent-strong);
+}
+
+.tray-brand-trigger:focus-visible,
+.tray-chevron-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .tray-launch-icon {
-  width: 15px;
-  height: 15px;
-  color: var(--color-text-secondary);
+  width: 17px;
+  height: 17px;
+  color: currentColor;
   transition: color 0.16s ease;
 }
 
 .tray-chevron-button:hover .tray-launch-icon {
-  color: var(--color-accent-strong);
+  color: currentColor;
 }
 
 .tray-brand {
@@ -1124,6 +1162,59 @@ body.body--standby .tray--launcher:hover {
   font-size: 0.9rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+
+.tray-brand--compact {
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-accent-wash) 76%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.tray-transcript {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 2px 2px 2px 0;
+  color: var(--color-text);
+}
+
+.tray-transcript__label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--color-accent-strong);
+}
+
+.tray-transcript__viewport {
+  max-height: 34px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.24;
+  letter-spacing: -0.01em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  scrollbar-width: none;
+}
+
+.tray-transcript__viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.tray-transcript--empty .tray-transcript__viewport {
+  color: var(--color-text-tertiary);
+  font-weight: 600;
 }
 
 .tray-brand-dot {
@@ -1956,6 +2047,12 @@ body {
   border-color: rgba(15, 118, 110, 0.32);
 }
 
+.quick-add__mode-switch-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
 .quick-add__actions {
   display: flex;
   gap: 10px;
@@ -2240,8 +2337,13 @@ body {
 
 .tray {
   border-color: var(--color-border);
-  background: var(--color-surface-glass-heavy);
-  
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-surface-strong) 86%, transparent),
+      color-mix(in srgb, var(--color-surface-glass-heavy) 78%, transparent)
+    ),
+    var(--color-surface);
 }
 
 .tray--launcher:hover {
@@ -2249,7 +2351,11 @@ body {
 }
 
 .tray-toggle {
-  padding-block: 12px;
+  padding: 18px 16px 10px 20px;
+}
+
+.tray-toggle--live {
+  padding-left: 14px;
 }
 
 .tray-chevron-button:hover {
@@ -5053,4 +5159,212 @@ button.voiceprint-recorder__chip.is-done.is-playing {
 .live-transcript__bubble--partial .live-transcript__body {
   /* partial-only bubble sits slightly muted */
   opacity: 0.9;
+}
+
+/* ============================================================
+ * ActioWordmark — animated SVG brand mark
+ *
+ * The wordmark draws in currentColor; parents set `color` to
+ * tint it. State-specific modifiers layer motion on top:
+ *   --standby      breath + blinking cursor
+ *   --listening    sonar rings + pulsing center dot
+ *   --processing   dashed secondary + spin arc + scan beam
+ *   --success      confident pulse (tinted green)
+ *   --error        shake + red rings + red 'a'
+ * ============================================================ */
+
+:root {
+  --actio-wm-success: #2da15f;
+  --actio-wm-error: #d8372a;
+  --actio-wm-error-soft: #e8857d;
+}
+
+.actio-wm {
+  display: inline-block;
+  vertical-align: middle;
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+/* STANDBY */
+.actio-wm--standby .actio-wm__glyph-group {
+  animation: actio-wm-breathe 4.2s ease-in-out infinite;
+}
+.actio-wm--standby .actio-wm__cursor {
+  animation: actio-wm-blink 1.1s steps(2, end) infinite;
+  transform-origin: center;
+}
+@keyframes actio-wm-breathe {
+  0%, 100% { opacity: 0.82; }
+  50%      { opacity: 1; }
+}
+@keyframes actio-wm-blink {
+  0%, 49%  { opacity: 1; }
+  50%, 100%{ opacity: 0; }
+}
+
+/* LISTENING */
+.actio-wm--listening .actio-wm__ring {
+  transform-origin: 22px 40px;
+  animation: actio-wm-sonar 3.2s ease-out infinite;
+  opacity: 0;
+}
+.actio-wm--listening .actio-wm__ring--2 { animation-delay: 1.05s; }
+.actio-wm--listening .actio-wm__ring--3 { animation-delay: 2.1s; }
+@keyframes actio-wm-sonar {
+  0%   { transform: scale(0.2); opacity: 0.9; }
+  80%  { opacity: 0.05; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.actio-wm--listening .actio-wm__center-dot {
+  transform-origin: 22px 40px;
+  animation: actio-wm-pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes actio-wm-pulse-dot {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.35); }
+}
+
+/* TRANSCRIBING — rotating dotted target + caret sweep + tick-mark draw */
+.actio-wm--transcribing .actio-wm__target {
+  transform-origin: 22px 40px;
+  animation: actio-wm-rotate 6s linear infinite;
+}
+@keyframes actio-wm-rotate {
+  to { transform: rotate(360deg); }
+}
+.actio-wm--transcribing .actio-wm__caret {
+  animation: actio-wm-caret-sweep 2.8s cubic-bezier(0.65, 0.05, 0.35, 1) infinite;
+}
+@keyframes actio-wm-caret-sweep {
+  0%       { transform: translateX(0);     opacity: 0; }
+  10%      { opacity: 1; }
+  80%      { transform: translateX(160px); opacity: 1; }
+  90%, 100%{ opacity: 0; }
+}
+.actio-wm--transcribing .actio-wm__tick-mark {
+  stroke-dasharray: 160;
+  stroke-dashoffset: 160;
+  animation: actio-wm-draw-tick 2.8s cubic-bezier(0.65, 0.05, 0.35, 1) infinite;
+}
+@keyframes actio-wm-draw-tick {
+  0%, 20% { stroke-dashoffset: 160; opacity: 0; }
+  30%     { opacity: 0.6; }
+  70%     { stroke-dashoffset: 0;   opacity: 0.6; }
+  100%    { stroke-dashoffset: 0;   opacity: 0; }
+}
+
+/* PROCESSING */
+.actio-wm--processing .actio-wm__dashed {
+  stroke-dasharray: 2 4;
+  animation: actio-wm-dash-shift 1.5s linear infinite;
+}
+@keyframes actio-wm-dash-shift {
+  to { stroke-dashoffset: -36; }
+}
+.actio-wm--processing .actio-wm__glyph-group {
+  animation: actio-wm-proc-fade 2.4s ease-in-out infinite;
+}
+@keyframes actio-wm-proc-fade {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 0.88; }
+}
+.actio-wm--processing .actio-wm__spin-arc {
+  transform-origin: 22px 40px;
+  animation: actio-wm-spin-arc 1.2s linear infinite;
+}
+@keyframes actio-wm-spin-arc {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.actio-wm--processing .actio-wm__scan-beam {
+  animation: actio-wm-scan-beam 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes actio-wm-scan-beam {
+  0%        { transform: translateX(0);     opacity: 0; }
+  6%        { opacity: 1; }
+  82%       { transform: translateX(250px); opacity: 0.55; }
+  97%, 100% { transform: translateX(250px); opacity: 0; }
+}
+
+/* SUCCESS */
+.actio-wm--success { color: var(--actio-wm-success); }
+.actio-wm--success .actio-wm__primary-mark {
+  transform-origin: 22px 40px;
+  animation: actio-wm-success-pulse 0.8s cubic-bezier(0.17, 0.67, 0.83, 0.67) forwards;
+}
+@keyframes actio-wm-success-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.1); stroke-width: 4.2; }
+  100% { transform: scale(1); stroke-width: 3; }
+}
+
+/* ERROR */
+.actio-wm--error .actio-wm__glyph-group {
+  animation: actio-wm-shake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+  transform-origin: center;
+}
+@keyframes actio-wm-shake {
+  0%, 100% { transform: translateX(0); }
+  10%      { transform: translateX(-1.2px); }
+  25%      { transform: translateX(1.6px); }
+  40%      { transform: translateX(-2px); }
+  55%      { transform: translateX(1.8px); }
+  70%      { transform: translateX(-1.2px); }
+  85%      { transform: translateX(0.8px); }
+}
+.actio-wm--error .actio-wm__err-ring {
+  transform-origin: 22px 40px;
+  stroke: var(--actio-wm-error-soft);
+  animation: actio-wm-err-ring 1.6s ease-out infinite;
+  opacity: 0;
+}
+.actio-wm--error .actio-wm__err-ring--2 { animation-delay: 0.5s; }
+.actio-wm--error .actio-wm__err-ring--3 { animation-delay: 1s; }
+@keyframes actio-wm-err-ring {
+  0%   { transform: scale(0.4); opacity: 0.8; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.actio-wm--error .actio-wm__primary-mark {
+  stroke: var(--actio-wm-error);
+  animation: actio-wm-err-blink 1.1s ease-in-out infinite;
+}
+@keyframes actio-wm-err-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* Respect the user's reduced-motion preference — drop everything to a steady
+ * mark so the logo reads the same without the kinetic layer. */
+@media (prefers-reduced-motion: reduce) {
+  .actio-wm *,
+  .actio-wm__glyph-group {
+    animation: none !important;
+  }
+  .actio-wm--listening .actio-wm__ring,
+  .actio-wm--error .actio-wm__err-ring {
+    opacity: 0;
+  }
+}
+
+/* ============================================================
+ * Board greeting — relocated from the toolbar so the wordmark
+ * owns the top-left, and the personal greeting gets room to
+ * breathe above the filters.
+ * ============================================================ */
+.board-greeting {
+  padding: 28px 40px 10px;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: var(--color-text);
+  line-height: 1.15;
+}
+
+/* Tray brand — wordmark only in the collapsed launcher. */
+.tray-brand--mark {
+  display: flex;
+  align-items: center;
+  color: var(--color-accent);
+  min-height: 44px;
 }

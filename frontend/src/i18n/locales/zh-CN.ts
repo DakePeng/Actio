@@ -143,6 +143,7 @@ export const zhCN: Translations = {
   'feedback.extractedMany': '已提取 {count} 条提醒',
   'feedback.extractFailed': '无法提取提醒',
   'feedback.modelSwitched': '已为新语言切换模型：{model}',
+  'feedback.llmNotConfiguredFormMode': '尚未配置大语言模型，已切换到表单模式',
 
   // Priority values (for interpolation)
   'priority.low': '低',
@@ -162,6 +163,14 @@ export const zhCN: Translations = {
   'tray.viewFullBoard': '查看完整看板',
   'tray.swipe.done': '完成',
   'tray.swipe.confirm': '确认',
+
+  // 状态描述：与 wordmark 的当前状态保持一致。
+  'tray.state.standby': '待机中，静待',
+  'tray.state.listening': '聆听中，专注',
+  'tray.state.transcribing': '转写中，行云流水',
+  'tray.state.processing': '处理中，归纳',
+  'tray.state.success': '已完成，就绪',
+  'tray.state.error': '出错，请重试',
 
   // Top-level tab bar
   'tab.people': '人员',
@@ -297,7 +306,7 @@ export const zhCN: Translations = {
 
   // New reminder bar
   'newReminder.quickCapture': '快速记录',
-  'newReminder.title.chat': '直接输入、听写或附上图片',
+  'newReminder.title.chat': '输入或听写一条笔记',
   'newReminder.title.form': '不离开看板就能添加笔记',
   'newReminder.copy.chat': '自由格式的笔记。整理和打标签可以事后再做。',
   'newReminder.copy.form': '内容保持简短。整理和打标签可以事后再做。',

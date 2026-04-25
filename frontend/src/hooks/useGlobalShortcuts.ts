@@ -137,19 +137,19 @@ export function useGlobalShortcuts() {
         const ws = new WebSocket('ws://127.0.0.1:3000/ws');
         wsRef.current = ws;
 
-        const seenIds = new Set<string>();
+        const finalizedIds = new Set<string>();
         ws.onmessage = (msg) => {
           try {
             const data = JSON.parse(msg.data);
             if (data.kind === 'transcript' && data.text) {
-              if (data.transcript_id && seenIds.has(data.transcript_id)) return;
-              if (data.transcript_id) seenIds.add(data.transcript_id);
+              if (data.transcript_id && data.is_final && finalizedIds.has(data.transcript_id)) return;
+              if (data.transcript_id && data.is_final) finalizedIds.add(data.transcript_id);
 
               console.log('[Actio] Live transcript:', data.text, data.is_final ? '(final)' : '(partial)', 'id:', data.transcript_id);
               if (data.is_final) {
                 fullTranscriptRef.current += data.text;
               }
-              setDictationTranscript(data.text);
+              setDictationTranscript(data.is_final ? fullTranscriptRef.current : `${fullTranscriptRef.current}${data.text}`);
 
               // If we're in "transcribing" phase and got a final, auto-paste
               if (data.is_final && useStore.getState().ui.isDictationTranscribing) {

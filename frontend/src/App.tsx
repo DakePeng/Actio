@@ -6,6 +6,7 @@ import { StandbyTray } from './components/StandbyTray';
 import { OnboardingCard } from './components/OnboardingCard';
 import { NewReminderBar } from './components/NewReminderBar';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import { advanceWordmarkPreview } from './hooks/useWordmarkPreview';
 
 export default function App() {
   useGlobalShortcuts();
@@ -24,6 +25,20 @@ export default function App() {
   useEffect(() => {
     void loadBoard();
   }, [loadBoard]);
+
+  // Shift+Alt+Tab cycles the ActioWordmark through transcribing → processing
+  // → success → standby → (clear). Useful for previewing the animations
+  // without having to actually trigger each state.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.shiftKey && e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        advanceWordmarkPreview();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

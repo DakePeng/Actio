@@ -6,6 +6,22 @@ import { useT } from '../i18n';
 
 type CaptureMode = 'chat' | 'form';
 const MODE_STORAGE_KEY = 'actio-capture-mode';
+const SETTINGS_API_URL = `${(import.meta.env.VITE_ACTIO_API_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '')}/settings`;
+
+function isLlmConfigured(settings: unknown): boolean {
+  const selection = (settings as { llm?: { selection?: { kind?: string } } })?.llm?.selection;
+  return Boolean(selection?.kind && selection.kind !== 'disabled');
+}
+
+async function fetchLlmConfigured(signal: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(SETTINGS_API_URL, { signal });
+    if (!response.ok) return false;
+    return isLlmConfigured(await response.json());
+  } catch {
+    return false;
+  }
+}
 
 function loadInitialMode(): CaptureMode {
   try {
@@ -21,6 +37,7 @@ export function NewReminderBar() {
   const show = useStore((s) => s.ui.showNewReminderBar);
   const setNewReminderBar = useStore((s) => s.setNewReminderBar);
   const addReminder = useStore((s) => s.addReminder);
+  const setFeedback = useStore((s) => s.setFeedback);
 
   const [mode, setMode] = useState<CaptureMode>(loadInitialMode);
   const t = useT();
@@ -33,6 +50,26 @@ export function NewReminderBar() {
       /* ignore quota errors */
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (!show || mode !== 'chat') return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 800);
+
+    void fetchLlmConfigured(controller.signal).then((configured) => {
+      if (cancelled || configured) return;
+      setMode('form');
+      setFeedback('feedback.llmNotConfiguredFormMode');
+    });
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [show, mode, setFeedback]);
 
   // Form mode state (only used when mode === 'form')
   const [title, setTitle] = useState('');
@@ -121,20 +158,6 @@ export function NewReminderBar() {
                   </div>
                 </div>
                 <div className="quick-add__header-actions">
-                  <button
-                    type="button"
-                    className="quick-add__mode-toggle"
-                    onClick={() => setMode(mode === 'chat' ? 'form' : 'chat')}
-                    title={
-                      mode === 'chat'
-                        ? t('newReminder.tooltip.switchToForm')
-                        : t('newReminder.tooltip.switchToChat')
-                    }
-                  >
-                    {mode === 'chat'
-                      ? t('newReminder.switchToForm')
-                      : t('newReminder.switchToChat')}
-                  </button>
                   <div className="active-pill">{t('newReminder.saveHint')}</div>
                   <button
                     type="button"
@@ -204,6 +227,22 @@ export function NewReminderBar() {
                   </div>
                 </div>
               )}
+              <div className="quick-add__mode-switch-row">
+                <button
+                  type="button"
+                  className="quick-add__mode-toggle"
+                  onClick={() => setMode(mode === 'chat' ? 'form' : 'chat')}
+                  title={
+                    mode === 'chat'
+                      ? t('newReminder.tooltip.switchToForm')
+                      : t('newReminder.tooltip.switchToChat')
+                  }
+                >
+                  {mode === 'chat'
+                    ? t('newReminder.switchToForm')
+                    : t('newReminder.switchToChat')}
+                </button>
+              </div>
             </div>
           </motion.div>
         </>

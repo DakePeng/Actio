@@ -7,6 +7,8 @@ import { sortByPriority } from '../utils/priority';
 import { formatTimeShort } from '../utils/time';
 import { SwipeActionRow } from './swipe/SwipeActionRow';
 import { SwipeActionCoordinatorProvider } from './swipe/SwipeActionCoordinator';
+import { ActioWordmark } from './ActioWordmark';
+import { useActioState } from '../hooks/useActioState';
 import { useT } from '../i18n';
 
 // Context to share tray state with FAB
@@ -30,6 +32,10 @@ export function StandbyTray() {
   const [expanded, setExpanded] = useState(false);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const t = useT();
+  const actioState = useActioState();
+  const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
+  const showLiveTranscript = isDictating || isDictationTranscribing;
+  const transcriptText = dictationTranscript.trim();
 
   const topReminders = useMemo(() => {
     return [...reminders].filter((r) => r.archivedAt === null).sort(sortByPriority).slice(0, 6);
@@ -38,6 +44,11 @@ export function StandbyTray() {
   useEffect(() => {
     setTrayExpanded(expanded);
   }, [expanded, setTrayExpanded]);
+
+  useEffect(() => {
+    if (!showLiveTranscript || !transcriptViewportRef.current) return;
+    transcriptViewportRef.current.scrollTop = transcriptViewportRef.current.scrollHeight;
+  }, [dictationTranscript, showLiveTranscript]);
 
   // Resize the Tauri window to match the tray state. The framer-motion
   // width animation on the tray element grows the DOM to 440px when
@@ -135,44 +146,36 @@ export function StandbyTray() {
           <div className="tray-drag-pill" />
         </div>
         {newCount > 0 && <span className="tray-badge">{newCount > 9 ? '9+' : newCount}</span>}
-        <div className="tray-toggle">
+        <div className={`tray-toggle${showLiveTranscript ? ' tray-toggle--live' : ''}`}>
           <button type="button" className="tray-brand-trigger" onClick={() => setExpanded((prev) => !prev)}>
-            <div className="tray-brand">
-              <span className="tray-brand-dot" aria-hidden="true" />
-              <div>
-                {isDictating || isDictationTranscribing ? (
-                  <div
-                    className="tray-soundwave"
-                    aria-label={
-                      isDictationTranscribing
-                        ? t('tray.aria.transcribing')
-                        : t('tray.aria.listening')
-                    }
-                  >
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <span key={i} className="tray-soundwave-bar" style={{ animationDelay: `${i * 0.1}s` }} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="tray-brand-name">actio</div>
-                )}
-                <div
-                  className={`tray-brand-subtitle${isDictating && dictationTranscript ? ' tray-brand-subtitle--live' : ''}`}
-                  title={isDictating && dictationTranscript ? dictationTranscript : undefined}
-                >
-                  {isDictationTranscribing
-                    ? t('tray.status.transcribing')
-                    : isDictating
-                      ? (dictationTranscript || t('tray.status.listening'))
-                      : newCount === 0
-                        ? t('tray.status.quiet')
-                        : newCount === 1
-                          ? t('tray.status.freshCapturesOne')
-                          : t('tray.status.freshCapturesMany', { count: newCount })}
-                </div>
-              </div>
+            <div className={`tray-brand tray-brand--mark${showLiveTranscript ? ' tray-brand--compact' : ''}`}>
+              <ActioWordmark
+                state={actioState}
+                height={showLiveTranscript ? 34 : 40}
+                ariaLabel="Actio"
+                compact={showLiveTranscript}
+              />
             </div>
           </button>
+          {showLiveTranscript && (
+            <div
+              className={`tray-transcript${transcriptText ? '' : ' tray-transcript--empty'}`}
+              role="status"
+              aria-live="polite"
+              aria-label={
+                isDictationTranscribing
+                  ? t('tray.aria.transcribing')
+                  : t('tray.aria.listening')
+              }
+            >
+              <span className="tray-transcript__label">
+                {isDictationTranscribing ? t('tray.status.transcribing') : t('tray.status.listening')}
+              </span>
+              <div ref={transcriptViewportRef} className="tray-transcript__viewport">
+                {transcriptText || t('tray.status.listening')}
+              </div>
+            </div>
+          )}
           <button
             type="button"
             className="tray-chevron-button"

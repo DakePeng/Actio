@@ -187,9 +187,7 @@ export function BoardWindow() {
             >
               <div className="desktop-toolbar">
                 <div className="desktop-toolbar__brand">
-                  <div>
-                    <div className="desktop-toolbar__title">{greeting}</div>
-                  </div>
+                  <div className="desktop-toolbar__title">{greeting}</div>
                 </div>
 
                 <TabBar />
@@ -205,7 +203,6 @@ export function BoardWindow() {
                   <button
                     type="button"
                     className="primary-button"
-                    disabled={activeTab !== 'board'}
                     onClick={() => setNewReminderBar(true)}
                   >
                     {t('board.action.captureNote')}

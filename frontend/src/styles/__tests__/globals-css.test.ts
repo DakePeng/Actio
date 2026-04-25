@@ -32,4 +32,18 @@ describe('global CSS regressions', () => {
     expect(spotlight).toContain('border-color: var(--color-accent)');
     expect(spotlight).not.toMatch(/\bbackground\s*:/);
   });
+
+  it('keeps the standby tray controls centered in an accessible compact header', () => {
+    expect(globalsCss).toContain('--tray-collapsed-height: 78px');
+    expect(globalsCss).toContain('min-height: var(--tray-collapsed-height)');
+    expect(globalsCss).toContain('width: 44px');
+    expect(globalsCss).toContain('height: 44px');
+  });
+
+  it('keeps live tray transcript text in a scrolling viewport', () => {
+    expect(globalsCss).toContain('.tray-toggle--live');
+    expect(globalsCss).toContain('.tray-transcript__viewport');
+    expect(globalsCss).toContain('overflow-y: auto');
+    expect(globalsCss).toContain('white-space: pre-wrap');
+  });
 });

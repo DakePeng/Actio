@@ -18,6 +18,7 @@ describe('actio api mappers', () => {
       transcript_excerpt: 'Finish wiring the API layer',
       context: 'Captured from a note',
       source_time: '2026-04-09T17:00:00.000Z',
+      source_window_id: null,
       labels: ['label-1', 'label-2'],
       created_at: '2026-04-09T16:00:00.000Z',
       updated_at: '2026-04-09T16:30:00.000Z',
