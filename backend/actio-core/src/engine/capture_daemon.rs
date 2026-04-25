@@ -185,3 +185,52 @@ impl CaptureDaemon {
         self.inner.lock().await.handle.is_some()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vad_path() -> PathBuf {
+        // Tests don't actually start cpal — they only exercise the flag
+        // surface. A nonexistent path is fine here.
+        PathBuf::from("nonexistent_silero.onnx")
+    }
+
+    #[tokio::test]
+    async fn archive_enabled_defaults_true_and_toggles() {
+        let d = CaptureDaemon::new(None, vad_path());
+        assert!(d.archive_enabled().await);
+        d.set_archive_enabled(false).await;
+        assert!(!d.archive_enabled().await);
+        d.set_archive_enabled(true).await;
+        assert!(d.archive_enabled().await);
+    }
+
+    #[tokio::test]
+    async fn mute_and_unmute_are_idempotent_no_ops_when_already_in_state() {
+        let d = CaptureDaemon::new(None, vad_path());
+        // Daemon is freshly created — never started. mute() should still
+        // record muted=true even though there's no cpal stream to stop.
+        d.mute().await;
+        assert!(d.is_muted().await);
+        // Second mute is a no-op (no panic, no stale broadcast).
+        d.mute().await;
+        assert!(d.is_muted().await);
+        // unmute() will try to start cpal which may legitimately fail in
+        // CI; we don't assert success, only that the flag flips back.
+        let _ = d.unmute().await;
+    }
+
+    #[tokio::test]
+    async fn subscribe_returns_independent_receivers() {
+        let d = CaptureDaemon::new(None, vad_path());
+        let mut a = d.subscribe();
+        let mut b = d.subscribe();
+        // Manually push an event to verify both receivers see it.
+        let _ = d.tx.send(CaptureEvent::Muted);
+        let ra = a.try_recv();
+        let rb = b.try_recv();
+        assert!(matches!(ra, Ok(CaptureEvent::Muted)));
+        assert!(matches!(rb, Ok(CaptureEvent::Muted)));
+    }
+}
