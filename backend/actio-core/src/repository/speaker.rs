@@ -108,6 +108,30 @@ pub async fn insert_provisional(
     Ok(())
 }
 
+/// Hard-delete provisional speakers whose last match is older than
+/// `older_than_days`. Their attached audio_segments rows have their
+/// `speaker_id` set to NULL via the existing ON DELETE SET NULL FK.
+/// Returns the number of rows deleted. NULL `provisional_last_matched_at`
+/// (shouldn't happen for any row inserted by `insert_provisional`, but
+/// allowed by the schema) is treated as eligible for GC.
+pub async fn gc_stale_provisionals(
+    pool: &SqlitePool,
+    older_than_days: i64,
+) -> Result<u64, sqlx::Error> {
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(older_than_days);
+    let cutoff_str = cutoff.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let res = sqlx::query(
+        "DELETE FROM speakers \
+         WHERE kind = 'provisional' \
+           AND (provisional_last_matched_at IS NULL \
+                OR provisional_last_matched_at < ?1)",
+    )
+    .bind(cutoff_str)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
 /// Bump `provisional_last_matched_at` to now. Called when a later clip's
 /// cluster centroid matches an existing provisional row, so the GC sweep
 /// in Plan Task 14 doesn't reap an actively-used provisional speaker.
