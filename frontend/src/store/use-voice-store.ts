@@ -136,6 +136,12 @@ function saveTranslateTarget(lang: string): void {
   } catch { /* private mode etc. */ }
 }
 
+// Single-flight guard for translation flushes. The 3s interval can fire
+// while a prior flush is still awaiting the LLM response — without this
+// guard, a second flush would re-send the same pending ids and the two
+// responses would race into the same byLineId.
+let flushInFlight = false;
+
 const { segments: initialSegments, clipInterval: initialClipInterval } = loadVoiceData();
 
 type StoreSet = (
@@ -452,6 +458,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   },
 
   flushTranslationBatch: async () => {
+    if (flushInFlight) return;
     const { translation, currentSession } = get();
     if (!translation.enabled || !currentSession) return;
     const pending = Object.entries(translation.byLineId)
@@ -463,11 +470,26 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       .map((id) => ({ id, text: idToText.get(id) ?? '' }))
       .filter((l) => l.text);
     if (lines.length === 0) return;
+    flushInFlight = true;
     try {
       const out = await translateLines(translation.targetLang, lines);
+      const post = get();
+      // If the user muted or toggled off mid-flush, the byLineId we'd be
+      // writing to has either been cleared or is for a closed session —
+      // dropping the response is correct.
+      if (!post.translation.enabled || !post.currentSession) return;
+      const returnedIds = new Set(out.map((t) => t.id));
       set((state) => {
         const next = { ...state.translation.byLineId };
         for (const t of out) next[t.id] = { status: 'done', text: t.text };
+        // Anything we asked about that the LLM didn't return stays as
+        // 'error' so the UI shows a retry link instead of an indefinite
+        // 'translating' placeholder.
+        for (const id of lines.map((l) => l.id)) {
+          if (!returnedIds.has(id) && next[id]?.status === 'pending') {
+            next[id] = { status: 'error' };
+          }
+        }
         return { translation: { ...state.translation, byLineId: next } };
       });
     } catch (e) {
@@ -475,6 +497,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         set({ translation: { ...get().translation, enabled: false, byLineId: {} } });
         return;
       }
+      const post = get();
+      if (!post.translation.enabled || !post.currentSession) return;
       const askedIds = new Set(lines.map((l) => l.id));
       set((state) => {
         const next = { ...state.translation.byLineId };
@@ -483,6 +507,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         }
         return { translation: { ...state.translation, byLineId: next } };
       });
+    } finally {
+      flushInFlight = false;
     }
   },
 

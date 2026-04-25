@@ -151,4 +151,42 @@ describe('translation slice', () => {
     expect(t.byLineId).toEqual({});
     expect(t.targetLang).toBe('ja');
   });
+
+  it('marks ids missing from the LLM response as error instead of leaving them pending', async () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: { a: { status: 'pending' }, b: { status: 'pending' } },
+      },
+    });
+    vi.spyOn(translateApi, 'translateLines').mockResolvedValue([{ id: 'a', text: 'A!' }]);
+    await useVoiceStore.getState().flushTranslationBatch();
+    const t = useVoiceStore.getState().translation;
+    expect(t.byLineId['a']).toEqual({ status: 'done', text: 'A!' });
+    expect(t.byLineId['b']?.status).toBe('error');
+  });
+
+  it('drops the response if the user mutes mid-flush', async () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: { a: { status: 'pending' } },
+      },
+    });
+    let resolve: (v: { id: string; text: string }[]) => void = () => {};
+    vi.spyOn(translateApi, 'translateLines').mockImplementation(
+      () => new Promise((r) => { resolve = r; }),
+    );
+    const flush = useVoiceStore.getState().flushTranslationBatch();
+    // Simulate stopRecording mid-flush: clears byLineId.
+    useVoiceStore.setState({
+      currentSession: null,
+      translation: { ...useVoiceStore.getState().translation, byLineId: {} },
+    });
+    resolve([{ id: 'a', text: 'A!' }]);
+    await flush;
+    expect(useVoiceStore.getState().translation.byLineId).toEqual({});
+  });
 });
