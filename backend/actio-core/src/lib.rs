@@ -241,20 +241,28 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         }
     }
 
-    // Spawn the always-on inference pipeline. The design intent is that the
-    // app listens continuously — UI clients (Recording tab, chat composer
-    // dictation) just open a WebSocket subscription to receive the live
-    // transcript stream as it's produced. They never start or stop the
-    // pipeline themselves.
-    //
-    // To avoid burning RAM when no UI is listening, a supervisor task watches
-    // the broadcast receiver count and hibernates the recognizer (frees the
-    // model RAM) after `IDLE_GRACE_PERIOD` of no subscribers, then wakes it
-    // back up on the next WebSocket connect.
-    {
+    // Pick the always-on pipeline based on the user's opt-in. The two paths
+    // are mutually exclusive — both would try to grab the microphone.
+    let use_batch_pipeline = state
+        .settings_manager
+        .get()
+        .await
+        .audio
+        .use_batch_pipeline;
+    if use_batch_pipeline {
+        info!("Always-on pipeline: batch clip processing (new)");
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = start_always_on_capture(&state_clone).await {
+                warn!(error = %e, "Could not warm-start always-on capture daemon");
+            }
+        });
+    } else {
+        // Legacy: spawn the InferencePipeline supervisor that watches the
+        // broadcast receiver count and hibernates after IDLE_GRACE_PERIOD.
+        info!("Always-on pipeline: legacy InferencePipeline");
         let state = state.clone();
         tokio::spawn(async move {
-            // Warm start at boot so the first user click is fast.
             if let Err(e) = start_always_on_pipeline(&state).await {
                 warn!(error = %e, "Could not warm-start always-on inference pipeline");
             }
@@ -359,6 +367,59 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         );
     }
 
+    Ok(())
+}
+
+/// Start the new batch-clip-processing always-on path:
+///   1. Create a default session if none exists for this boot.
+///   2. Start the CaptureDaemon (cpal + Silero VAD).
+///   3. Spawn the ClipWriter loop tied to that session — it subscribes to
+///      the daemon's broadcast, runs the boundary state machine, writes
+///      per-segment WAVs + manifest, and inserts audio_clips rows.
+///
+/// The BatchProcessor's claim loop is driven by the existing
+/// `batch_pipeline_supervisor`, which calls
+/// `BatchProcessorHandle::ensure_running` whenever
+/// `audio.always_listening = true`. Together this is the new default
+/// pipeline — opt in via `audio.use_batch_pipeline`.
+async fn start_always_on_capture(state: &AppState) -> anyhow::Result<()> {
+    let settings = state.settings_manager.get().await;
+    if !settings.audio.always_listening {
+        info!("always_listening=false at boot — skipping capture daemon start");
+        return Ok(());
+    }
+
+    // Tenant must match the dev tenant the frontend filters by — same as
+    // the legacy start_always_on_pipeline.
+    let tenant_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+        .expect("hardcoded uuid must parse");
+    let session =
+        repository::session::create_session(&state.pool, tenant_id, "microphone", "always_on")
+            .await?;
+    let session_id = session.id.parse::<uuid::Uuid>()?;
+
+    state.capture_daemon.start().await?;
+
+    // Spawn the clip writer loop. It runs until the broadcast channel
+    // closes (daemon shutdown) or the receiver lags severely. On a clean
+    // app exit this just gets dropped along with the rest of the runtime.
+    let pool = state.pool.clone();
+    let daemon = state.capture_daemon.clone();
+    let cfg = crate::engine::clip_writer::ClipWriterConfig {
+        clips_dir: state.clips_dir.clone(),
+        boundary: crate::engine::clip_boundary::BoundaryConfig {
+            target_secs: settings.audio.clip_target_secs,
+            max_secs: settings.audio.clip_max_secs,
+            silence_close_ms: settings.audio.clip_close_silence_ms,
+        },
+    };
+    let events = state.capture_daemon.subscribe();
+    tokio::spawn(async move {
+        crate::engine::clip_writer::run_clip_writer_loop(pool, session_id, cfg, daemon, events)
+            .await;
+    });
+
+    info!(%session_id, "Always-on capture + clip writer started");
     Ok(())
 }
 

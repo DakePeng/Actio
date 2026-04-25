@@ -205,6 +205,14 @@ pub struct AudioSettings {
     /// days are GC'd (DELETE cascades their attached segments' speaker_id).
     #[serde(default = "default_provisional_voiceprint_gc_days")]
     pub provisional_voiceprint_gc_days: u32,
+
+    /// Opt-in for the new batch-clip-processing pipeline. When true,
+    /// start_server boots the always-on CaptureDaemon + ClipWriter +
+    /// BatchProcessor instead of the legacy InferencePipeline supervisor.
+    /// The two paths are mutually exclusive — both would try to grab the
+    /// microphone. Default false so existing installs are unchanged.
+    #[serde(default)]
+    pub use_batch_pipeline: bool,
 }
 
 fn default_clip_retention_days() -> u32 {
@@ -291,6 +299,7 @@ impl Default for AudioSettings {
             cluster_cosine_threshold: default_cluster_cosine_threshold(),
             audio_retention_days: default_audio_retention_days(),
             provisional_voiceprint_gc_days: default_provisional_voiceprint_gc_days(),
+            use_batch_pipeline: false,
         }
     }
 }
@@ -570,6 +579,9 @@ impl SettingsManager {
             if let Some(v) = audio.provisional_voiceprint_gc_days {
                 settings.audio.provisional_voiceprint_gc_days = v;
             }
+            if let Some(v) = audio.use_batch_pipeline {
+                settings.audio.use_batch_pipeline = v;
+            }
         }
         if let Some(keyboard) = patch.keyboard {
             if let Some(shortcuts) = keyboard.shortcuts {
@@ -660,6 +672,7 @@ pub struct AudioSettingsPatch {
     pub cluster_cosine_threshold: Option<f32>,
     pub audio_retention_days: Option<u32>,
     pub provisional_voiceprint_gc_days: Option<u32>,
+    pub use_batch_pipeline: Option<bool>,
 }
 
 #[cfg(test)]
