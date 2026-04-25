@@ -300,9 +300,13 @@ pub fn build_router_from_settings(
     }
 }
 
-/// How long to wait with zero broadcast subscribers before hibernating
-/// the always-on inference pipeline. Brief pauses (changing tabs, finishing
-/// a sentence) shouldn't trigger hibernation; sustained idleness should.
+/// Legacy: how long to wait with zero broadcast subscribers before
+/// hibernating the inference pipeline. Only relevant when
+/// `audio.always_listening = false` AND a WS subscriber temporarily
+/// attached — we don't want a tab-switch flicker to thrash the pipeline.
+/// User-driven mute (mic toggle off) bypasses this entirely and stops
+/// the pipeline immediately so the microphone isn't hot for an extra
+/// minute after the user said "stop".
 const IDLE_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Start the inference pipeline. Idempotent: if a pipeline is already
@@ -393,6 +397,11 @@ async fn pipeline_supervisor(state: AppState) {
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let mut idle_since: Option<std::time::Instant> = None;
+    // Track the last-seen always_listening value so we can detect the
+    // user-driven mute transition (true → false) and stop the pipeline
+    // immediately, instead of leaving the mic hot for the legacy
+    // 60-second grace period.
+    let mut prev_always_listening: Option<bool> = None;
 
     loop {
         tokio::select! {
@@ -415,8 +424,22 @@ async fn pipeline_supervisor(state: AppState) {
                             warn!(error = %e, "Failed to start always-listening pipeline");
                         }
                     }
+                    prev_always_listening = Some(true);
                     continue;
                 }
+
+                // User just flipped the mic toggle off — stop immediately
+                // rather than running out the legacy 60s grace period.
+                // The user expected the mic to be off the moment they
+                // clicked, not a minute later.
+                if prev_always_listening == Some(true) && running {
+                    info!("Listening disabled by user — stopping pipeline");
+                    state.inference_pipeline.lock().await.stop();
+                    idle_since = None;
+                    prev_always_listening = Some(false);
+                    continue;
+                }
+                prev_always_listening = Some(false);
 
                 if count > 0 {
                     if idle_since.is_some() {
@@ -432,7 +455,9 @@ async fn pipeline_supervisor(state: AppState) {
                     continue;
                 }
 
-                // No subscribers.
+                // No WS subscribers AND user has not just muted (legacy
+                // grace path — applies only when always_listening was
+                // already false and a WS client temporarily attached).
                 if !running {
                     continue;
                 }
@@ -442,7 +467,7 @@ async fn pipeline_supervisor(state: AppState) {
                         idle_since = Some(std::time::Instant::now());
                         info!(
                             grace_secs = IDLE_GRACE_PERIOD.as_secs(),
-                            "No subscribers — pipeline will hibernate after grace period"
+                            "WS subscribers gone — pipeline will hibernate after grace period"
                         );
                     }
                     Some(since) if since.elapsed() >= IDLE_GRACE_PERIOD => {
