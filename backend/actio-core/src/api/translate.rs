@@ -148,7 +148,15 @@ mod tests {
                     None,
                     model_dir.join("silero_vad.onnx"),
                 ));
-                Arc::new(crate::engine::live_streaming::LiveStreamingService::new(cd))
+                let agg = Arc::new(TranscriptAggregator::new(
+                    SqlitePoolOptions::new()
+                        .connect("sqlite::memory:")
+                        .await
+                        .unwrap(),
+                ));
+                Arc::new(crate::engine::live_streaming::LiveStreamingService::new(
+                    cd, agg,
+                ))
             },
             settings_manager: Arc::new(SettingsManager::new(&data_dir)),
             clips_dir,

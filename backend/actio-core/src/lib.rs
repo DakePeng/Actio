@@ -148,7 +148,10 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         ))
     };
     let live_streaming = Arc::new(
-        crate::engine::live_streaming::LiveStreamingService::new(capture_daemon.clone()),
+        crate::engine::live_streaming::LiveStreamingService::new(
+            capture_daemon.clone(),
+            aggregator.clone(),
+        ),
     );
 
     // Phase-A voiceprint-candidate retention: clips land in <data_dir>/audio_clips/
