@@ -213,7 +213,7 @@ impl LlmRouter {
     /// see `engine::llm_translate`.
     pub async fn translate_lines(
         &self,
-        _target_lang: &str,
+        target_lang: &str,
         lines: Vec<crate::engine::llm_translate::TranslateLineRequest>,
     ) -> Result<Vec<crate::engine::llm_translate::TranslateLineResponse>, LlmRouterError> {
         match self {
@@ -226,12 +226,10 @@ impl LlmRouter {
                     text: format!("{}{}", l.text, translation_suffix),
                 })
                 .collect()),
-            LlmRouter::Remote(_) => {
-                // Implemented in Task 7
-                Err(LlmRouterError::Parse(
-                    "translate_lines remote not yet implemented".into(),
-                ))
-            }
+            LlmRouter::Remote(client) => client
+                .translate_lines(target_lang, lines)
+                .await
+                .map_err(LlmRouterError::Remote),
             LlmRouter::Local { .. } => {
                 // Implemented in Task 8
                 Err(LlmRouterError::Parse(
