@@ -239,6 +239,14 @@ export const zhCN: Translations = {
   'settings.audio.extractionTick': '调度周期',
   'settings.audio.minutes': '{n} 分钟',
   'settings.audio.seconds': '{n} 秒',
+  'settings.audio.days': '{n} 天',
+  'settings.audio.batchTitle': '后台片段处理',
+  'settings.audio.batchHint':
+    '录制的音频会在后台分片段处理,生成转写并归并相同声音。可调整每个片段时长、声音聚类强度,以及原始音频的保留期。',
+  'settings.audio.clipTarget': '目标片段时长',
+  'settings.audio.clusterThreshold': '声音聚类阈值',
+  'settings.audio.audioRetention': '音频保留',
+  'settings.audio.provisionalGc': '未匹配的声音保留时长',
 
   // Board page filter bar
   'board.filter.priority': '优先级',

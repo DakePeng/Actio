@@ -241,6 +241,14 @@ export const en = {
   'settings.audio.extractionTick': 'Scheduler tick',
   'settings.audio.minutes': '{n} min',
   'settings.audio.seconds': '{n} s',
+  'settings.audio.days': '{n} d',
+  'settings.audio.batchTitle': 'Batch clip processing',
+  'settings.audio.batchHint':
+    'Clips of recorded audio are processed in the background to produce transcripts and group voices. Tune how clips are sized, how aggressively voices are merged, and how long raw audio is kept.',
+  'settings.audio.clipTarget': 'Clip target length',
+  'settings.audio.clusterThreshold': 'Voice clustering threshold',
+  'settings.audio.audioRetention': 'Audio retention',
+  'settings.audio.provisionalGc': 'Drop unmatched voices after',
 
   // Board page filter bar
   'board.filter.priority': 'Priority',
