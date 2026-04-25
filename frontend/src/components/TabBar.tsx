@@ -5,7 +5,7 @@ import { useT, type TKey } from '../i18n';
 
 const TABS: { id: Tab; labelKey: TKey }[] = [
   { id: 'people', labelKey: 'tab.people' },
-  { id: 'recording', labelKey: 'tab.recording' },
+  { id: 'live', labelKey: 'tab.live' },
   { id: 'board', labelKey: 'tab.board' },
   { id: 'needs-review', labelKey: 'tab.needsReview' },
   { id: 'archive', labelKey: 'tab.archive' },

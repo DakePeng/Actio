@@ -14,7 +14,7 @@ const DEFAULT_SHORTCUTS: ShortcutMap = {
   // Tab navigation
   tab_board: 'Ctrl+1',
   tab_people: 'Ctrl+2',
-  tab_recording: 'Ctrl+3',
+  tab_live: 'Ctrl+3',
   tab_archive: 'Ctrl+4',
   tab_settings: 'Ctrl+5',
   // Card navigation
@@ -30,7 +30,7 @@ const ACTION_LABEL_KEYS: Record<string, TKey> = {
   new_todo: 'settings.shortcuts.action.new_todo',
   tab_board: 'settings.shortcuts.action.tab_board',
   tab_people: 'settings.shortcuts.action.tab_people',
-  tab_recording: 'settings.shortcuts.action.tab_recording',
+  tab_live: 'settings.shortcuts.action.tab_live',
   tab_archive: 'settings.shortcuts.action.tab_archive',
   tab_settings: 'settings.shortcuts.action.tab_settings',
   card_up: 'settings.shortcuts.action.card_up',
@@ -143,7 +143,7 @@ export function KeyboardSettings() {
     },
     {
       labelKey: 'settings.shortcuts.group.tab',
-      actions: ['tab_board', 'tab_people', 'tab_recording', 'tab_archive', 'tab_settings'],
+      actions: ['tab_board', 'tab_people', 'tab_live', 'tab_archive', 'tab_settings'],
     },
     {
       labelKey: 'settings.shortcuts.group.card',

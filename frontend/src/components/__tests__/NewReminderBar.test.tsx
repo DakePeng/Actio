@@ -15,6 +15,7 @@ vi.mock('../NeedsReviewView', () => ({ NeedsReviewView: () => <div /> }));
 vi.mock('../ArchiveView', () => ({ ArchiveView: () => <div /> }));
 vi.mock('../settings/SettingsView', () => ({ SettingsView: () => <div /> }));
 vi.mock('../RecordingTab', () => ({ RecordingTab: () => <div /> }));
+vi.mock('../LiveTab', () => ({ LiveTab: () => <div /> }));
 vi.mock('../PeopleTab', () => ({ PeopleTab: () => <div /> }));
 
 function openNewReminder(overrides: Partial<ReturnType<typeof useStore.getState>['ui']> = {}) {

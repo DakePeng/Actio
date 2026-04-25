@@ -5,7 +5,7 @@ import { Board } from './Board';
 import { NeedsReviewView } from './NeedsReviewView';
 import { ArchiveView } from './ArchiveView';
 import { SettingsView } from './settings/SettingsView';
-import { RecordingTab } from './RecordingTab';
+import { LiveTab } from './LiveTab';
 import { PeopleTab } from './PeopleTab';
 import { TabBar } from './TabBar';
 import { NewReminderBar } from './NewReminderBar';
@@ -215,7 +215,7 @@ export function BoardWindow() {
                 {activeTab === 'needs-review' && <NeedsReviewView />}
                 {activeTab === 'archive' && <ArchiveView />}
                 {activeTab === 'settings' && <SettingsView />}
-                {activeTab === 'recording' && <RecordingTab />}
+                {activeTab === 'live' && <LiveTab />}
                 {activeTab === 'people' && <PeopleTab />}
               </div>
               <NewReminderBar />
