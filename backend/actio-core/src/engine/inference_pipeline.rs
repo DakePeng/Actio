@@ -553,6 +553,7 @@ async fn finalize_segment(
 
     crate::repository::segment::insert_segment(
         pool,
+        segment_id,
         session_id,
         start_ms,
         end_ms,
@@ -625,7 +626,7 @@ async fn handle_segment_embedding(
             end_ms, "segment hook: no embedding model — marking UNKNOWN"
         );
         crate::repository::segment::insert_segment(
-            pool, session_id, start_ms, end_ms, None, None, None, None,
+            pool, segment_id, session_id, start_ms, end_ms, None, None, None, None,
         )
         .await?;
         publish_raw(None, None);
@@ -637,7 +638,7 @@ async fn handle_segment_embedding(
         Err(err) => {
             warn!(?err, "speaker embedding failed; segment marked UNKNOWN");
             crate::repository::segment::insert_segment(
-                pool, session_id, start_ms, end_ms, None, None, None, None,
+                pool, segment_id, session_id, start_ms, end_ms, None, None, None, None,
             )
             .await?;
             publish_raw(None, None);
@@ -662,6 +663,7 @@ async fn handle_segment_embedding(
         let speaker_uuid = Uuid::parse_str(&enrolled_speaker).ok();
         crate::repository::segment::insert_segment(
             pool,
+            segment_id,
             session_id,
             start_ms,
             end_ms,

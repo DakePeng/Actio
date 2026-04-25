@@ -194,8 +194,15 @@ pub async fn unassign_speaker(pool: &SqlitePool, segment_id: Uuid) -> Result<boo
 /// Insert an audio_segments row, optionally attaching a pre-computed embedding
 /// and speaker identification result. Used by the live inference pipeline as
 /// each VAD-detected segment completes.
+///
+/// The `id` argument MUST be the same UUID the VAD attached to the
+/// `SpeechSegment` and that the offline-ASR consumer carries through to
+/// `transcripts.segment_id`. Generating a fresh UUID here would orphan
+/// transcripts (FK constraint failure) since they reference the VAD-side
+/// id, not whatever this function picked.
 pub async fn insert_segment(
     pool: &SqlitePool,
+    id: Uuid,
     session_id: Uuid,
     start_ms: i64,
     end_ms: i64,
@@ -204,7 +211,7 @@ pub async fn insert_segment(
     embedding: Option<&[f32]>,
     audio_ref: Option<&str>,
 ) -> Result<Uuid, sqlx::Error> {
-    let id = Uuid::new_v4().to_string();
+    let id_str = id.to_string();
     let (blob, dim) = match embedding {
         Some(e) => (
             Some(bytemuck::cast_slice::<f32, u8>(e).to_vec()),
@@ -217,7 +224,7 @@ pub async fn insert_segment(
            (id, session_id, start_ms, end_ms, speaker_id, speaker_score, embedding, embedding_dim, audio_ref) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )
-    .bind(&id)
+    .bind(&id_str)
     .bind(session_id.to_string())
     .bind(start_ms)
     .bind(end_ms)
@@ -228,7 +235,7 @@ pub async fn insert_segment(
     .bind(audio_ref)
     .execute(pool)
     .await?;
-    Uuid::parse_str(&id).map_err(|e| sqlx::Error::Decode(Box::new(e)))
+    Ok(id)
 }
 
 #[cfg(test)]
@@ -326,6 +333,39 @@ mod tests {
             voiceprint_count.0, 0,
             "retroactive tagging must not create speaker_embeddings rows"
         );
+    }
+
+    #[tokio::test]
+    async fn insert_segment_uses_caller_provided_id_so_transcripts_can_fk_to_it() {
+        // Regression: insert_segment used to generate its own Uuid::new_v4() internally,
+        // which orphaned every transcript whose segment_id came from VAD. The FK on
+        // transcripts.segment_id → audio_segments.id then failed at insert time and the
+        // always-listening action extractor saw zero usable transcript rows.
+        let pool = fresh_pool().await;
+        let sid = insert_session(&pool).await;
+        let session_uuid = Uuid::parse_str(&sid).unwrap();
+        let segment_id = Uuid::new_v4();
+
+        let returned = insert_segment(&pool, segment_id, session_uuid, 0, 1000, None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(returned, segment_id, "insert_segment must echo the caller's id");
+
+        // Transcript referencing the same segment_id must FK-resolve.
+        let transcript_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO transcripts (id, session_id, segment_id, start_ms, end_ms, text, is_final) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+        )
+        .bind(&transcript_id)
+        .bind(&sid)
+        .bind(segment_id.to_string())
+        .bind(0i64)
+        .bind(1000i64)
+        .bind("hello world")
+        .execute(&pool)
+        .await
+        .expect("FK to audio_segments.id must hold when ids match");
     }
 
     #[tokio::test]
