@@ -605,7 +605,7 @@ fn main() {
             // Spawn Axum HTTP server as a background task
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = actio_core::start_server(config).await {
-                    eprintln!("Actio HTTP server error: {e}");
+                    eprintln!("Actio HTTP server error: {e:#}");
                 }
             });
 

@@ -1,0 +1,3 @@
+# Normalize line endings: SQL migration files must be LF so SQLx checksum
+# is consistent across Windows / macOS / Linux dev machines.
+*.sql text eol=lf
