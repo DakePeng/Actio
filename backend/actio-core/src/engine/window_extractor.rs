@@ -567,6 +567,169 @@ fn parse_due_time_to_utc(s: &str) -> Option<DateTime<Utc>> {
 // `chrono::Local::from_local_datetime` lives on the `TimeZone` trait.
 use chrono::TimeZone;
 
+// ── Clip-driven extraction (batch clip processing pipeline) ──────────────
+
+/// Extract action items from a single processed clip.
+///
+/// Replaces the legacy time-window scheduler's per-clip role: the
+/// BatchProcessor calls this after persisting transcripts so reminders
+/// carry `source_window_id = clip_id` and resolve through the trace
+/// endpoint to the same clip's transcripts. The legacy `tick_once` /
+/// `run_extraction_loop` scheduler remains in this file for backward
+/// compatibility and retires alongside the deprecated settings in Plan
+/// Task 17.
+pub async fn extract_for_clip(
+    pool: &SqlitePool,
+    router: &crate::engine::llm_router::LlmRouter,
+    clip_id: Uuid,
+) -> anyhow::Result<()> {
+    // Pull the clip — we need session_id + start_ms for source_time math
+    // and to skip already-failed clips that somehow re-entered this path.
+    let clip = match crate::repository::audio_clip::get_by_id(pool, clip_id).await? {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+
+    let session = match fetch_session_started_at(pool, clip.session_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(clip_id = %clip_id, error = %e, "extract_for_clip: session lookup failed");
+            return Ok(());
+        }
+    };
+
+    let lines = match fetch_attributed_lines_for_clip(pool, clip_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(clip_id = %clip_id, error = %e, "extract_for_clip: transcript fetch failed");
+            return Ok(());
+        }
+    };
+
+    let total_chars: usize = lines.iter().map(|l| l.text.len()).sum();
+    if total_chars < MIN_EXTRACTABLE_CHARS {
+        debug!(clip_id = %clip_id, total_chars, "clip too short to extract — skipping");
+        return Ok(());
+    }
+
+    let attributed = format_attributed_transcript(&lines);
+    let window_local_date = chrono::Local::now().format("%Y-%m-%d %A").to_string();
+
+    let labels = crate::repository::label::list_labels(pool, session.tenant_id)
+        .await
+        .unwrap_or_default();
+    let label_names: Vec<String> = labels.iter().map(|l| l.name.clone()).collect();
+    let label_lookup: HashMap<String, Uuid> = labels
+        .iter()
+        .filter_map(|l| {
+            Uuid::parse_str(&l.id)
+                .ok()
+                .map(|id| (l.name.to_lowercase(), id))
+        })
+        .collect();
+
+    let items = match router
+        .generate_action_items_with_refs(&attributed, &label_names, &window_local_date)
+        .await
+    {
+        Ok(items) => items,
+        Err(LlmRouterError::Disabled) => {
+            // Clip is already 'processed' — we just don't generate
+            // reminders this time. User can enable an LLM later; future
+            // clips will produce reminders. Backfilling this clip's
+            // reminders later is out of scope for v1.
+            info!(clip_id = %clip_id, "extract_for_clip: LLM disabled — no reminders this clip");
+            return Ok(());
+        }
+        Err(e) => {
+            warn!(clip_id = %clip_id, error = %e, "extract_for_clip: llm error");
+            return Ok(());
+        }
+    };
+
+    if items.is_empty() {
+        return Ok(());
+    }
+
+    // Synthetic ExtractionWindow stub for `gate_action_item` — it only
+    // reads `id`, `session_id`, `start_ms` from the window.
+    let window_stub = window_repo::ExtractionWindow {
+        id: clip.id,
+        session_id: clip.session_id,
+        start_ms: clip.started_at_ms,
+        end_ms: clip.ended_at_ms,
+        status: "running".to_string(),
+        attempts: 1,
+        last_error: None,
+        created_at: clip.created_at,
+        finished_at: clip.finished_at,
+    };
+
+    let new_reminders: Vec<(NewReminder, Vec<Uuid>)> = items
+        .into_iter()
+        .filter_map(|item| {
+            gate_action_item(
+                item,
+                &lines,
+                session.tenant_id,
+                &window_stub,
+                &session.started_at,
+                &label_lookup,
+            )
+        })
+        .collect();
+
+    if new_reminders.is_empty() {
+        return Ok(());
+    }
+
+    match reminder_repo::create_reminders_batch_with_labels(pool, &new_reminders).await {
+        Ok(inserted) => info!(
+            clip_id = %clip_id,
+            reminders = inserted.len(),
+            "clip produced reminders"
+        ),
+        Err(e) => warn!(clip_id = %clip_id, error = %e, "extract_for_clip: insert failed"),
+    }
+    Ok(())
+}
+
+/// Read all final transcripts attached to a clip's segments, joined to
+/// their speaker (when set). Mirrors `fetch_attributed_lines` but uses the
+/// `audio_segments.clip_id` link instead of a (start_ms, end_ms) overlap.
+async fn fetch_attributed_lines_for_clip(
+    pool: &SqlitePool,
+    clip_id: Uuid,
+) -> Result<Vec<AttributedLine>, sqlx::Error> {
+    let rows: Vec<(String, i64, i64, Option<String>, Option<String>)> = sqlx::query_as(
+        r#"SELECT t.text, t.start_ms, t.end_ms, seg.speaker_id, sp.display_name
+           FROM transcripts t
+           JOIN audio_segments seg ON seg.id = t.segment_id
+           LEFT JOIN speakers sp ON sp.id = seg.speaker_id
+           WHERE seg.clip_id = ?1
+             AND t.is_final = 1
+           ORDER BY t.start_ms"#,
+    )
+    .bind(clip_id.to_string())
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(text, t_start, t_end, speaker_id_str, speaker_name)| AttributedLine {
+                text,
+                start_ms: t_start,
+                end_ms: t_end,
+                speaker_id: speaker_id_str
+                    .as_deref()
+                    .and_then(|s| Uuid::parse_str(s).ok()),
+                speaker_name: speaker_name.unwrap_or_else(|| "Unknown".to_string()),
+            },
+        )
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1089,6 +1252,142 @@ mod tests {
 
         let outcome = process_window_with(&pool, &router, &window).await.unwrap();
         assert!(matches!(outcome, ProcessOutcome::Empty));
+
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM reminders")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0);
+    }
+
+    // ── Clip-driven extraction tests ─────────────────────────────────
+
+    async fn mk_clip(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        started_ms: i64,
+        ended_ms: i64,
+    ) -> Uuid {
+        crate::repository::audio_clip::insert_pending(
+            pool,
+            session_id,
+            started_ms,
+            ended_ms,
+            1,
+            "/tmp/m.json",
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn mk_clip_segment(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        clip_id: Uuid,
+        speaker_id: Uuid,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Uuid {
+        let seg_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO audio_segments (id, session_id, clip_id, start_ms, end_ms, speaker_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(seg_id.to_string())
+        .bind(session_id.to_string())
+        .bind(clip_id.to_string())
+        .bind(start_ms)
+        .bind(end_ms)
+        .bind(speaker_id.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+        seg_id
+    }
+
+    #[tokio::test]
+    async fn extract_for_clip_writes_high_confidence_reminder_with_clip_source_id() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let alice = mk_speaker(&pool, "Alice").await;
+        let clip_id = mk_clip(&pool, sid, 0, 300_000).await;
+        let seg = mk_clip_segment(&pool, sid, clip_id, alice, 1_000, 30_000).await;
+        mk_final_transcript_for_segment(
+            &pool,
+            sid,
+            seg,
+            "Please draft the design review summary by Thursday morning so the team can read it.",
+            1_000,
+            30_000,
+        )
+        .await;
+
+        let router = LlmRouter::stub(vec![stub_item(
+            "Draft design review summary",
+            "high",
+            "draft the design review summary by Thursday morning",
+            Some("Alice"),
+        )]);
+
+        extract_for_clip(&pool, &router, clip_id).await.unwrap();
+
+        let row: (String, Option<String>) = sqlx::query_as(
+            "SELECT status, source_window_id FROM reminders WHERE description = ?1",
+        )
+        .bind("Draft design review summary")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "open");
+        assert_eq!(row.1.as_deref(), Some(clip_id.to_string().as_str()));
+    }
+
+    #[tokio::test]
+    async fn extract_for_clip_no_op_when_router_disabled() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let alice = mk_speaker(&pool, "Alice").await;
+        let clip_id = mk_clip(&pool, sid, 0, 300_000).await;
+        let seg = mk_clip_segment(&pool, sid, clip_id, alice, 1_000, 30_000).await;
+        mk_final_transcript_for_segment(
+            &pool,
+            sid,
+            seg,
+            "Please draft the design review summary by Thursday morning so the team can read it.",
+            1_000,
+            30_000,
+        )
+        .await;
+
+        // Router disabled → silent no-op (no error, no reminders).
+        let router = LlmRouter::Disabled;
+        extract_for_clip(&pool, &router, clip_id).await.unwrap();
+
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM reminders")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0);
+    }
+
+    #[tokio::test]
+    async fn extract_for_clip_skips_below_min_chars() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let alice = mk_speaker(&pool, "Alice").await;
+        let clip_id = mk_clip(&pool, sid, 0, 300_000).await;
+        let seg = mk_clip_segment(&pool, sid, clip_id, alice, 1_000, 5_000).await;
+        // Below MIN_EXTRACTABLE_CHARS — must short-circuit before the LLM.
+        mk_final_transcript_for_segment(&pool, sid, seg, "ok", 1_000, 5_000).await;
+
+        // Stub returns items, but they should never be requested.
+        let router = LlmRouter::stub(vec![stub_item(
+            "should not appear",
+            "high",
+            "ok",
+            Some("Alice"),
+        )]);
+        extract_for_clip(&pool, &router, clip_id).await.unwrap();
 
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM reminders")
             .fetch_one(&pool)

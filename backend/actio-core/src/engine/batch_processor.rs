@@ -132,16 +132,21 @@ pub struct ClusteringConfig {
 }
 
 /// Process a clip with the full pipeline: ASR + embedding + clustering +
-/// per-cluster speaker matching + auto-provisional creation. Each cluster
+/// per-cluster speaker matching + auto-provisional creation, then optional
+/// post-clip action-item extraction via the LLM router. Each cluster
 /// member gets `speaker_id` and `clip_local_speaker_idx` set; clusters
 /// below `min_segments_per_cluster` are dropped (segments stay attached
 /// to the clip but speaker_id stays NULL).
+///
+/// The `router` argument is optional so tests can drive the pipeline
+/// without an LLM stub. When `None`, the post-clip extractor is skipped.
 pub async fn process_clip_with_clustering<A: ArchiveAsr, E: SegmentEmbedder>(
     pool: &SqlitePool,
     asr: Arc<A>,
     embedder: Arc<E>,
     clip: &AudioClip,
     cfg: &ClusteringConfig,
+    router: Option<&crate::engine::llm_router::LlmRouter>,
 ) -> anyhow::Result<()> {
     let manifest = load_manifest(&clip.manifest_path)?;
     let audio_dir = audio_dir_of(&clip.manifest_path);
@@ -259,6 +264,13 @@ pub async fn process_clip_with_clustering<A: ArchiveAsr, E: SegmentEmbedder>(
         transcripts = transcripts.len(),
         "clip processed with clustering"
     );
+
+    // Best-effort post-clip extraction. Errors are already swallowed inside
+    // extract_for_clip so the clip stays 'processed' even if the LLM step
+    // misbehaves — the user can re-enable an LLM later for future clips.
+    if let Some(r) = router {
+        let _ = crate::engine::window_extractor::extract_for_clip(pool, r, clip.id).await;
+    }
     Ok(())
 }
 
@@ -532,7 +544,7 @@ mod tests {
             dim: 2,
         });
 
-        process_clip_with_clustering(&pool, Arc::new(StubAsr), embedder, &claimed, &cluster_cfg())
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), embedder, &claimed, &cluster_cfg(), None)
             .await
             .unwrap();
 
@@ -579,7 +591,7 @@ mod tests {
             .unwrap();
         let c1 = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
         let e1 = Arc::new(StubEmbedder { vecs: vec![vec![1.0, 0.0]], dim: 2 });
-        process_clip_with_clustering(&pool, Arc::new(StubAsr), e1, &c1, &cfg).await.unwrap();
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), e1, &c1, &cfg, None).await.unwrap();
 
         // Clip 2: single segment, near-collinear embedding [0.99, 0.14].
         let tmp2 = tempdir().unwrap();
@@ -608,7 +620,7 @@ mod tests {
         .unwrap();
         let c2 = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
         let e2 = Arc::new(StubEmbedder { vecs: vec![vec![0.99, 0.14]], dim: 2 });
-        process_clip_with_clustering(&pool, Arc::new(StubAsr), e2, &c2, &cfg).await.unwrap();
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), e2, &c2, &cfg, None).await.unwrap();
 
         let provisional =
             crate::repository::speaker::list_provisional(&pool).await.unwrap();
