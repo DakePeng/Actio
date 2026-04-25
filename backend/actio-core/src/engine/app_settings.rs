@@ -107,6 +107,17 @@ pub fn migrate_legacy_selection(llm: &mut LlmSettings) {
     }
 }
 
+/// Post-deser migration: copy a stale `tab_recording` shortcut binding to
+/// `tab_live` (renamed in the always-on listening feature) and drop the
+/// old key. No-op if `tab_live` is already set or `tab_recording` is
+/// absent. Runs once per process via `SettingsManager::new`.
+pub fn migrate_tab_recording_shortcut(keyboard: &mut KeyboardSettings) {
+    let Some(value) = keyboard.shortcuts.remove("tab_recording") else {
+        return;
+    };
+    keyboard.shortcuts.entry("tab_live".to_string()).or_insert(value);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
     pub device_name: Option<String>,
@@ -241,7 +252,7 @@ fn default_shortcuts() -> HashMap<String, String> {
     // Tab navigation
     m.insert("tab_board".into(), "Ctrl+1".into());
     m.insert("tab_people".into(), "Ctrl+2".into());
-    m.insert("tab_recording".into(), "Ctrl+3".into());
+    m.insert("tab_live".into(), "Ctrl+3".into());
     m.insert("tab_archive".into(), "Ctrl+4".into());
     m.insert("tab_settings".into(), "Ctrl+5".into());
     // Card navigation
@@ -345,6 +356,7 @@ impl SettingsManager {
 
         // Post-deser migration: promote Disabled → Remote for legacy users
         migrate_legacy_selection(&mut settings.llm);
+        migrate_tab_recording_shortcut(&mut settings.keyboard);
 
         // Env var bootstrap: seed Remote when LLM_BASE_URL + LLM_API_KEY are
         // set and settings.json had no LLM section at all.
@@ -635,5 +647,31 @@ mod tests {
         let recs = recommend_models_for_language("en", &audio);
         assert!(recs.asr_model.is_none());
         assert!(recs.speaker_embedding_model.is_none());
+    }
+
+    #[test]
+    fn migrates_tab_recording_shortcut_to_tab_live() {
+        let mut shortcuts = std::collections::HashMap::new();
+        shortcuts.insert("tab_recording".to_string(), "Ctrl+9".to_string());
+        let mut keyboard = KeyboardSettings { shortcuts };
+
+        super::migrate_tab_recording_shortcut(&mut keyboard);
+
+        assert!(!keyboard.shortcuts.contains_key("tab_recording"));
+        assert_eq!(keyboard.shortcuts.get("tab_live"), Some(&"Ctrl+9".to_string()));
+    }
+
+    #[test]
+    fn migrate_no_op_when_tab_live_already_set() {
+        let mut shortcuts = std::collections::HashMap::new();
+        shortcuts.insert("tab_recording".to_string(), "Ctrl+9".to_string());
+        shortcuts.insert("tab_live".to_string(), "Ctrl+3".to_string());
+        let mut keyboard = KeyboardSettings { shortcuts };
+
+        super::migrate_tab_recording_shortcut(&mut keyboard);
+
+        // tab_live keeps its existing value; tab_recording is removed
+        assert_eq!(keyboard.shortcuts.get("tab_live"), Some(&"Ctrl+3".to_string()));
+        assert!(!keyboard.shortcuts.contains_key("tab_recording"));
     }
 }
