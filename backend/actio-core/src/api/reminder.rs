@@ -663,36 +663,83 @@ pub async fn get_reminder_trace(
         None => None,
     };
 
-    // Load the window (if any) to get the time bounds.
-    let (window_start_ms, window_end_ms) = match window_id {
+    // Resolve source: try audio_clips first (post-batch-clip-processing
+    // rows), fall back to extraction_windows (legacy time-window scheduler
+    // rows). Both populate the same source_window_id column with no FK.
+    enum SourceKind {
+        Clip,
+        LegacyWindow,
+        None,
+    }
+    let (source_kind, window_start_ms, window_end_ms) = match window_id {
         Some(wid) => {
-            let row: Option<(i64, i64)> =
-                sqlx::query_as("SELECT start_ms, end_ms FROM extraction_windows WHERE id = ?1")
+            let clip: Option<(i64, i64)> = sqlx::query_as(
+                "SELECT started_at_ms, ended_at_ms FROM audio_clips WHERE id = ?1",
+            )
+            .bind(wid.to_string())
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| AppApiError::Internal(e.to_string()))?;
+            match clip {
+                Some((s, e)) => (SourceKind::Clip, Some(s), Some(e)),
+                None => {
+                    let legacy: Option<(i64, i64)> = sqlx::query_as(
+                        "SELECT start_ms, end_ms FROM extraction_windows WHERE id = ?1",
+                    )
                     .bind(wid.to_string())
                     .fetch_optional(&state.pool)
                     .await
                     .map_err(|e| AppApiError::Internal(e.to_string()))?;
-            match row {
-                Some((s, e)) => (Some(s), Some(e)),
-                None => (None, None),
+                    match legacy {
+                        Some((s, e)) => (SourceKind::LegacyWindow, Some(s), Some(e)),
+                        None => (SourceKind::None, None, None),
+                    }
+                }
             }
         }
-        None => (None, None),
+        None => (SourceKind::None, None, None),
     };
 
-    // If we have both session + window bounds, fetch the transcripts in-window.
-    let lines = match (session_id, window_start_ms, window_end_ms) {
-        (Some(sid), Some(start), Some(end)) => {
+    // Fetch transcripts. For clip sources, use the audio_segments.clip_id
+    // linkage (new and exact). For legacy windows, fall back to the
+    // overlap-by-start/end time query the old code path used.
+    let lines = match (&source_kind, session_id, window_start_ms, window_end_ms) {
+        (SourceKind::Clip, _, _, _) => {
+            let wid = window_id.expect("Clip kind implies window_id present");
             sqlx::query_as::<_, (i64, i64, String, Option<String>, Option<String>)>(
                 r#"SELECT t.start_ms, t.end_ms, t.text, sp.id, sp.display_name
-               FROM transcripts t
-               LEFT JOIN audio_segments s ON s.id = t.segment_id
-               LEFT JOIN speakers sp      ON sp.id = s.speaker_id
-               WHERE t.session_id = ?1
-                 AND t.is_final = 1
-                 AND t.start_ms < ?3
-                 AND t.end_ms   > ?2
-               ORDER BY t.start_ms"#,
+                   FROM transcripts t
+                   JOIN audio_segments s ON s.id = t.segment_id
+                   LEFT JOIN speakers sp ON sp.id = s.speaker_id
+                   WHERE s.clip_id = ?1
+                     AND t.is_final = 1
+                   ORDER BY t.start_ms"#,
+            )
+            .bind(wid.to_string())
+            .fetch_all(&state.pool)
+            .await
+            .map_err(|e| AppApiError::Internal(e.to_string()))?
+            .into_iter()
+            .map(|(s_ms, e_ms, text, sid, name)| ReminderTraceLine {
+                start_ms: s_ms,
+                end_ms: e_ms,
+                text,
+                speaker_id: sid,
+                speaker_name: name,
+            })
+            .collect()
+        }
+        (SourceKind::LegacyWindow, Some(sid), Some(start), Some(end)) => {
+            sqlx::query_as::<_, (i64, i64, String, Option<String>, Option<String>)>(
+                r#"SELECT t.start_ms, t.end_ms, t.text, sp.id, sp.display_name
+                   FROM transcripts t
+                   LEFT JOIN audio_segments s ON s.id = t.segment_id
+                   LEFT JOIN speakers sp      ON sp.id = s.speaker_id
+                   WHERE t.session_id = ?1
+                     AND t.is_final = 1
+                     AND t.start_ms < ?3
+                     AND t.end_ms   > ?2
+                   ORDER BY t.start_ms"#,
             )
             .bind(sid.to_string())
             .bind(start)
