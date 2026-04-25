@@ -96,6 +96,36 @@ function SpeakerHeader({
   );
 }
 
+function TranscriptLineRow({ line }: { line: TranscriptLine }) {
+  const t = useT();
+  const enabled = useVoiceStore((s) => s.translation.enabled);
+  const entry = useVoiceStore((s) => s.translation.byLineId[line.id]);
+  const retry = useVoiceStore((s) => s.retryTranslationLine);
+
+  return (
+    <span className="live-transcript__line">
+      <span className="live-transcript__line-text">{line.text}</span>
+      {enabled && entry && (
+        <span
+          className={`live-transcript__translation live-transcript__translation--${entry.status}`}
+        >
+          {entry.status === 'pending' && t('transcript.translating')}
+          {entry.status === 'done' && entry.text}
+          {entry.status === 'error' && (
+            <button
+              type="button"
+              className="live-transcript__translation-retry"
+              onClick={() => retry(line.id)}
+            >
+              ⚠ {t('transcript.translateError')}
+            </button>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** Renders the current session's finalized lines as speaker-grouped bubbles,
  *  with the pending partial trailing as italic text under its own
  *  "Identifying…" header. */
@@ -144,9 +174,7 @@ export function LiveTranscript({
               />
               <div className="live-transcript__body">
                 {b.lines.map((l) => (
-                  <span key={l.id} className="live-transcript__line">
-                    {l.text}
-                  </span>
+                  <TranscriptLineRow key={l.id} line={l} />
                 ))}
                 {attachedPartial && (
                   <span className="live-transcript__partial">

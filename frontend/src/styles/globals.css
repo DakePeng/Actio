@@ -5368,3 +5368,38 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.live-transcript__line-text {
+  display: inline;
+}
+
+.live-transcript__translation {
+  display: block;
+  font-size: 0.85em;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+.live-transcript__translation--pending {
+  opacity: 0.6;
+}
+
+.live-transcript__translation--error {
+  color: #b91c1c;
+  font-style: normal;
+}
+
+.live-transcript__translation-retry {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.live-transcript__translation-retry:hover {
+  color: #7f1d1d;
+}
