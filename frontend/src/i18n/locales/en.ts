@@ -335,6 +335,22 @@ export const en = {
   'people.aria.delete': 'Delete {name}',
   'people.tooltip.record': 'Record voiceprint',
 
+  // Candidate speakers (provisional rows from batch clip processing)
+  'candidates.heading': 'Suggested people',
+  'candidates.subtitle':
+    'Voices the app heard but hasn’t enrolled yet. Promote to keep them, dismiss to drop.',
+  'candidates.empty': 'No suggestions right now.',
+  'candidates.lastHeard': 'Last heard {when}',
+  'candidates.lastHeardUnknown': 'Never matched',
+  'candidates.promote': 'Promote',
+  'candidates.dismiss': 'Dismiss',
+  'candidates.namePlaceholder': 'Their name',
+  'candidates.save': 'Save',
+  'candidates.cancel': 'Cancel',
+  'candidates.confirmDismiss': 'Dismiss this suggestion?',
+  'candidates.aria.promote': 'Promote {name}',
+  'candidates.aria.dismiss': 'Dismiss {name}',
+
   // New reminder bar
   'newReminder.quickCapture': 'Quick capture',
   'newReminder.title.chat': 'Type or dictate a note',

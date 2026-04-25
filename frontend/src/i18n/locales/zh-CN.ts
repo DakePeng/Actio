@@ -332,6 +332,22 @@ export const zhCN: Translations = {
   'people.aria.delete': '删除 {name}',
   'people.tooltip.record': '录制声纹',
 
+  // Candidate speakers (provisional rows from batch clip processing)
+  'candidates.heading': '建议添加的人',
+  'candidates.subtitle':
+    '应用听到过但尚未登记的声音。确认后将其加入，或忽略以丢弃。',
+  'candidates.empty': '暂无建议。',
+  'candidates.lastHeard': '上次出现:{when}',
+  'candidates.lastHeardUnknown': '未匹配过',
+  'candidates.promote': '确认添加',
+  'candidates.dismiss': '忽略',
+  'candidates.namePlaceholder': '他们的名字',
+  'candidates.save': '保存',
+  'candidates.cancel': '取消',
+  'candidates.confirmDismiss': '确定忽略该建议吗?',
+  'candidates.aria.promote': '确认添加 {name}',
+  'candidates.aria.dismiss': '忽略 {name}',
+
   // New reminder bar
   'newReminder.quickCapture': '快速记录',
   'newReminder.title.chat': '输入或听写一条笔记',
