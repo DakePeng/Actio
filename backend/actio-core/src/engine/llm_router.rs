@@ -223,15 +223,22 @@ fn parse_action_items_with_fallback(raw: &str) -> Result<LlmActionResponse, LlmR
         }
     }
 
-    if let Some(json) = extract_json_block(stripped, '{', '}') {
+    // Models often echo prompt examples like `{"items": [...]}` in their
+    // prose preamble. Walk every balanced `{...}` and `[...]` block and keep
+    // the LAST one that parses — the real answer is almost always at the end.
+    let mut best: Option<LlmActionResponse> = None;
+    for json in all_json_blocks(stripped, '{', '}') {
         if let Ok(parsed) = serde_json::from_str::<LlmActionResponse>(&json) {
-            return Ok(parsed);
+            best = Some(parsed);
         }
     }
-    if let Some(json) = extract_json_block(stripped, '[', ']') {
+    for json in all_json_blocks(stripped, '[', ']') {
         if let Ok(items) = serde_json::from_str::<Vec<LlmActionItem>>(&json) {
-            return Ok(LlmActionResponse { items });
+            best = Some(LlmActionResponse { items });
         }
+    }
+    if let Some(parsed) = best {
+        return Ok(parsed);
     }
 
     tracing::warn!(
@@ -252,6 +259,13 @@ fn strip_think_tags(raw: &str) -> String {
             result = result[..start].to_string();
             break;
         }
+    }
+    // Some models (e.g. qwen3.5-2b) emit a thinking preamble without an
+    // opening <think> tag but still close it. Drop everything up to and
+    // including the first dangling </think>.
+    if let Some(end_pos) = result.find("</think>") {
+        let end = end_pos + "</think>".len();
+        result = result[end..].to_string();
     }
     result.trim().to_string()
 }
@@ -318,6 +332,55 @@ fn strip_code_fences(raw: &str) -> &str {
         }
     }
     trimmed
+}
+
+/// Iterate every top-level balanced block delimited by `open`/`close` chars,
+/// in left-to-right order. Skips delimiters inside strings.
+fn all_json_blocks(s: &str, open: char, close: char) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] as char == open {
+            let mut depth = 0i32;
+            let mut in_string = false;
+            let mut escape = false;
+            let mut end_idx = None;
+            for (j, ch) in s[i..].char_indices() {
+                if escape {
+                    escape = false;
+                    continue;
+                }
+                if ch == '\\' && in_string {
+                    escape = true;
+                    continue;
+                }
+                if ch == '"' {
+                    in_string = !in_string;
+                    continue;
+                }
+                if in_string {
+                    continue;
+                }
+                if ch == open {
+                    depth += 1;
+                } else if ch == close {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_idx = Some(i + j + ch.len_utf8());
+                        break;
+                    }
+                }
+            }
+            if let Some(end) = end_idx {
+                out.push(s[i..end].to_string());
+                i = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Find the outermost balanced block delimited by `open`/`close` chars.
@@ -392,6 +455,33 @@ mod tests {
         let raw = "totally not json at all";
         let parsed = parse_with_fallback(raw).unwrap();
         assert!(parsed.todos.is_empty());
+    }
+
+    #[test]
+    fn strip_think_tags_removes_dangling_close_tag() {
+        let raw = "Thinking out loud about the request.\n   </think>\n{\"items\":[]}";
+        let stripped = strip_think_tags(raw);
+        assert_eq!(stripped, "{\"items\":[]}");
+    }
+
+    #[test]
+    fn parse_action_items_prefers_last_block_over_echoed_example() {
+        // Simulates qwen3.5-2b echoing the prompt's example shape inside a
+        // thinking preamble before emitting the real answer.
+        let raw = r#"Thinking: the format is `{"items": [...]}`.
+        </think>
+        {"items":[{"title":"Buy milk","description":"On the way home","confidence":"high","evidence_quote":"buy milk","speaker_name":null}]}"#;
+        let stripped = strip_think_tags(raw);
+        let parsed = parse_action_items_with_fallback(&stripped).unwrap();
+        assert_eq!(parsed.items.len(), 1);
+        assert_eq!(parsed.items[0].title.as_deref(), Some("Buy milk"));
+    }
+
+    #[test]
+    fn parse_action_items_falls_through_to_empty_on_garbage() {
+        let raw = "totally not json, no braces either";
+        let parsed = parse_action_items_with_fallback(raw).unwrap();
+        assert!(parsed.items.is_empty());
     }
 
     #[tokio::test]
