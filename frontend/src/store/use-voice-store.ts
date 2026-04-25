@@ -3,6 +3,7 @@ import type { Segment } from '../types';
 import type { Speaker } from '../types/speaker';
 import { getWsUrl } from '../api/backend-url';
 import * as speakerApi from '../api/speakers';
+import { translateLines, LlmDisabledError } from '../api/translate';
 
 export type ClipInterval = 1 | 2 | 5 | 10 | 30;
 
@@ -67,6 +68,18 @@ interface VoiceState {
   createSpeaker: (input: { display_name: string; color: string }) => Promise<Speaker>;
   updateSpeaker: (id: string, patch: { display_name?: string; color?: string }) => Promise<void>;
   deleteSpeaker: (id: string) => Promise<void>;
+
+  translation: {
+    enabled: boolean;
+    targetLang: string;
+    byLineId: Record<string, { status: 'pending' | 'done' | 'error'; text?: string }>;
+  };
+
+  setTranslationEnabled: (enabled: boolean) => Promise<void>;
+  setTranslationTargetLang: (lang: string) => Promise<void>;
+  queueLineForTranslation: (lineId: string) => void;
+  flushTranslationBatch: () => Promise<void>;
+  retryTranslationLine: (lineId: string) => void;
 }
 
 const MAX_UNSTARRED = 30;
@@ -105,6 +118,22 @@ function loadVoiceData(): PersistedVoiceData {
 
 function saveVoiceData(segments: Segment[], clipInterval: ClipInterval) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ segments, clipInterval }));
+}
+
+const TRANSLATE_LANG_KEY = 'actio-translate-target';
+
+function loadTranslateTarget(): string {
+  try {
+    return localStorage.getItem(TRANSLATE_LANG_KEY) ?? 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+function saveTranslateTarget(lang: string): void {
+  try {
+    localStorage.setItem(TRANSLATE_LANG_KEY, lang);
+  } catch { /* private mode etc. */ }
 }
 
 const { segments: initialSegments, clipInterval: initialClipInterval } = loadVoiceData();
@@ -197,11 +226,13 @@ function handleTranscriptMessage(
   if (!msg.text.trim()) return;
   const isFinal = msg.is_final ?? false;
 
+  const id = msg.transcript_id || `local-${crypto.randomUUID()}`;
+
   set((state) => {
     if (!state.currentSession) return state;
     const speakerId = msg.speaker_id ?? null;
     const line: TranscriptLine = {
-      id: msg.transcript_id || `local-${crypto.randomUUID()}`,
+      id,
       text: msg.text,
       start_ms: msg.start_ms ?? 0,
       end_ms: msg.end_ms ?? 0,
@@ -242,6 +273,14 @@ function handleTranscriptMessage(
       },
     };
   });
+
+  // Queue the new final for translation if the toggle is on.
+  if (isFinal) {
+    const ts = useVoiceStore.getState();
+    if (ts.translation.enabled) {
+      ts.queueLineForTranslation(id);
+    }
+  }
 }
 
 /** `kind: "speaker_resolved"` — the per-segment identification task has
@@ -306,6 +345,12 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   speakersStatus: 'idle',
   speakersError: null,
 
+  translation: {
+    enabled: false,
+    targetLang: loadTranslateTarget(),
+    byLineId: {},
+  },
+
   _ws: null,
 
   startRecording: () => {
@@ -345,7 +390,110 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     _ws?.close();
     if (currentSession && currentSession.lines.length > 0) get().flushInterval();
     clearPendingResolutionsForSession();
-    set({ isRecording: false, currentSession: null, _ws: null });
+    set((state) => ({
+      isRecording: false,
+      currentSession: null,
+      _ws: null,
+      translation: { ...state.translation, byLineId: {} },
+    }));
+  },
+
+  setTranslationEnabled: async (enabled) => {
+    set((state) => ({ translation: { ...state.translation, enabled } }));
+    if (!enabled) return;
+    const { currentSession, translation } = get();
+    if (!currentSession) return;
+    const missing = currentSession.lines
+      .filter((l) => l.is_final && !translation.byLineId[l.id])
+      .map((l) => ({ id: l.id, text: l.text }));
+    if (missing.length === 0) return;
+    set((state) => {
+      const next = { ...state.translation.byLineId };
+      for (const m of missing) next[m.id] = { status: 'pending' };
+      return { translation: { ...state.translation, byLineId: next } };
+    });
+    await get().flushTranslationBatch();
+  },
+
+  setTranslationTargetLang: async (lang) => {
+    saveTranslateTarget(lang);
+    set((state) => ({
+      translation: { ...state.translation, targetLang: lang, byLineId: {} },
+    }));
+    if (get().translation.enabled) {
+      const { currentSession } = get();
+      if (currentSession) {
+        const missing = currentSession.lines
+          .filter((l) => l.is_final)
+          .map((l) => ({ id: l.id, text: l.text }));
+        if (missing.length > 0) {
+          set((state) => {
+            const next: Record<string, { status: 'pending' | 'done' | 'error'; text?: string }> = {};
+            for (const m of missing) next[m.id] = { status: 'pending' };
+            return { translation: { ...state.translation, byLineId: next } };
+          });
+          await get().flushTranslationBatch();
+        }
+      }
+    }
+  },
+
+  queueLineForTranslation: (lineId) => {
+    if (!get().translation.enabled) return;
+    set((state) => {
+      if (state.translation.byLineId[lineId]) return state;
+      return {
+        translation: {
+          ...state.translation,
+          byLineId: { ...state.translation.byLineId, [lineId]: { status: 'pending' } },
+        },
+      };
+    });
+  },
+
+  flushTranslationBatch: async () => {
+    const { translation, currentSession } = get();
+    if (!translation.enabled || !currentSession) return;
+    const pending = Object.entries(translation.byLineId)
+      .filter(([, v]) => v.status === 'pending')
+      .map(([id]) => id);
+    if (pending.length === 0) return;
+    const idToText = new Map(currentSession.lines.map((l) => [l.id, l.text] as const));
+    const lines = pending
+      .map((id) => ({ id, text: idToText.get(id) ?? '' }))
+      .filter((l) => l.text);
+    if (lines.length === 0) return;
+    try {
+      const out = await translateLines(translation.targetLang, lines);
+      set((state) => {
+        const next = { ...state.translation.byLineId };
+        for (const t of out) next[t.id] = { status: 'done', text: t.text };
+        return { translation: { ...state.translation, byLineId: next } };
+      });
+    } catch (e) {
+      if (e instanceof LlmDisabledError) {
+        set({ translation: { ...get().translation, enabled: false, byLineId: {} } });
+        return;
+      }
+      const askedIds = new Set(lines.map((l) => l.id));
+      set((state) => {
+        const next = { ...state.translation.byLineId };
+        for (const id of askedIds) {
+          if (next[id]?.status === 'pending') next[id] = { status: 'error' };
+        }
+        return { translation: { ...state.translation, byLineId: next } };
+      });
+    }
+  },
+
+  retryTranslationLine: (lineId) => {
+    set((state) => ({
+      translation: {
+        ...state.translation,
+        byLineId: { ...state.translation.byLineId, [lineId]: { status: 'pending' } },
+      },
+    }));
+    void get().flushTranslationBatch();
   },
 
   appendLiveTranscript: (text) => {
