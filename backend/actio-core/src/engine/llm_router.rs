@@ -206,6 +206,40 @@ impl LlmRouter {
             }
         }
     }
+
+    /// Translate each input line to `target_lang`. Returns translations
+    /// in the same order as the input. The Local and Remote backends
+    /// dispatch to a structured prompt that returns a JSON envelope;
+    /// see `engine::llm_translate`.
+    pub async fn translate_lines(
+        &self,
+        _target_lang: &str,
+        lines: Vec<crate::engine::llm_translate::TranslateLineRequest>,
+    ) -> Result<Vec<crate::engine::llm_translate::TranslateLineResponse>, LlmRouterError> {
+        match self {
+            LlmRouter::Disabled => Err(LlmRouterError::Disabled),
+            #[cfg(test)]
+            LlmRouter::Stub { translation_suffix, .. } => Ok(lines
+                .into_iter()
+                .map(|l| crate::engine::llm_translate::TranslateLineResponse {
+                    id: l.id,
+                    text: format!("{}{}", l.text, translation_suffix),
+                })
+                .collect()),
+            LlmRouter::Remote(_) => {
+                // Implemented in Task 7
+                Err(LlmRouterError::Parse(
+                    "translate_lines remote not yet implemented".into(),
+                ))
+            }
+            LlmRouter::Local { .. } => {
+                // Implemented in Task 8
+                Err(LlmRouterError::Parse(
+                    "translate_lines local not yet implemented".into(),
+                ))
+            }
+        }
+    }
 }
 
 /// Lenient parser for the windowed response shape. Accepts:
@@ -502,5 +536,35 @@ mod tests {
         let router = LlmRouter::Disabled;
         let todos = router.generate_todos("anything", &[], &[]).await.unwrap();
         assert!(todos.is_empty());
+    }
+
+    use crate::engine::llm_translate::TranslateLineRequest;
+
+    #[tokio::test]
+    async fn translate_lines_disabled_returns_disabled_error() {
+        let router = LlmRouter::Disabled;
+        let lines = vec![TranslateLineRequest {
+            id: uuid::Uuid::nil(),
+            text: "hello".into(),
+        }];
+        let err = router.translate_lines("zh-CN", lines).await.unwrap_err();
+        assert!(matches!(err, LlmRouterError::Disabled));
+    }
+
+    #[tokio::test]
+    async fn translate_lines_stub_appends_suffix_in_order() {
+        let router = LlmRouter::stub_with_translation_suffix(" [zh]");
+        let id1 = uuid::Uuid::new_v4();
+        let id2 = uuid::Uuid::new_v4();
+        let lines = vec![
+            TranslateLineRequest { id: id1, text: "first".into() },
+            TranslateLineRequest { id: id2, text: "second".into() },
+        ];
+        let out = router.translate_lines("zh-CN", lines).await.unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].id, id1);
+        assert_eq!(out[0].text, "first [zh]");
+        assert_eq!(out[1].id, id2);
+        assert_eq!(out[1].text, "second [zh]");
     }
 }
