@@ -39,6 +39,12 @@ export function ListeningToggle({
       }}
     >
       <svg
+        // Glyph scales with button size (default 18px at 28px button —
+        // ~64%). Without this the inline style on the button changes the
+        // hit area but not the visible icon, surprising consumers that
+        // pass a non-default size (e.g. LiveTab's size={32}).
+        width={Math.round(size * 0.64)}
+        height={Math.round(size * 0.64)}
         viewBox="0 0 24 24"
         fill={isOn ? 'currentColor' : 'none'}
         stroke="currentColor"
