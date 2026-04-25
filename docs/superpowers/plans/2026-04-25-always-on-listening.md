@@ -488,19 +488,19 @@ Remove the now-stale entry `'settings.shortcuts.action.tab_recording'` if presen
 Append to `frontend/src/i18n/locales/zh-CN.ts` in matching positions:
 
 ```ts
-  'tray.aria.toggleListening.on': '正在收听 — 点击静音',
-  'tray.aria.toggleListening.off': '已静音 — 点击开始收听',
-  'tray.tooltip.listening': '收听中',
+  'tray.aria.toggleListening.on': '正在聆听 — 点击静音',
+  'tray.aria.toggleListening.off': '已静音 — 点击开始聆听',
+  'tray.tooltip.listening': '聆听中',
   'tray.tooltip.muted': '已静音',
-  'live.header.on': '收听中',
+  'live.header.on': '聆听中',
   'live.header.off': '已静音',
   'live.listeningSince': '从 {time} 开始 • 已运行 {duration}',
-  'live.pausedHint': '收听已暂停。在托盘或此处开启以开始捕捉。',
-  'live.aria.toggleListening': '切换收听',
-  'feedback.listeningOn': '已开启收听',
-  'feedback.listeningOff': '已关闭收听',
-  'feedback.listeningToggleFailed': '无法切换收听状态',
-  'settings.shortcuts.action.toggle_listening': '切换收听',
+  'live.pausedHint': '聆听已暂停。在托盘或此处开启以开始捕捉。',
+  'live.aria.toggleListening': '切换聆听',
+  'feedback.listeningOn': '已开启聆听',
+  'feedback.listeningOff': '已关闭聆听',
+  'feedback.listeningToggleFailed': '无法切换聆听状态',
+  'settings.shortcuts.action.toggle_listening': '切换聆听',
   'settings.shortcuts.action.tab_live': '实时标签页',
 ```
 

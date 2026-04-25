@@ -144,9 +144,9 @@ export const zhCN: Translations = {
   'feedback.extractFailed': '无法提取提醒',
   'feedback.modelSwitched': '已为新语言切换模型：{model}',
   'feedback.llmNotConfiguredFormMode': '尚未配置大语言模型，已切换到表单模式',
-  'feedback.listeningOn': '已开启收听',
-  'feedback.listeningOff': '已关闭收听',
-  'feedback.listeningToggleFailed': '无法切换收听状态',
+  'feedback.listeningOn': '已开启聆听',
+  'feedback.listeningOff': '已关闭聆听',
+  'feedback.listeningToggleFailed': '无法切换聆听状态',
 
   // Priority values (for interpolation)
   'priority.low': '低',
@@ -158,9 +158,9 @@ export const zhCN: Translations = {
   'tray.aria.openBoard': '打开看板',
   'tray.aria.listening': '聆听中',
   'tray.aria.transcribing': '转写中',
-  'tray.aria.toggleListening.on': '正在收听 — 点击静音',
-  'tray.aria.toggleListening.off': '已静音 — 点击开始收听',
-  'tray.tooltip.listening': '收听中',
+  'tray.aria.toggleListening.on': '正在聆听 — 点击静音',
+  'tray.aria.toggleListening.off': '已静音 — 点击开始聆听',
+  'tray.tooltip.listening': '聆听中',
   'tray.tooltip.muted': '已静音',
   'tray.status.transcribing': '转写中...',
   'tray.status.listening': '聆听中...',
@@ -188,11 +188,11 @@ export const zhCN: Translations = {
   'tab.settings': '设置',
 
   // Live tab
-  'live.header.on': '收听中',
+  'live.header.on': '聆听中',
   'live.header.off': '已静音',
   'live.listeningSince': '从 {time} 开始 • 已运行 {duration}',
-  'live.pausedHint': '收听已暂停。在托盘或此处开启以开始捕捉。',
-  'live.aria.toggleListening': '切换收听',
+  'live.pausedHint': '聆听已暂停。在托盘或此处开启以开始捕捉。',
+  'live.aria.toggleListening': '切换聆听',
 
   // Needs-review queue (medium-confidence auto-extracted items)
   'needsReview.empty.title': '暂无待审核事项',
@@ -375,7 +375,7 @@ export const zhCN: Translations = {
   'settings.shortcuts.saveFailed': '保存快捷键失败',
   'settings.shortcuts.resetFailed': '重置快捷键失败',
   'settings.shortcuts.action.toggle_board_tray': '显示/隐藏看板',
-  'settings.shortcuts.action.toggle_listening': '切换收听',
+  'settings.shortcuts.action.toggle_listening': '切换聆听',
   'settings.shortcuts.action.start_dictation': '开始听写',
   'settings.shortcuts.action.new_todo': '新建待办',
   'settings.shortcuts.action.tab_board': '看板标签页',
