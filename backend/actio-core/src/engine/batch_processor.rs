@@ -308,6 +308,368 @@ fn load_manifest(manifest_path: &str) -> anyhow::Result<ClipManifest> {
     Ok(serde_json::from_str(&body)?)
 }
 
+// ── Production async pipeline (sherpa ASR + diarization embed) ───────────
+
+/// Process one clip end-to-end without going through the ArchiveAsr /
+/// SegmentEmbedder traits. The traits exist for in-memory tests; this
+/// path is what production runs against real sherpa-onnx workers.
+///
+/// Steps mirror `process_clip_with_clustering` but call engine::asr's
+/// offline helpers and engine::diarization::extract_embedding directly
+/// — those are async and can't be used from a sync trait method without
+/// awkward runtime gymnastics.
+pub async fn process_clip_production(
+    pool: &SqlitePool,
+    clip: &AudioClip,
+    archive_model_id: &str,
+    embedding_model_path: Option<std::path::PathBuf>,
+    model_paths: &crate::engine::model_manager::ModelPaths,
+    cluster_cosine_threshold: f32,
+    confirm_threshold: f32,
+    router: Option<&crate::engine::llm_router::LlmRouter>,
+) -> anyhow::Result<()> {
+    let manifest = load_manifest(&clip.manifest_path)?;
+    let audio_dir = audio_dir_of(&clip.manifest_path);
+
+    if manifest.segments.is_empty() {
+        audio_clip::mark_empty(pool, clip.id).await?;
+        return Ok(());
+    }
+
+    // 1) Persist segment rows tied to the clip.
+    for seg in &manifest.segments {
+        segment::upsert_segment_for_clip(
+            pool,
+            seg.id,
+            clip.session_id,
+            clip.id,
+            seg.start_ms,
+            seg.end_ms,
+        )
+        .await?;
+    }
+
+    // 2) Run ASR against every segment by feeding them through one of the
+    //    engine::asr offline helpers. We collect transcripts indexed by
+    //    segment_id so order doesn't matter.
+    let (seg_tx, seg_rx) =
+        tokio::sync::mpsc::channel::<crate::engine::vad::SpeechSegment>(32);
+    let mut transcript_rx = match start_offline_asr_for_archive(
+        archive_model_id,
+        model_paths,
+        seg_rx,
+    ) {
+        Ok(rx) => rx,
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "archive ASR start failed for model {}: {}",
+                archive_model_id,
+                e
+            ));
+        }
+    };
+
+    // Push every segment WAV into the ASR. We read each WAV synchronously
+    // (cheap) but await the send so backpressure works.
+    for seg in &manifest.segments {
+        let wav_path = audio_dir.join(&seg.file);
+        let audio = match read_wav_f32_mono_16k(&wav_path) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!(?wav_path, error=%e, "skipping segment with unreadable WAV");
+                continue;
+            }
+        };
+        let speech = crate::engine::vad::SpeechSegment {
+            segment_id: seg.id,
+            start_sample: ((seg.start_ms as i64 * 16_000) / 1_000) as usize,
+            end_sample: ((seg.end_ms as i64 * 16_000) / 1_000) as usize,
+            audio,
+        };
+        if seg_tx.send(speech).await.is_err() {
+            tracing::warn!("archive ASR consumer closed early — bailing");
+            break;
+        }
+    }
+    drop(seg_tx); // signal end-of-stream so the recognizer drains.
+
+    // Drain transcripts. Stop when the channel closes (recognizer thread
+    // exited after seeing the EOF). We add a generous timeout per receive
+    // so a stuck worker doesn't hang the queue forever.
+    let mut transcripts: Vec<ArchiveTranscript> = Vec::with_capacity(manifest.segments.len());
+    let drain_deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs((manifest.segments.len() as u64).max(1) * 30);
+    loop {
+        let remaining = drain_deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            tracing::warn!(clip_id=%clip.id, "archive ASR drain timed out");
+            break;
+        }
+        match tokio::time::timeout(remaining, transcript_rx.recv()).await {
+            Ok(Some(t)) => {
+                if !t.is_final {
+                    continue;
+                }
+                if t.text.trim().is_empty() {
+                    continue;
+                }
+                let segment_id = match t.segment_id {
+                    Some(id) => id,
+                    None => continue,
+                };
+                let start_ms = (t.start_sample as i64 * 1_000) / 16_000;
+                let end_ms = (t.end_sample as i64 * 1_000) / 16_000;
+                transcripts.push(ArchiveTranscript {
+                    segment_id,
+                    start_ms,
+                    end_ms,
+                    text: t.text,
+                });
+            }
+            Ok(None) => break,
+            Err(_) => {
+                tracing::warn!(clip_id=%clip.id, "archive ASR drain timeout — partial transcripts");
+                break;
+            }
+        }
+    }
+
+    // Persist transcripts.
+    for t in &transcripts {
+        transcript::create_transcript(
+            pool,
+            clip.session_id,
+            &t.text,
+            t.start_ms,
+            t.end_ms,
+            true,
+            Some(t.segment_id),
+        )
+        .await?;
+    }
+
+    // 3) Run embeddings — only if a speaker-embedding model is configured.
+    if let Some(emb_path) = embedding_model_path.as_ref() {
+        let mut embeddings: Vec<(Uuid, Vec<f32>)> = Vec::with_capacity(manifest.segments.len());
+        let mut dim: i64 = 0;
+        for seg in &manifest.segments {
+            let wav_path = audio_dir.join(&seg.file);
+            let audio = match read_wav_f32_mono_16k(&wav_path) {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            match crate::engine::diarization::extract_embedding(emb_path, &audio).await {
+                Ok(e) => {
+                    if dim == 0 {
+                        dim = e.values.len() as i64;
+                    }
+                    if e.values.len() as i64 != dim {
+                        // Mid-clip dimension mismatch — skip this segment.
+                        continue;
+                    }
+                    segment::set_embedding(pool, seg.id, &e.values, dim).await?;
+                    embeddings.push((seg.id, e.values));
+                }
+                Err(err) => {
+                    tracing::warn!(seg_id=%seg.id, error=%err, "embedding extraction failed");
+                }
+            }
+        }
+
+        // 4) Cluster + 5) Match / insert provisional / assign segments.
+        if !embeddings.is_empty() && dim > 0 {
+            let assignments =
+                crate::engine::cluster::ahc(&embeddings, cluster_cosine_threshold);
+            let mut clusters: std::collections::BTreeMap<usize, Vec<(Uuid, &Vec<f32>)>> =
+                Default::default();
+            for (i, a) in assignments.iter().enumerate() {
+                clusters
+                    .entry(a.cluster_idx)
+                    .or_default()
+                    .push((a.segment_id, &embeddings[i].1));
+            }
+            let tenant_id = Uuid::nil();
+            for (cluster_idx, members) in clusters {
+                let centroid = mean_unit(members.iter().map(|(_, e)| e.as_slice()));
+                let speaker_id = match crate::repository::speaker::find_match_by_centroid(
+                    pool,
+                    &centroid,
+                    dim,
+                    tenant_id,
+                    confirm_threshold,
+                )
+                .await?
+                {
+                    Some(id) => {
+                        crate::repository::speaker::touch_provisional_match(pool, id).await?;
+                        id
+                    }
+                    None => {
+                        let new_id = Uuid::new_v4();
+                        let now = chrono::Utc::now();
+                        let display_name = format!("Unknown {}", now.format("%Y-%m-%d %H:%M"));
+                        crate::repository::speaker::insert_provisional(
+                            pool,
+                            new_id,
+                            tenant_id,
+                            &display_name,
+                            "#9E9E9E",
+                        )
+                        .await?;
+                        new_id
+                    }
+                };
+                for (seg_id, _) in members {
+                    segment::assign_speaker_and_local_idx(
+                        pool,
+                        seg_id,
+                        speaker_id,
+                        cluster_idx as i64,
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+
+    audio_clip::mark_processed(pool, clip.id, Some(archive_model_id)).await?;
+    info!(
+        clip_id = %clip.id,
+        transcripts = transcripts.len(),
+        "clip processed (production)"
+    );
+
+    if let Some(r) = router {
+        let _ = crate::engine::window_extractor::extract_for_clip(pool, r, clip.id).await;
+    }
+    Ok(())
+}
+
+fn start_offline_asr_for_archive(
+    asr_model_id: &str,
+    model_paths: &crate::engine::model_manager::ModelPaths,
+    seg_rx: tokio::sync::mpsc::Receiver<crate::engine::vad::SpeechSegment>,
+) -> anyhow::Result<tokio::sync::mpsc::Receiver<crate::engine::asr::TranscriptResult>> {
+    match asr_model_id {
+        "whisper_base" => {
+            let files = model_paths
+                .whisper_base
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Whisper base model not downloaded"))?;
+            crate::engine::asr::start_whisper_asr(files, seg_rx)
+        }
+        "whisper_turbo" => {
+            let files = model_paths
+                .whisper_turbo
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Whisper turbo model not downloaded"))?;
+            crate::engine::asr::start_whisper_asr(files, seg_rx)
+        }
+        "moonshine_tiny_en" => {
+            let files = model_paths
+                .moonshine_en
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Moonshine not downloaded"))?;
+            crate::engine::asr::start_moonshine_asr(files, seg_rx)
+        }
+        "paraformer_zh_small" => {
+            let files = model_paths
+                .paraformer_zh_small
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Paraformer zh-small not downloaded"))?;
+            crate::engine::asr::start_paraformer_offline_asr(files, seg_rx)
+        }
+        "zipformer_ctc_zh_small" => {
+            let files = model_paths
+                .zipformer_ctc_zh_small
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Zipformer CTC zh-small not downloaded"))?;
+            crate::engine::asr::start_zipformer_ctc_asr(files, seg_rx)
+        }
+        "funasr_nano" => {
+            let files = model_paths
+                .funasr_nano
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("FunASR Nano not downloaded"))?;
+            crate::engine::asr::start_funasr_nano_asr(files, seg_rx)
+        }
+        _ => {
+            let files = model_paths
+                .sense_voice
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("SenseVoice not downloaded"))?;
+            crate::engine::asr::start_sense_voice_asr(files, seg_rx)
+        }
+    }
+}
+
+fn read_wav_f32_mono_16k(path: &std::path::Path) -> anyhow::Result<Vec<f32>> {
+    let mut reader = hound::WavReader::open(path)?;
+    let spec = reader.spec();
+    anyhow::ensure!(spec.sample_rate == 16_000, "expected 16 kHz wav");
+    anyhow::ensure!(spec.channels == 1, "expected mono wav");
+    if spec.sample_format == hound::SampleFormat::Float {
+        Ok(reader.samples::<f32>().filter_map(|s| s.ok()).collect())
+    } else {
+        let max = (1i32 << (spec.bits_per_sample - 1)) as f32;
+        Ok(reader
+            .samples::<i32>()
+            .filter_map(|s| s.ok())
+            .map(|x| x as f32 / max)
+            .collect())
+    }
+}
+
+/// ProductionClipRunner — the ClipRunner the supervisor wires into the
+/// BatchProcessorHandle. Reads settings on every clip so model selection
+/// + thresholds can change without restarting the loop.
+pub struct ProductionClipRunner {
+    pub settings_manager: Arc<crate::engine::app_settings::SettingsManager>,
+    pub model_manager: Arc<crate::engine::model_manager::ModelManager>,
+    pub router: Arc<tokio::sync::RwLock<crate::engine::llm_router::LlmRouter>>,
+}
+
+impl ClipRunner for ProductionClipRunner {
+    fn run_clip<'a>(
+        &'a self,
+        pool: &'a sqlx::SqlitePool,
+        clip: &'a AudioClip,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let settings = self.settings_manager.get().await;
+            let resolved = settings.audio.resolved_asr_models();
+            let archive_model = resolved
+                .archive
+                .ok_or_else(|| anyhow::anyhow!("no archive ASR model configured"))?;
+            let embedding_id = settings.audio.speaker_embedding_model.clone();
+            let model_paths = self
+                .model_manager
+                .model_paths(embedding_id.as_deref())
+                .await
+                .ok_or_else(|| anyhow::anyhow!("models not ready for archive processing"))?;
+
+            let router = self.router.read().await;
+            let router_ref = if router.is_disabled() {
+                None
+            } else {
+                Some(&*router)
+            };
+            process_clip_production(
+                pool,
+                clip,
+                &archive_model,
+                model_paths.speaker_embedding.clone(),
+                &model_paths,
+                settings.audio.cluster_cosine_threshold,
+                settings.audio.speaker_confirm_threshold,
+                router_ref,
+            )
+            .await
+        })
+    }
+}
+
 // ── BatchProcessor lifecycle handle ──────────────────────────────────────
 
 /// Long-lived handle that owns the claim → process → mark loop. The

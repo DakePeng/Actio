@@ -384,13 +384,41 @@ async fn batch_pipeline_supervisor(state: AppState) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     info!("Batch pipeline supervisor started");
+
+    // Construct the ProductionClipRunner once. It re-reads settings each
+    // run_clip call so model selection + thresholds can change without a
+    // restart.
+    let runner: Arc<crate::engine::batch_processor::ProductionClipRunner> = Arc::new(
+        crate::engine::batch_processor::ProductionClipRunner {
+            settings_manager: state.settings_manager.clone(),
+            model_manager: state.model_manager.clone(),
+            router: state.router.clone(),
+        },
+    );
+
     loop {
         interval.tick().await;
         let always_listening = state.settings_manager.get().await.audio.always_listening;
+
+        // Privacy-mode gate for the archive: when off, the clip writer
+        // drops speech events (live subscribers still get them via the
+        // CaptureDaemon broadcast).
         state
             .capture_daemon
             .set_archive_enabled(always_listening)
             .await;
+
+        // Drive the BatchProcessor's claim-loop lifecycle. The handle is
+        // idempotent — repeat ensure_running calls are no-ops when the
+        // loop is already up.
+        if always_listening {
+            state
+                .batch_processor
+                .ensure_running(state.pool.clone(), runner.clone())
+                .await;
+        } else {
+            state.batch_processor.ensure_stopped().await;
+        }
     }
 }
 
