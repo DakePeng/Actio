@@ -46,5 +46,51 @@ describe('useStore — listening toggle', () => {
     expect(ui.listeningEnabled).toBe(true);
     expect(ui.listeningStartedAt).toBe(1);
     expect(ui.feedback?.message).toBe('feedback.listeningToggleFailed');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/settings'),
+      expect.objectContaining({ method: 'PATCH' }),
+    );
+  });
+
+  it('does not revert when a newer setListening has superseded the failing one', async () => {
+    // Clear any stale feedback bleeding through from a prior test's failure path
+    // (module-level feedbackTimer, fake timers from beforeEach defer the auto-clear).
+    useStore.setState((state) => ({ ui: { ...state.ui, feedback: null } }));
+
+    let patchIndex = 0;
+    let resolveFirst!: (v: { ok: boolean; status?: number }) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: unknown, init?: { method?: string }) => {
+        const url = typeof input === 'string' ? input : String(input);
+        // Only count PATCH /settings calls — backend-url's /health probe and
+        // any other GETs should always succeed so the test isn't gated on
+        // discovery state from prior tests.
+        if (init?.method === 'PATCH' && url.includes('/settings')) {
+          patchIndex += 1;
+          if (patchIndex === 1) {
+            // First PATCH — hold it open until we explicitly fail it later.
+            return new Promise((resolve) => {
+              resolveFirst = resolve;
+            });
+          }
+        }
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+      }),
+    );
+
+    // Kick off the first toggle (will hang until we resolve it).
+    const firstPromise = useStore.getState().setListening(false);
+    // Now fire a second toggle that lands optimistically + succeeds.
+    await useStore.getState().setListening(true);
+    expect(useStore.getState().ui.listeningEnabled).toBe(true);
+
+    // Fail the first PATCH after the second has already taken over.
+    resolveFirst({ ok: false, status: 500 });
+    await firstPromise;
+
+    const { ui } = useStore.getState();
+    expect(ui.listeningEnabled).toBe(true);
+    expect(ui.feedback?.message).not.toBe('feedback.listeningToggleFailed');
   });
 });

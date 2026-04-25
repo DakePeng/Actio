@@ -128,6 +128,7 @@ export function pendingReminders(reminders: Reminder[]) {
 
 let feedbackTimer: number | null = null;
 let highlightTimer: number | null = null;
+let listeningSeq = 0;
 
 function pushFeedback(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
@@ -363,6 +364,7 @@ export const useStore = create<AppState>((set) => ({
   })),
 
   setListening: async (enabled) => {
+    const mySeq = ++listeningSeq;
     const prev = {
       enabled: useStore.getState().ui.listeningEnabled,
       startedAt: useStore.getState().ui.listeningStartedAt,
@@ -377,6 +379,9 @@ export const useStore = create<AppState>((set) => ({
     try {
       await patchSettings({ audio: { always_listening: enabled } });
     } catch {
+      // A newer setListening call has already taken over — its optimistic
+      // write is the truth and we must not clobber it with our stale prev.
+      if (mySeq !== listeningSeq) return;
       set((state) => ({
         ui: {
           ...state.ui,
@@ -393,6 +398,12 @@ export const useStore = create<AppState>((set) => ({
       const settings = await fetchSettings();
       const v = settings.audio?.always_listening;
       if (typeof v !== 'boolean') return;
+      // listeningStartedAt isn't persisted across restarts (the backend
+      // doesn't record when the toggle was last flipped). On boot we stamp
+      // Date.now() — the "Listening since" timer in LiveTab therefore
+      // reflects the freshness of the current UI session, not how long the
+      // pipeline has actually been alive. Intentional and documented in
+      // the spec (docs/superpowers/specs/2026-04-25-always-on-listening-design.md).
       set((state) => ({
         ui: {
           ...state.ui,
