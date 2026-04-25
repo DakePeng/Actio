@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createActioApiClient } from '../api/actio-api';
+import { fetchSettings, patchSettings } from '../api/settings-client';
 import type {
   FilterState,
   Label,
@@ -46,6 +47,8 @@ interface AppState {
   setFocusedCard: (index: number | null) => void;
   setDictating: (active: boolean) => void;
   setDictationTranscript: (text: string) => void;
+  setListening: (enabled: boolean) => Promise<void>;
+  loadListening: () => Promise<void>;
   setFeedback: (
     message: string,
     tone?: 'neutral' | 'success',
@@ -94,6 +97,8 @@ const initialUI: UIState = {
   isDictationTranscribing: false,
   dictationTranscript: '',
   feedback: null,
+  listeningEnabled: null,
+  listeningStartedAt: null,
 };
 
 function filterReminders(reminders: Reminder[], filter: FilterState) {
@@ -356,6 +361,50 @@ export const useStore = create<AppState>((set) => ({
   setDictationTranscript: (text) => set((state) => ({
     ui: { ...state.ui, dictationTranscript: text },
   })),
+
+  setListening: async (enabled) => {
+    const prev = {
+      enabled: useStore.getState().ui.listeningEnabled,
+      startedAt: useStore.getState().ui.listeningStartedAt,
+    };
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        listeningEnabled: enabled,
+        listeningStartedAt: enabled ? Date.now() : null,
+      },
+    }));
+    try {
+      await patchSettings({ audio: { always_listening: enabled } });
+    } catch {
+      set((state) => ({
+        ui: {
+          ...state.ui,
+          listeningEnabled: prev.enabled,
+          listeningStartedAt: prev.startedAt,
+        },
+      }));
+      pushFeedback(set, 'feedback.listeningToggleFailed');
+    }
+  },
+
+  loadListening: async () => {
+    try {
+      const settings = await fetchSettings();
+      const v = settings.audio?.always_listening;
+      if (typeof v !== 'boolean') return;
+      set((state) => ({
+        ui: {
+          ...state.ui,
+          listeningEnabled: v,
+          listeningStartedAt: v ? Date.now() : null,
+        },
+      }));
+    } catch {
+      // Silent — boot UI tolerates the null sentinel until a later attempt
+      // succeeds (e.g. when the user toggles, which performs its own PATCH).
+    }
+  },
 
   setHasSeenOnboarding: (seen) => {
     localStorage.setItem('actio-onboarded', 'true');
