@@ -1,3 +1,4 @@
+pub mod audio_clip;
 pub mod db;
 pub mod extraction_window;
 pub mod label;

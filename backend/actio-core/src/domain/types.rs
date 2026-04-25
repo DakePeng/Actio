@@ -296,3 +296,60 @@ pub struct ListSessionsParams {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
+
+// ── Audio clips (batch processing) ────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpeakerKind {
+    Enrolled,
+    Provisional,
+}
+
+impl SpeakerKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SpeakerKind::Enrolled => "enrolled",
+            SpeakerKind::Provisional => "provisional",
+        }
+    }
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "enrolled" => Some(SpeakerKind::Enrolled),
+            "provisional" => Some(SpeakerKind::Provisional),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioClip {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub started_at_ms: i64,
+    pub ended_at_ms: i64,
+    pub segment_count: i64,
+    pub manifest_path: String,
+    pub status: String,
+    pub attempts: i64,
+    pub archive_model: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipManifestSegment {
+    pub id: Uuid,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipManifest {
+    pub clip_id: Uuid,
+    pub session_id: Uuid,
+    pub started_at_ms: i64,
+    pub ended_at_ms: i64,
+    pub segments: Vec<ClipManifestSegment>,
+}
