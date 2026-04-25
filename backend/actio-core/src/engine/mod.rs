@@ -3,6 +3,7 @@ pub mod asr;
 pub mod audio_capture;
 pub mod audio_quality;
 pub mod clip_storage;
+pub mod cluster;
 pub mod continuity;
 pub mod diarization;
 pub mod dictation;
