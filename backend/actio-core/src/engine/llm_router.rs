@@ -230,11 +230,28 @@ impl LlmRouter {
                 .translate_lines(target_lang, lines)
                 .await
                 .map_err(LlmRouterError::Remote),
-            LlmRouter::Local { .. } => {
-                // Implemented in Task 8
-                Err(LlmRouterError::Parse(
-                    "translate_lines local not yet implemented".into(),
-                ))
+            LlmRouter::Local { slot, model_id } => {
+                let engine = slot
+                    .get_or_load(model_id)
+                    .await
+                    .map_err(LlmRouterError::Local)?;
+                let total_chars: usize = lines.iter().map(|l| l.text.len()).sum();
+                let params = GenerationParams {
+                    max_tokens: 2000,
+                    temperature: 0.1,
+                    json_mode: true,
+                    thinking_budget: Some((total_chars / 10).clamp(100, 500)),
+                };
+                let messages =
+                    crate::engine::llm_translate::build_translate_messages(target_lang, &lines);
+                let json = engine
+                    .chat_completion(messages, params, EnginePriority::Internal)
+                    .await
+                    .map_err(LlmRouterError::Local)?;
+                tracing::info!(raw_json = %json, "Local LLM translate raw response");
+                let parsed = crate::engine::llm_translate::parse_translate_response(&json)
+                    .map_err(|e| LlmRouterError::Parse(e.to_string()))?;
+                Ok(parsed)
             }
         }
     }
