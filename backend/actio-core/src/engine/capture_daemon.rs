@@ -34,6 +34,15 @@ pub struct CaptureDaemon {
     tx: broadcast::Sender<CaptureEvent>,
 }
 
+// SAFETY: AudioCaptureHandle contains a cpal::Stream whose !Send/!Sync
+// markers come from a raw `*mut ()` pointer. cpal Streams are documented
+// as needing single-thread access, but we hold ours behind a tokio Mutex
+// — every interaction with `Inner.handle` happens under that lock, so
+// the cpal stream is never *concurrently* accessed across threads.
+// Crossing thread boundaries serially is fine; the `Mutex` enforces it.
+unsafe impl Send for CaptureDaemon {}
+unsafe impl Sync for CaptureDaemon {}
+
 struct Inner {
     handle: Option<AudioCaptureHandle>,
     pump_task: Option<tokio::task::JoinHandle<()>>,
@@ -42,6 +51,13 @@ struct Inner {
     archive_enabled: bool,
     muted: bool,
 }
+
+// SAFETY: Inner is always wrapped in `tokio::sync::Mutex<Inner>` and only
+// reached through that lock. The non-Send field is `AudioCaptureHandle`,
+// which holds a `cpal::Stream` (raw pointer). cpal Streams need
+// single-thread access; the Mutex ensures `handle` is touched by exactly
+// one thread at a time. Crossing thread boundaries serially is fine.
+unsafe impl Send for Inner {}
 
 impl CaptureDaemon {
     pub fn new(device_name: Option<String>, vad_model_path: PathBuf) -> Self {

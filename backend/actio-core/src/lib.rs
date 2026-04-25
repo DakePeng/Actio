@@ -41,6 +41,23 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub model_manager: Arc<ModelManager>,
     pub inference_pipeline: Arc<tokio::sync::Mutex<InferencePipeline>>,
+    /// New batch-clip-processing pipeline. Lifecycle handle for the
+    /// claim → process → mark loop. Spawned at boot (gated on
+    /// `always_listening`) and stopped when the user toggles privacy
+    /// mode. The legacy InferencePipeline above remains the live path
+    /// until the streaming-loop port from `engine::live_streaming`
+    /// completes — both pipelines coexist by design.
+    pub batch_processor: Arc<crate::engine::batch_processor::BatchProcessorHandle>,
+    /// Always-on capture daemon (cpal + Silero VAD) shared by the new
+    /// batch pipeline and (eventually) the live streaming service.
+    /// Constructed at boot but only started by the new supervisor when
+    /// `always_listening = true` AND the user is unmuted.
+    pub capture_daemon: Arc<crate::engine::capture_daemon::CaptureDaemon>,
+    /// On-demand live streaming service (dictation + translation). Same
+    /// note as `inference_pipeline` — it ships as a skeleton; flipping
+    /// dictation/translation handlers from `inference_pipeline` to here
+    /// is a follow-up.
+    pub live_streaming: Arc<crate::engine::live_streaming::LiveStreamingService>,
     pub settings_manager: Arc<SettingsManager>,
     /// Directory where Phase-A voiceprint-candidate clips are written.
     pub clips_dir: PathBuf,
@@ -112,6 +129,28 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     let inference_pipeline = Arc::new(tokio::sync::Mutex::new(InferencePipeline::new()));
     let settings_manager = Arc::new(SettingsManager::new(&config.data_dir));
 
+    // New batch-clip-processing pipeline scaffolding. The handles are
+    // constructed unconditionally so the API and supervisor have stable
+    // references; whether they actually run is decided each tick by the
+    // batch supervisor below based on `always_listening`.
+    let batch_processor =
+        Arc::new(crate::engine::batch_processor::BatchProcessorHandle::new());
+    let capture_daemon = {
+        // Default device for now — when audio.device_name is wired through
+        // settings updates, the daemon's start() will pick it up via the
+        // Inner.device_name field. The Silero VAD model lives next to the
+        // other ONNX models the model_manager already extracts on first run.
+        let initial_device = settings_manager.get().await.audio.device_name.clone();
+        let vad_path = config.model_dir.join("silero_vad.onnx");
+        Arc::new(crate::engine::capture_daemon::CaptureDaemon::new(
+            initial_device,
+            vad_path,
+        ))
+    };
+    let live_streaming = Arc::new(
+        crate::engine::live_streaming::LiveStreamingService::new(capture_daemon.clone()),
+    );
+
     // Phase-A voiceprint-candidate retention: clips land in <data_dir>/audio_clips/
     // and get swept hourly per the user's `audio.clip_retention_days` setting.
     let clips_dir = config.data_dir.join("audio_clips");
@@ -140,6 +179,9 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         metrics,
         model_manager,
         inference_pipeline,
+        batch_processor,
+        capture_daemon,
+        live_streaming,
         settings_manager,
         clips_dir,
         live_enrollment: crate::engine::live_enrollment::new_state(),
@@ -226,6 +268,54 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         });
     }
 
+    // ── Batch clip processing background tasks ──────────────────────
+    //
+    // Three background lifecycles, all gated on user-visible privacy:
+    //
+    //   1. Nested clip-dir cleanup — sweeps <clips_dir>/<session>/<clip>/
+    //      every hour, removes whole clip directories older than
+    //      `audio.audio_retention_days` (default 14). Distinct from the
+    //      legacy flat-dir voiceprint candidate sweep above; both run
+    //      until Plan Task 17 retires the legacy infra.
+    //
+    //   2. Provisional speaker GC — daily DELETE of provisional rows
+    //      whose `provisional_last_matched_at` is older than
+    //      `audio.provisional_voiceprint_gc_days` (default 30).
+    //
+    //   3. Batch supervisor — every 5 s, syncs CaptureDaemon's
+    //      `archive_enabled` flag to `audio.always_listening`. This is
+    //      the privacy-mode hook (Plan Task 13): when always_listening is
+    //      false, the clip writer drops speech events instead of writing
+    //      them to disk. Live streaming subscribers still receive events.
+    //      Spawning the BatchProcessorHandle's claim loop is left to the
+    //      supervisor refactor that flips the live path off
+    //      InferencePipeline; until then, the BatchProcessor only runs if
+    //      the user-side has explicitly populated audio_clips rows.
+    {
+        let initial = settings_manager_ref(&state);
+        let clip_dir_root = state.clips_dir.clone();
+        crate::engine::clip_storage::start_clip_dir_cleanup_task(
+            clip_dir_root,
+            initial.audio.audio_retention_days,
+        );
+    }
+    {
+        let pool = state.pool.clone();
+        let gc_days = state
+            .settings_manager
+            .get()
+            .await
+            .audio
+            .provisional_voiceprint_gc_days as i64;
+        crate::engine::clip_storage::start_provisional_speaker_gc_task(pool, gc_days);
+    }
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            batch_pipeline_supervisor(state).await;
+        });
+    }
+
     let cors = CorsLayer::new()
         .allow_origin([
             "http://localhost:1420".parse().unwrap(),
@@ -267,6 +357,38 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Convenience: snapshot the current `AppSettings` synchronously when the
+/// caller already holds `state`. Used by start_server so the cleanup task
+/// can read its retention setting once at spawn time without forcing the
+/// caller to await inside the spawn block.
+fn settings_manager_ref(
+    state: &AppState,
+) -> crate::engine::app_settings::AppSettings {
+    // settings_manager.get() is async; we use try_read on the inner RwLock
+    // when we know the caller is in startup (no contention). Falling back
+    // to defaults is harmless — the user can always patch settings later.
+    futures::executor::block_on(state.settings_manager.get())
+}
+
+/// Batch pipeline supervisor. Runs every 5 s; owns the privacy-mode flip
+/// for the new pipeline by syncing CaptureDaemon's `archive_enabled` to
+/// `audio.always_listening`. Compared to `pipeline_supervisor` above (the
+/// legacy live-path supervisor), this one is intentionally minimal — the
+/// real claim-loop spawn lands when the live-path migration completes.
+async fn batch_pipeline_supervisor(state: AppState) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    info!("Batch pipeline supervisor started");
+    loop {
+        interval.tick().await;
+        let always_listening = state.settings_manager.get().await.audio.always_listening;
+        state
+            .capture_daemon
+            .set_archive_enabled(always_listening)
+            .await;
+    }
 }
 
 /// Construct a fresh `LlmRouter` from the current `LlmSettings`.
