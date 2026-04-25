@@ -5,6 +5,7 @@ pub mod audio_quality;
 pub mod capture_daemon;
 pub mod clip_boundary;
 pub mod clip_storage;
+pub mod clip_writer;
 pub mod cluster;
 pub mod continuity;
 pub mod diarization;
