@@ -43,6 +43,14 @@ pub enum LlmRouter {
         model_id: String,
     },
     Remote(Arc<RemoteLlmClient>),
+    /// Test-only variant that returns a fixed list of action items from
+    /// `generate_action_items_with_refs` and an empty list from
+    /// `generate_todos`. Lets integration tests exercise the windowed
+    /// extraction path without a live LLM backend.
+    #[cfg(test)]
+    Stub {
+        action_items: Vec<LlmActionItem>,
+    },
 }
 
 impl LlmRouter {
@@ -54,6 +62,12 @@ impl LlmRouter {
         matches!(self, LlmRouter::Disabled)
     }
 
+    /// Test-only constructor for the Stub variant.
+    #[cfg(test)]
+    pub fn stub(action_items: Vec<LlmActionItem>) -> Self {
+        LlmRouter::Stub { action_items }
+    }
+
     pub async fn generate_todos(
         &self,
         transcript: &str,
@@ -62,6 +76,8 @@ impl LlmRouter {
     ) -> Result<Vec<LlmTodoItem>, LlmRouterError> {
         match self {
             LlmRouter::Disabled => Ok(vec![]),
+            #[cfg(test)]
+            LlmRouter::Stub { .. } => Ok(vec![]),
             LlmRouter::Remote(client) => {
                 let items = client
                     .generate_todos(transcript, label_names, image_data_urls)
@@ -137,6 +153,8 @@ impl LlmRouter {
     ) -> Result<Vec<LlmActionItem>, LlmRouterError> {
         match self {
             LlmRouter::Disabled => Err(LlmRouterError::Disabled),
+            #[cfg(test)]
+            LlmRouter::Stub { action_items } => Ok(action_items.clone()),
             LlmRouter::Remote(client) => client
                 .generate_action_items_with_refs(
                     attributed_transcript,

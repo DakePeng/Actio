@@ -244,6 +244,7 @@ enum ProcessOutcome {
     Empty,
 }
 
+#[derive(Debug)]
 enum ProcessError {
     LlmDisabled,
     Transient(String),
@@ -263,13 +264,25 @@ async fn process_window(
     state: &AppState,
     window: &window_repo::ExtractionWindow,
 ) -> Result<ProcessOutcome, ProcessError> {
+    let router = state.router.read().await;
+    process_window_with(&state.pool, &router, window).await
+}
+
+/// Inner driver split out so integration tests can run the full claim →
+/// fetch → route → gate → persist pipeline against a stub `LlmRouter`
+/// without constructing a full `AppState`.
+async fn process_window_with(
+    pool: &SqlitePool,
+    router: &crate::engine::llm_router::LlmRouter,
+    window: &window_repo::ExtractionWindow,
+) -> Result<ProcessOutcome, ProcessError> {
     // Fetch the session so we can turn ms offsets into wall-clock times.
-    let session_started_at = fetch_session_started_at(&state.pool, window.session_id)
+    let session_started_at = fetch_session_started_at(pool, window.session_id)
         .await
         .map_err(|e| ProcessError::Permanent(format!("session lookup: {e}")))?;
 
     let lines = fetch_attributed_lines(
-        &state.pool,
+        pool,
         window.session_id,
         window.start_ms,
         window.end_ms,
@@ -286,7 +299,7 @@ async fn process_window(
     let window_local_date = chrono::Local::now().format("%Y-%m-%d %A").to_string();
 
     let labels =
-        crate::repository::label::list_labels(&state.pool, resolve_tenant(&session_started_at))
+        crate::repository::label::list_labels(pool, resolve_tenant(&session_started_at))
             .await
             .unwrap_or_default();
     let label_names: Vec<String> = labels.iter().map(|l| l.name.clone()).collect();
@@ -299,7 +312,6 @@ async fn process_window(
         })
         .collect();
 
-    let router = state.router.read().await;
     let items = match router
         .generate_action_items_with_refs(&attributed, &label_names, &window_local_date)
         .await
@@ -308,7 +320,6 @@ async fn process_window(
         Err(LlmRouterError::Disabled) => return Err(ProcessError::LlmDisabled),
         Err(e) => return Err(ProcessError::Transient(format!("llm error: {e}"))),
     };
-    drop(router);
 
     if items.is_empty() {
         return Ok(ProcessOutcome::Empty);
@@ -333,7 +344,7 @@ async fn process_window(
         return Ok(ProcessOutcome::Empty);
     }
 
-    let inserted = reminder_repo::create_reminders_batch_with_labels(&state.pool, &new_reminders)
+    let inserted = reminder_repo::create_reminders_batch_with_labels(pool, &new_reminders)
         .await
         .map_err(|e| ProcessError::Permanent(format!("insert reminders: {e}")))?;
     Ok(ProcessOutcome::Produced(inserted.len()))
@@ -918,5 +929,170 @@ mod tests {
     #[allow(dead_code)]
     fn _force_use_secs_format() -> SecondsFormat {
         SecondsFormat::Secs
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Integration tests for the full claim → fetch → route → gate → persist
+    // pipeline using the cfg-test LlmRouter::Stub variant. These cover the
+    // contract `process_window` upholds against the DB without needing a
+    // live LLM backend or a full AppState.
+    // ───────────────────────────────────────────────────────────────────
+
+    use crate::engine::llm_router::LlmRouter;
+    use crate::engine::remote_llm_client::LlmActionItem;
+
+    fn stub_item(
+        description: &str,
+        confidence: &str,
+        evidence: &str,
+        speaker: Option<&str>,
+    ) -> LlmActionItem {
+        LlmActionItem {
+            title: None,
+            description: description.to_string(),
+            priority: None,
+            due_time: None,
+            labels: vec![],
+            confidence: Some(confidence.to_string()),
+            evidence_quote: Some(evidence.to_string()),
+            speaker_name: speaker.map(|s| s.to_string()),
+        }
+    }
+
+    async fn upsert_test_window(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> window_repo::ExtractionWindow {
+        window_repo::upsert_pending_window(pool, session_id, start_ms, end_ms)
+            .await
+            .unwrap();
+        window_repo::claim_next_pending(pool).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn process_window_with_persists_high_and_pending_reminders() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let alice = mk_speaker(&pool, "Alice").await;
+        let seg1 = mk_segment(&pool, sid, alice, 1_000, 30_000).await;
+        let seg2 = mk_segment(&pool, sid, alice, 30_000, 60_000).await;
+        // Total length must exceed MIN_EXTRACTABLE_CHARS (60).
+        mk_final_transcript_for_segment(
+            &pool,
+            sid,
+            seg1,
+            "Please draft the design review summary by Thursday morning so the team can read it.",
+            1_000,
+            30_000,
+        )
+        .await;
+        mk_final_transcript_for_segment(
+            &pool,
+            sid,
+            seg2,
+            "Also remind me to email the vendor about pricing.",
+            30_000,
+            60_000,
+        )
+        .await;
+
+        let window = upsert_test_window(&pool, sid, 0, 300_000).await;
+
+        let router = LlmRouter::stub(vec![
+            stub_item(
+                "Draft design review summary",
+                "high",
+                "draft the design review summary by Thursday morning",
+                Some("Alice"),
+            ),
+            stub_item(
+                "Email vendor about pricing",
+                "medium",
+                "email the vendor about pricing",
+                Some("Alice"),
+            ),
+        ]);
+
+        let outcome = process_window_with(&pool, &router, &window).await.unwrap();
+        assert!(matches!(outcome, ProcessOutcome::Produced(2)));
+
+        let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT description, status, source_window_id FROM reminders WHERE session_id = ?1 ORDER BY description",
+        )
+        .bind(sid.to_string())
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        let (d0, s0, w0) = &rows[0];
+        let (d1, s1, w1) = &rows[1];
+        assert_eq!(d0, "Draft design review summary");
+        assert_eq!(s0, "open"); // high → open (lands on Board)
+        assert_eq!(w0.as_deref(), Some(window.id.to_string().as_str()));
+        assert_eq!(d1, "Email vendor about pricing");
+        assert_eq!(s1, "pending"); // medium → pending (Needs-review queue)
+        assert_eq!(w1.as_deref(), Some(window.id.to_string().as_str()));
+    }
+
+    #[tokio::test]
+    async fn process_window_with_returns_llm_disabled_for_disabled_router() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let alice = mk_speaker(&pool, "Alice").await;
+        let seg = mk_segment(&pool, sid, alice, 1_000, 30_000).await;
+        mk_final_transcript_for_segment(
+            &pool,
+            sid,
+            seg,
+            "Please draft the design review summary by Thursday morning so the team can read it.",
+            1_000,
+            30_000,
+        )
+        .await;
+
+        let window = upsert_test_window(&pool, sid, 0, 300_000).await;
+        let router = LlmRouter::Disabled;
+
+        let result = process_window_with(&pool, &router, &window).await;
+        assert!(matches!(result, Err(ProcessError::LlmDisabled)));
+
+        // Disabled is a non-event — no reminders should land.
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM reminders")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0);
+    }
+
+    #[tokio::test]
+    async fn process_window_with_returns_empty_for_short_transcript() {
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let alice = mk_speaker(&pool, "Alice").await;
+        let seg = mk_segment(&pool, sid, alice, 1_000, 5_000).await;
+        // Below MIN_EXTRACTABLE_CHARS (60) — must short-circuit before the router.
+        mk_final_transcript_for_segment(&pool, sid, seg, "ok", 1_000, 5_000).await;
+
+        let window = upsert_test_window(&pool, sid, 0, 300_000).await;
+
+        // Stub returns items, but they should never be requested.
+        let router = LlmRouter::stub(vec![stub_item(
+            "should not appear",
+            "high",
+            "ok",
+            Some("Alice"),
+        )]);
+
+        let outcome = process_window_with(&pool, &router, &window).await.unwrap();
+        assert!(matches!(outcome, ProcessOutcome::Empty));
+
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM reminders")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0);
     }
 }
