@@ -108,6 +108,42 @@ pub async fn insert_provisional(
     Ok(())
 }
 
+/// Promote a provisional speaker to enrolled, optionally renaming. After
+/// promotion the row is just like any other enrolled speaker — it shows
+/// up in `list_speakers`, `find_match_by_centroid`'s enrolled pool, etc.
+/// `provisional_last_matched_at` is cleared so the GC sweep no longer
+/// touches it. Returns true if the row existed and was promoted.
+pub async fn promote_provisional(
+    pool: &SqlitePool,
+    id: Uuid,
+    new_display_name: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE speakers \
+         SET kind = 'enrolled', \
+             display_name = COALESCE(?2, display_name), \
+             provisional_last_matched_at = NULL \
+         WHERE id = ?1 AND kind = 'provisional'",
+    )
+    .bind(id.to_string())
+    .bind(new_display_name)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// Hard-delete a provisional speaker. The user explicitly told us this
+/// row isn't a real person worth tracking. Attached audio_segments rows
+/// have their speaker_id set to NULL via the existing FK. Returns true if
+/// a row was actually removed.
+pub async fn dismiss_provisional(pool: &SqlitePool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query("DELETE FROM speakers WHERE id = ?1 AND kind = 'provisional'")
+        .bind(id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected() > 0)
+}
+
 /// Hard-delete provisional speakers whose last match is older than
 /// `older_than_days`. Their attached audio_segments rows have their
 /// `speaker_id` set to NULL via the existing ON DELETE SET NULL FK.

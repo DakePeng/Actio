@@ -1,3 +1,4 @@
+pub mod candidate_speaker;
 pub mod label;
 pub mod llm;
 pub mod reminder;
@@ -125,6 +126,19 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/enroll-live/status",
             get(session::get_live_enrollment_status),
+        )
+        // candidate speakers (provisional rows from batch clip processing)
+        .route(
+            "/candidate-speakers",
+            get(candidate_speaker::list_candidates),
+        )
+        .route(
+            "/candidate-speakers/:id/promote",
+            post(candidate_speaker::promote),
+        )
+        .route(
+            "/candidate-speakers/:id",
+            delete(candidate_speaker::dismiss),
         )
         // segment routes (unknown speakers + retroactive tagging)
         .route(
