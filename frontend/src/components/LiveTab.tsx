@@ -5,6 +5,8 @@ import { LiveTranscript } from './LiveTranscript';
 import { ListeningToggle } from './ListeningToggle';
 import { useT } from '../i18n';
 
+const TRANSLATE_LANGS = ['en', 'zh-CN', 'ja', 'es', 'fr', 'de'] as const;
+
 function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
@@ -22,12 +24,14 @@ export function LiveTab() {
   const listeningEnabled = useStore((s) => s.ui.listeningEnabled);
   const listeningStartedAt = useStore((s) => s.ui.listeningStartedAt);
   const currentSession = useVoiceStore((s) => s.currentSession);
+  const translation = useVoiceStore((s) => s.translation);
+  const setTranslationEnabled = useVoiceStore((s) => s.setTranslationEnabled);
+  const setTranslationTargetLang = useVoiceStore((s) => s.setTranslationTargetLang);
   const t = useT();
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(Date.now());
 
-  // Tick the "Listening since" duration once a second when on.
   useEffect(() => {
     if (!listeningEnabled || !listeningStartedAt) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -47,6 +51,29 @@ export function LiveTab() {
     <div className="live-tab">
       <div className="live-tab__header">
         <span className={`live-tab__status${isOn ? ' is-on' : ''}`}>{headerLabel}</span>
+        <div className="live-tab__translate-cluster">
+          <button
+            type="button"
+            className={`live-tab__translate-toggle${translation.enabled ? ' is-on' : ''}`}
+            aria-pressed={translation.enabled}
+            onClick={() => void setTranslationEnabled(!translation.enabled)}
+          >
+            {t('live.translate.toggle')}
+          </button>
+          <select
+            className="live-tab__translate-select"
+            aria-label={t('live.translate.targetLabel')}
+            value={translation.targetLang}
+            disabled={!translation.enabled}
+            onChange={(e) => void setTranslationTargetLang(e.target.value)}
+          >
+            {TRANSLATE_LANGS.map((lang) => (
+              <option key={lang} value={lang}>
+                {t(`live.translate.lang.${lang}` as Parameters<typeof t>[0])}
+              </option>
+            ))}
+          </select>
+        </div>
         <ListeningToggle size={32} />
       </div>
 
