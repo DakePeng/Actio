@@ -43,13 +43,14 @@ pub enum LlmRouter {
         model_id: String,
     },
     Remote(Arc<RemoteLlmClient>),
-    /// Test-only variant that returns a fixed list of action items from
-    /// `generate_action_items_with_refs` and an empty list from
-    /// `generate_todos`. Lets integration tests exercise the windowed
-    /// extraction path without a live LLM backend.
+    /// Test-only variant for integration tests. `action_items` feeds
+    /// `generate_action_items_with_refs`; `translation_suffix` is
+    /// appended to each input line by `translate_lines` (e.g. "[zh]")
+    /// so order-preservation and id-mapping can be asserted.
     #[cfg(test)]
     Stub {
         action_items: Vec<LlmActionItem>,
+        translation_suffix: String,
     },
 }
 
@@ -65,7 +66,19 @@ impl LlmRouter {
     /// Test-only constructor for the Stub variant.
     #[cfg(test)]
     pub fn stub(action_items: Vec<LlmActionItem>) -> Self {
-        LlmRouter::Stub { action_items }
+        LlmRouter::Stub {
+            action_items,
+            translation_suffix: " [stub]".into(),
+        }
+    }
+
+    /// Test-only constructor when translation behavior matters.
+    #[cfg(test)]
+    pub fn stub_with_translation_suffix(suffix: impl Into<String>) -> Self {
+        LlmRouter::Stub {
+            action_items: vec![],
+            translation_suffix: suffix.into(),
+        }
     }
 
     pub async fn generate_todos(
@@ -154,7 +167,7 @@ impl LlmRouter {
         match self {
             LlmRouter::Disabled => Err(LlmRouterError::Disabled),
             #[cfg(test)]
-            LlmRouter::Stub { action_items } => Ok(action_items.clone()),
+            LlmRouter::Stub { action_items, .. } => Ok(action_items.clone()),
             LlmRouter::Remote(client) => client
                 .generate_action_items_with_refs(
                     attributed_transcript,
