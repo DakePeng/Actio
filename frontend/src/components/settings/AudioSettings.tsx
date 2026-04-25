@@ -23,6 +23,7 @@ interface AudioSettingsShape {
   cluster_cosine_threshold?: number;
   audio_retention_days?: number;
   provisional_voiceprint_gc_days?: number;
+  use_batch_pipeline?: boolean;
 }
 
 async function fetchDevices(): Promise<AudioDeviceInfo[]> {
@@ -64,6 +65,7 @@ export function AudioSettings() {
   const [clusterCosThreshold, setClusterCosThreshold] = useState(0.4);
   const [audioRetentionDays, setAudioRetentionDays] = useState(14);
   const [provisionalGcDays, setProvisionalGcDays] = useState(30);
+  const [useBatchPipeline, setUseBatchPipeline] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -112,6 +114,9 @@ export function AudioSettings() {
         }
         if (typeof settings.audio?.provisional_voiceprint_gc_days === 'number') {
           setProvisionalGcDays(settings.audio.provisional_voiceprint_gc_days);
+        }
+        if (typeof settings.audio?.use_batch_pipeline === 'boolean') {
+          setUseBatchPipeline(settings.audio.use_batch_pipeline);
         }
       })
       .catch(() => {});
@@ -335,6 +340,26 @@ export function AudioSettings() {
       </div>
       <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
         {t('settings.audio.batchHint')}
+      </p>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.useBatchPipeline')}
+        </span>
+        <input
+          type="checkbox"
+          className="settings-check"
+          role="switch"
+          aria-checked={useBatchPipeline}
+          checked={useBatchPipeline}
+          onChange={(e) => {
+            setUseBatchPipeline(e.target.checked);
+            void commit('use_batch_pipeline', e.target.checked);
+          }}
+        />
+      </label>
+      <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
+        {t('settings.audio.useBatchPipelineHint')}
       </p>
 
       <label className="settings-row">

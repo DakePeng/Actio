@@ -245,6 +245,9 @@ export const en = {
   'settings.audio.batchTitle': 'Batch clip processing',
   'settings.audio.batchHint':
     'Clips of recorded audio are processed in the background to produce transcripts and group voices. Tune how clips are sized, how aggressively voices are merged, and how long raw audio is kept.',
+  'settings.audio.useBatchPipeline': 'Use new batch pipeline (experimental)',
+  'settings.audio.useBatchPipelineHint':
+    'Switches the always-on path from the live recognizer to the new clip-based pipeline. Live transcripts come from the same source but archive transcripts now arrive ~5 min after the audio, with global speaker clustering. Restart the app after changing this.',
   'settings.audio.clipTarget': 'Clip target length',
   'settings.audio.clusterThreshold': 'Voice clustering threshold',
   'settings.audio.audioRetention': 'Audio retention',

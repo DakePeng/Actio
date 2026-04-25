@@ -243,6 +243,9 @@ export const zhCN: Translations = {
   'settings.audio.batchTitle': '后台片段处理',
   'settings.audio.batchHint':
     '录制的音频会在后台分片段处理,生成转写并归并相同声音。可调整每个片段时长、声音聚类强度,以及原始音频的保留期。',
+  'settings.audio.useBatchPipeline': '启用新的后台处理管线(实验性)',
+  'settings.audio.useBatchPipelineHint':
+    '将始终监听的实时识别管线切换为新的片段化管线。实时转写来源不变,但归档转写会在录音约 5 分钟后才出现,并附带全局声音聚类。修改后需重启应用。',
   'settings.audio.clipTarget': '目标片段时长',
   'settings.audio.clusterThreshold': '声音聚类阈值',
   'settings.audio.audioRetention': '音频保留',
