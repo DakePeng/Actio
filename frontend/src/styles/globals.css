@@ -5361,3 +5361,37 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   color: var(--color-accent);
   min-height: 44px;
 }
+
+/* Shared mic-button toggle (collapsed tray + board header). */
+.listening-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.listening-toggle:hover:not(:disabled) {
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--color-accent-strong);
+}
+.listening-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.listening-toggle[aria-pressed="true"] {
+  color: var(--color-text);
+}
+.listening-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.listening-toggle svg {
+  width: 18px;
+  height: 18px;
+}
