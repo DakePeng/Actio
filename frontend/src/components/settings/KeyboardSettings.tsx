@@ -11,6 +11,7 @@ const DEFAULT_SHORTCUTS: ShortcutMap = {
   toggle_board_tray: 'Ctrl+\\',
   start_dictation: 'Ctrl+Shift+Space',
   new_todo: 'Ctrl+N',
+  toggle_listening: 'Ctrl+Shift+M',
   // Tab navigation
   tab_board: 'Ctrl+1',
   tab_people: 'Ctrl+2',
@@ -28,6 +29,7 @@ const ACTION_LABEL_KEYS: Record<string, TKey> = {
   toggle_board_tray: 'settings.shortcuts.action.toggle_board_tray',
   start_dictation: 'settings.shortcuts.action.start_dictation',
   new_todo: 'settings.shortcuts.action.new_todo',
+  toggle_listening: 'settings.shortcuts.action.toggle_listening',
   tab_board: 'settings.shortcuts.action.tab_board',
   tab_people: 'settings.shortcuts.action.tab_people',
   tab_live: 'settings.shortcuts.action.tab_live',
@@ -39,7 +41,7 @@ const ACTION_LABEL_KEYS: Record<string, TKey> = {
   card_archive: 'settings.shortcuts.action.card_archive',
 };
 
-const GLOBAL_ACTIONS = new Set(['toggle_board_tray', 'start_dictation', 'new_todo']);
+const GLOBAL_ACTIONS = new Set(['toggle_board_tray', 'start_dictation', 'new_todo', 'toggle_listening']);
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && !!(window as any).__TAURI__;
@@ -139,7 +141,7 @@ export function KeyboardSettings() {
   const groups: { labelKey: TKey; actions: string[] }[] = [
     {
       labelKey: 'settings.shortcuts.group.global',
-      actions: ['toggle_board_tray', 'start_dictation', 'new_todo'],
+      actions: ['toggle_board_tray', 'start_dictation', 'new_todo', 'toggle_listening'],
     },
     {
       labelKey: 'settings.shortcuts.group.tab',

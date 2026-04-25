@@ -10,6 +10,7 @@ const DEFAULT_GLOBAL_SHORTCUTS: Record<string, string> = {
   toggle_board_tray: 'Ctrl+\\',
   start_dictation: 'Ctrl+Shift+Space',
   new_todo: 'Ctrl+N',
+  toggle_listening: 'Ctrl+Shift+M',
 };
 
 /** How long to wait for a final transcript after stopping dictation (ms).
@@ -127,6 +128,15 @@ export function useGlobalShortcuts() {
           console.log('[Actio] Starting dictation...');
           invoke('start_dictation').catch(console.error);
         }
+      } else if (action === 'toggle_listening') {
+        const current = useStore.getState().ui.listeningEnabled;
+        if (current === null) return;
+        const next = !current;
+        void useStore.getState().setListening(next);
+        useStore.getState().setFeedback(
+          next ? 'feedback.listeningOn' : 'feedback.listeningOff',
+          'success',
+        );
       }
     }).then((fn) => {
       if (cancelled) { fn(); return; }
