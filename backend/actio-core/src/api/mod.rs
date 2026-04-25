@@ -4,6 +4,7 @@ pub mod reminder;
 pub mod segment;
 pub mod session;
 pub mod settings;
+pub mod translate;
 pub mod ws;
 
 use axum::extract::State;
@@ -172,6 +173,8 @@ pub fn router(state: AppState) -> Router {
         .route("/settings/llm/load", post(llm::start_llm_load))
         .route("/settings/llm/cancel-load", post(llm::cancel_llm_load))
         .route("/settings/llm/load-status", get(llm::llm_load_status))
+        // translation
+        .route("/llm/translate", post(translate::translate_lines))
         // OpenAI-compat
         .route("/v1/models", get(llm::openai_list_models))
         .route("/v1/chat/completions", post(llm::openai_chat_completions))
