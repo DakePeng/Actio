@@ -57,7 +57,7 @@ Tests live in `src/**/__tests__/` next to their subjects. The `i18n/__tests__/pa
 
 The pipeline reads 16 kHz mono via cpal → Silero VAD → ASR (Zipformer / Whisper / SenseVoice / FunASR / Moonshine, selected per-session) → speaker embedding → `ContinuityState` → broadcasts `transcript` and `speaker_resolved` frames on `/ws`. Persistence (transcripts, segments, speakers) is synchronous against SQLite.
 
-**`sherpa-onnx` is `!Send`.** Wrap each extractor/recognizer's entire lifecycle in a single `tokio::task::spawn_blocking` (or a plain `std::thread` for long-lived workers) and bridge with `mpsc`/`oneshot`/`crossbeam_channel`. See `diarization.rs::EMBEDDING_WORKERS` — per-model worker threads cached in an LRU-capped registry (size 2) so model swaps don't leak 512-dim ONNX models.
+**`sherpa-onnx` is `!Send`.** Wrap each extractor/recognizer's entire lifecycle in a single `tokio::task::spawn_blocking` (or a plain `std::thread` for long-lived workers) and bridge with `mpsc`/`oneshot`/`crossbeam_channel`. See `diarization.rs::EMBEDDING_WORKERS` — per-model worker threads cached in an LRU-capped registry (size 2) so model swaps don't leak ONNX speaker-embedding models (~30–70MB each).
 
 ### Speaker continuity (`engine/continuity.rs`)
 
@@ -109,7 +109,7 @@ The mock-API and local-LLM ports collide by default — pick one when doing UI-o
 
 ## Non-obvious patterns
 
-- **Embeddings are 512-dim (3D-Speaker).** Any hardcoded `192` in the code is stale from the earlier CAM++ design; fix it when you see it.
+- **Embedding dimension is per-model, not a single repo-wide constant.** Five of six catalog models (CAM++ family + ERes2Net v2 + TitaNet) emit 192-dim vectors; ERes2Net Base emits 512-dim. The DB tracks `embedding_dimension` per row and `speaker_matcher` filters joins on the active dim, so cross-model rows are silently ignored. Production INSERT sites already pass `embedding.len()` — never hardcode either number outside test fixtures.
 - **SQLite `ALTER TABLE` can't change CHECK constraints.** Migrations that need to widen an enum (e.g. `reminders.status` gaining `'pending'` in `004_action_windows.sql`) rebuild the table via `CREATE _new → INSERT SELECT → DROP → RENAME → recreate indexes`.
 - **`NewReminder` derives `Default`.** Any new caller should still spell out every field for grep-ability; only reach for `..Default::default()` when the struct has grown > ~10 fields.
 - **Hooks lie sometimes.** `PostToolUse:Edit` may say "Edit operation failed" when the body reports success. Trust the body.
