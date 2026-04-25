@@ -81,7 +81,7 @@ export function useGlobalShortcuts() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<string>('shortcut-triggered', (event) => {
+    listen<string>('shortcut-triggered', async (event) => {
       if (cancelled) return;
       const action = event.payload;
       console.log('[Actio] shortcut-triggered:', action, 'showNewReminderBar:', useStore.getState().ui.showNewReminderBar);
@@ -132,11 +132,16 @@ export function useGlobalShortcuts() {
         const current = useStore.getState().ui.listeningEnabled;
         if (current === null) return;
         const next = !current;
-        void useStore.getState().setListening(next);
-        useStore.getState().setFeedback(
-          next ? 'feedback.listeningOn' : 'feedback.listeningOff',
-          'success',
-        );
+        await useStore.getState().setListening(next);
+        // setListening reverts + pushes its own failure toast on PATCH failure;
+        // only emit the success toast if the post-call state matches what we
+        // optimistically tried to apply (i.e., no rollback occurred).
+        if (useStore.getState().ui.listeningEnabled === next) {
+          useStore.getState().setFeedback(
+            next ? 'feedback.listeningOn' : 'feedback.listeningOff',
+            'success',
+          );
+        }
       }
     }).then((fn) => {
       if (cancelled) { fn(); return; }

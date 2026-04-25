@@ -31,7 +31,6 @@ function matchesShortcut(e: KeyboardEvent, combo: string): boolean {
 }
 
 const DEFAULT_SHORTCUTS: ShortcutMap = {
-  toggle_listening: 'Ctrl+Shift+M',
   tab_board: 'Ctrl+1',
   tab_people: 'Ctrl+2',
   tab_live: 'Ctrl+3',
