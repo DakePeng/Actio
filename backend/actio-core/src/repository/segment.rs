@@ -238,6 +238,80 @@ pub async fn insert_segment(
     Ok(id)
 }
 
+/// Update the embedding + dimension for an existing audio_segments row.
+/// Used by the batch processor after the embedder produces vectors for
+/// each segment. Idempotent — re-running batch processing for a clip just
+/// overwrites with the (identical) vector.
+pub async fn set_embedding(
+    pool: &SqlitePool,
+    id: Uuid,
+    embedding: &[f32],
+    dim: i64,
+) -> Result<(), sqlx::Error> {
+    let blob = bytemuck::cast_slice::<f32, u8>(embedding).to_vec();
+    sqlx::query(
+        "UPDATE audio_segments \
+         SET embedding = ?2, embedding_dim = ?3 \
+         WHERE id = ?1",
+    )
+    .bind(id.to_string())
+    .bind(blob)
+    .bind(dim)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Set both the speaker assignment and the clip-local cluster index for
+/// a segment. Called once per cluster member after the centroid match
+/// resolves either to an existing speaker or a fresh provisional row.
+pub async fn assign_speaker_and_local_idx(
+    pool: &SqlitePool,
+    seg_id: Uuid,
+    speaker_id: Uuid,
+    local_idx: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE audio_segments \
+         SET speaker_id = ?2, clip_local_speaker_idx = ?3 \
+         WHERE id = ?1",
+    )
+    .bind(seg_id.to_string())
+    .bind(speaker_id.to_string())
+    .bind(local_idx)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ClipSegmentRow {
+    pub id: String,
+    pub session_id: String,
+    pub clip_id: Option<String>,
+    pub speaker_id: Option<String>,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub clip_local_speaker_idx: Option<i64>,
+}
+
+/// All audio_segments rows tied to a clip, ordered by time. Backs the
+/// archive UI's "show clip transcripts with speaker labels" view.
+pub async fn list_for_clip(
+    pool: &SqlitePool,
+    clip_id: Uuid,
+) -> Result<Vec<ClipSegmentRow>, sqlx::Error> {
+    sqlx::query_as::<_, ClipSegmentRow>(
+        "SELECT id, session_id, clip_id, speaker_id, start_ms, end_ms, clip_local_speaker_idx \
+         FROM audio_segments \
+         WHERE clip_id = ?1 \
+         ORDER BY start_ms",
+    )
+    .bind(clip_id.to_string())
+    .fetch_all(pool)
+    .await
+}
+
 /// Insert (or no-op-update clip_id on) an audio_segments row tied to a
 /// batch-processed clip. Used by the batch processor before transcripts
 /// land for each segment in a clip's manifest. Idempotent — re-running
