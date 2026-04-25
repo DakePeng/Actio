@@ -35,6 +35,7 @@ export function useActioState(): WordmarkState {
   const isDictating = useStore((s) => s.ui.isDictating);
   const isDictationTranscribing = useStore((s) => s.ui.isDictationTranscribing);
   const feedback = useStore((s) => s.ui.feedback);
+  const listeningEnabled = useStore((s) => s.ui.listeningEnabled);
 
   const preview = useWordmarkPreview();
   const flash = useWordmarkFlash();
@@ -66,6 +67,7 @@ export function useActioState(): WordmarkState {
   if (isDictationTranscribing) return 'processing';
   if (isExtracting) return 'processing';
   if (isDictating) return 'transcribing';
+  if (listeningEnabled) return 'listening';
   if (isRecording) return 'listening';
   return 'standby';
 }

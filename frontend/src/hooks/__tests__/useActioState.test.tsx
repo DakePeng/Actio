@@ -23,6 +23,8 @@ describe('useActioState', () => {
         isDictationTranscribing: false,
         dictationTranscript: '',
         feedback: null,
+        listeningEnabled: null,
+        listeningStartedAt: null,
       },
     }));
     useVoiceStore.setState({ isRecording: false });
@@ -118,6 +120,41 @@ describe('useActioState', () => {
     render(<Probe />);
 
     expect(screen.getByTestId('state')).toHaveTextContent('processing');
+  });
+
+  it('returns "listening" when the toggle is enabled and nothing transient applies', () => {
+    useStore.setState((state) => ({
+      ui: { ...state.ui, listeningEnabled: true },
+    }));
+
+    render(<Probe />);
+
+    expect(screen.getByTestId('state')).toHaveTextContent('listening');
+  });
+
+  it('returns "standby" when the toggle is disabled', () => {
+    useStore.setState((state) => ({
+      ui: { ...state.ui, listeningEnabled: false },
+    }));
+
+    render(<Probe />);
+
+    expect(screen.getByTestId('state')).toHaveTextContent('standby');
+  });
+
+  it('dictation phases still beat the listening toggle', () => {
+    useStore.setState((state) => ({
+      ui: {
+        ...state.ui,
+        listeningEnabled: true,
+        isDictating: true,
+        isDictationTranscribing: false,
+      },
+    }));
+
+    render(<Probe />);
+
+    expect(screen.getByTestId('state')).toHaveTextContent('transcribing');
   });
 
 });
