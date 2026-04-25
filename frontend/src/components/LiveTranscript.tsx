@@ -184,7 +184,7 @@ export function LiveTranscript({
       </AnimatePresence>
 
       {bubbles.length === 0 && !pendingPartial && (
-        <span className="recording-tab__transcript-placeholder">
+        <span className="live-tab__transcript-placeholder">
           {t('recording.listening')}
         </span>
       )}
