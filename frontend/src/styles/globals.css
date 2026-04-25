@@ -1055,10 +1055,10 @@ body.body--standby .tray--launcher:hover {
   left: 0;
   right: 0;
   z-index: 2;
-  height: 18px;
+  height: 14px;
   display: flex;
   justify-content: center;
-  padding: 6px 0 8px;
+  padding: 5px 0 5px;
   cursor: grab;
   -webkit-app-region: no-drag;
 }
@@ -1068,7 +1068,7 @@ body.body--standby .tray--launcher:hover {
 }
 
 .tray-drag-pill {
-  width: 36px;
+  width: 32px;
   height: 4px;
   border-radius: 2px;
   background: var(--color-tray-handle);
@@ -1082,11 +1082,14 @@ body.body--standby .tray--launcher:hover {
 .tray-toggle {
   width: 100%;
   min-height: var(--tray-collapsed-height);
-  padding: 18px 16px 10px 20px;
+  /* Top padding clears the 14px drag handle (4px breathing room).
+   * Sides on an 8dp rhythm; right is tighter so the 44×44 chevron's
+   * own padding visually balances against the larger left inset. */
+  padding: 16px 12px 12px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px;
   background: transparent;
   border: 0;
   text-align: left;
@@ -1096,8 +1099,8 @@ body.body--standby .tray--launcher:hover {
 /* During the transcribing phase the wordmark switches to the compact 'a'
  * glyph and the live transcript scrolls in beside it on the same row. */
 .tray-toggle--live {
-  padding-left: 14px;
-  gap: 12px;
+  padding-left: 12px;
+  gap: 10px;
 }
 
 .tray-toggle--live .tray-brand-trigger {
@@ -1134,8 +1137,17 @@ body.body--standby .tray--launcher:hover {
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
+/* Tray mic shares the chevron's 44×44 hit-area for a balanced action
+ * cluster. Inline `size` prop owns the box; we match the chevron's
+ * pill radius and hover treatment so the two read as a pair. */
 .tray-mic-button {
-  margin-right: 4px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.tray-mic-button:hover:not(:disabled) {
+  border-color: rgba(15, 118, 110, 0.16);
 }
 
 .tray-chevron-button:hover {
@@ -1183,7 +1195,7 @@ body.body--standby .tray--launcher:hover {
 }
 
 .tray-transcript__label {
-  font-size: 0.58rem;
+  font-size: 0.625rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -1192,13 +1204,13 @@ body.body--standby .tray--launcher:hover {
 }
 
 .tray-transcript__viewport {
-  max-height: 34px;
+  max-height: 44px;
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 4px;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 650;
-  line-height: 1.24;
+  line-height: 1.32;
   letter-spacing: -0.01em;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1270,19 +1282,21 @@ body.body--standby .tray--launcher:hover {
 
 .tray-badge {
   position: absolute;
-  top: 4px;
+  top: 16px;
   left: 8px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
+  z-index: 3;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
   border-radius: 999px;
   background: #dc2626;
   color: white;
-  font-size: 0.58rem;
+  font-size: 0.625rem;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0 0 2px var(--color-surface);
 }
 
 .tray-chevron {
@@ -1309,13 +1323,19 @@ body.body--standby .tray--launcher:hover {
 
 .tray-item {
   width: 100%;
-  padding: 10px 14px;
+  padding: 12px 16px;
   border-radius: 0;
   border: 0;
   border-bottom: 1px solid var(--color-border);
   background: transparent;
   text-align: left;
   transition: background 0.16s ease, transform 0.16s ease;
+}
+
+/* The list ends at the CTA — the trailing border doubles up against the
+ * CTA's top padding and reads as visual noise. */
+.tray-item:last-of-type {
+  border-bottom: 0;
 }
 
 .tray-item:hover {
@@ -1354,15 +1374,15 @@ body.body--standby .tray--launcher:hover {
 }
 
 .tray-cta {
-  padding: 12px 14px;
+  padding: 12px 16px 16px;
 }
 
 .tray-cta .primary-button {
   width: 100%;
-  height: 36px;
-  border-radius: 8px;
+  height: 40px;
+  border-radius: 10px;
   box-shadow: none;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
 }
 
 .onboarding {

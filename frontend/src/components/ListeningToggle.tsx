@@ -6,11 +6,14 @@ export interface ListeningToggleProps {
   className?: string;
   /** Render at this pixel size (square). Defaults to 28. */
   size?: number;
+  /** Override the inner glyph size. Defaults to ~64% of `size`. */
+  iconSize?: number;
 }
 
 export function ListeningToggle({
   className,
   size = 28,
+  iconSize,
 }: ListeningToggleProps) {
   const enabled = useStore((s) => s.ui.listeningEnabled);
   const setListening = useStore((s) => s.setListening);
@@ -43,8 +46,10 @@ export function ListeningToggle({
         // ~64%). Without this the inline style on the button changes the
         // hit area but not the visible icon, surprising consumers that
         // pass a non-default size (e.g. LiveTab's size={32}).
-        width={Math.round(size * 0.64)}
-        height={Math.round(size * 0.64)}
+        // Callers may override via `iconSize` to expand the hit area
+        // (e.g. tray) without scaling the glyph itself.
+        width={iconSize ?? Math.round(size * 0.64)}
+        height={iconSize ?? Math.round(size * 0.64)}
         viewBox="0 0 24 24"
         fill={isOn ? 'currentColor' : 'none'}
         stroke="currentColor"

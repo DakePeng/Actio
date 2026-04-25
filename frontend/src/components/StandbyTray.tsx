@@ -187,7 +187,7 @@ export function StandbyTray() {
               </div>
             </div>
           )}
-          <ListeningToggle className="tray-mic-button" />
+          <ListeningToggle className="tray-mic-button" size={44} iconSize={18} />
           <button
             type="button"
             className="tray-chevron-button"
