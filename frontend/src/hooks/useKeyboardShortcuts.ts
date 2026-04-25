@@ -34,6 +34,7 @@ const DEFAULT_SHORTCUTS: ShortcutMap = {
   tab_board: 'Ctrl+1',
   tab_people: 'Ctrl+2',
   tab_live: 'Ctrl+3',
+  tab_needs_review: 'Ctrl+6',
   tab_archive: 'Ctrl+4',
   tab_settings: 'Ctrl+5',
   card_up: 'ArrowUp',
@@ -63,6 +64,7 @@ export function useKeyboardShortcuts() {
         tab_board: 'board',
         tab_people: 'people',
         tab_live: 'live',
+        tab_needs_review: 'needs-review',
         tab_archive: 'archive',
         tab_settings: 'settings',
       };

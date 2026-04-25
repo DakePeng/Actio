@@ -381,6 +381,7 @@ export const zhCN: Translations = {
   'settings.shortcuts.action.tab_board': '看板标签页',
   'settings.shortcuts.action.tab_people': '人员标签页',
   'settings.shortcuts.action.tab_live': '实时标签页',
+  'settings.shortcuts.action.tab_needs_review': '待审核标签页',
   'settings.shortcuts.action.tab_archive': '归档标签页',
   'settings.shortcuts.action.tab_settings': '设置标签页',
   'settings.shortcuts.action.card_up': '上一张卡片',

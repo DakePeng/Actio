@@ -384,6 +384,7 @@ export const en = {
   'settings.shortcuts.action.tab_board': 'Board tab',
   'settings.shortcuts.action.tab_people': 'People tab',
   'settings.shortcuts.action.tab_live': 'Live tab',
+  'settings.shortcuts.action.tab_needs_review': 'Needs-review tab',
   'settings.shortcuts.action.tab_archive': 'Archive tab',
   'settings.shortcuts.action.tab_settings': 'Settings tab',
   'settings.shortcuts.action.card_up': 'Card up',
