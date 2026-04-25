@@ -3,7 +3,7 @@ export type Priority = 'high' | 'medium' | 'low';
 // by the windowed extractor. User confirms → 'open', dismisses → 'archived'.
 export type ReminderStatus = 'open' | 'pending' | 'completed' | 'archived';
 
-export type Tab = 'board' | 'needs-review' | 'archive' | 'settings' | 'recording' | 'people';
+export type Tab = 'board' | 'needs-review' | 'archive' | 'settings' | 'live' | 'people';
 
 export interface Segment {
   id: string;
@@ -174,4 +174,17 @@ export interface UIState {
     vars?: Record<string, string | number>;
     tone: 'neutral' | 'success';
   } | null;
+  /**
+   * User-facing toggle for the always-on background pipeline. Mirrors
+   * `settings.audio.always_listening`; the canonical source is the backend.
+   * `null` while the boot fetch hasn't resolved yet — UI shows a neutral
+   * disabled state in that window.
+   */
+  listeningEnabled: boolean | null;
+  /**
+   * Wall-clock timestamp (Date.now()) of the most recent off → on flip,
+   * or null when listening is off. Drives the "Listening since" header
+   * timer in the Live tab. Not persisted across restarts.
+   */
+  listeningStartedAt: number | null;
 }
