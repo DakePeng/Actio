@@ -8,6 +8,7 @@ import { formatTimeShort } from '../utils/time';
 import { SwipeActionRow } from './swipe/SwipeActionRow';
 import { SwipeActionCoordinatorProvider } from './swipe/SwipeActionCoordinator';
 import { ActioWordmark } from './ActioWordmark';
+import { ListeningToggle } from './ListeningToggle';
 import { useActioState } from '../hooks/useActioState';
 import { useT } from '../i18n';
 
@@ -186,6 +187,7 @@ export function StandbyTray() {
               </div>
             </div>
           )}
+          <ListeningToggle className="tray-mic-button" />
           <button
             type="button"
             className="tray-chevron-button"

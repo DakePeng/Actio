@@ -1134,6 +1134,10 @@ body.body--standby .tray--launcher:hover {
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
+.tray-mic-button {
+  margin-right: 4px;
+}
+
 .tray-chevron-button:hover {
   background: rgba(15, 118, 110, 0.08);
   border-color: rgba(15, 118, 110, 0.16);

@@ -68,4 +68,20 @@ describe('StandbyTray', () => {
     // same physical size it has inside the full wordmark.
     expect(screen.getByLabelText('Actio')).toHaveAttribute('viewBox', '0 16 44 48');
   });
+
+  it('renders the listening toggle in the collapsed tray', () => {
+    useStore.setState((state) => ({
+      ui: { ...state.ui, listeningEnabled: true, listeningStartedAt: 1 },
+    }));
+
+    render(
+      <LanguageProvider>
+        <StandbyTray />
+      </LanguageProvider>,
+    );
+
+    const toggle = screen.getByRole('button', { name: /click to mute/i });
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  });
 });
