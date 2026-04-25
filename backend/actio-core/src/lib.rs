@@ -64,6 +64,10 @@ pub struct AppState {
     pub remote_client_envseed: Option<Arc<RemoteLlmClient>>,
     /// Active LLM router. Rebuilt whenever LlmSettings.selection changes.
     pub router: Arc<tokio::sync::RwLock<LlmRouter>>,
+    /// Process-level mutex serializing all `LlmRouter` calls (window
+    /// extraction + translation). Tokio's mutex is FIFO so neither
+    /// feature starves.
+    pub llm_inflight: std::sync::Arc<tokio::sync::Mutex<()>>,
     /// Optional second listener for the /v1/* endpoint on a configurable port.
     pub llm_endpoint: Arc<tokio::sync::Mutex<LocalLlmEndpoint>>,
 }
@@ -145,6 +149,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         llm_downloader,
         remote_client_envseed,
         router,
+        llm_inflight: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         llm_endpoint,
     };
 
