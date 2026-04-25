@@ -144,6 +144,9 @@ export const en = {
   'feedback.extractFailed': "Couldn't extract reminders",
   'feedback.modelSwitched': 'Switched model to {model} for the new language',
   'feedback.llmNotConfiguredFormMode': 'Language model is not configured, so quick capture opened in form mode',
+  'feedback.listeningOn': 'Listening on',
+  'feedback.listeningOff': 'Listening off',
+  'feedback.listeningToggleFailed': "Couldn't change listening state",
 
   // Priority values (for interpolation)
   'priority.low': 'low',
@@ -155,6 +158,10 @@ export const en = {
   'tray.aria.openBoard': 'Open board',
   'tray.aria.listening': 'Listening',
   'tray.aria.transcribing': 'Transcribing',
+  'tray.aria.toggleListening.on': 'Listening — click to mute',
+  'tray.aria.toggleListening.off': 'Muted — click to start listening',
+  'tray.tooltip.listening': 'Listening',
+  'tray.tooltip.muted': 'Muted',
   'tray.status.transcribing': 'Transcribing...',
   'tray.status.listening': 'Listening...',
   'tray.status.freshCapturesOne': '1 fresh capture waiting',
@@ -176,11 +183,18 @@ export const en = {
 
   // Top-level tab bar
   'tab.people': 'People',
-  'tab.recording': 'Transcribe',
+  'tab.live': 'Live',
   'tab.board': 'Board',
   'tab.needsReview': 'Needs review',
   'tab.archive': 'Archive',
   'tab.settings': 'Settings',
+
+  // Live tab
+  'live.header.on': 'Listening',
+  'live.header.off': 'Muted',
+  'live.listeningSince': 'Listening since {time} • {duration}',
+  'live.pausedHint': 'Listening is paused. Turn it on in the tray or here to start capturing.',
+  'live.aria.toggleListening': 'Toggle listening',
 
   // Needs-review queue (medium-confidence auto-extracted items)
   'needsReview.empty.title': 'Nothing to review',
@@ -364,11 +378,12 @@ export const en = {
   'settings.shortcuts.saveFailed': 'Failed to save shortcut',
   'settings.shortcuts.resetFailed': 'Failed to reset shortcuts',
   'settings.shortcuts.action.toggle_board_tray': 'Toggle board / tray',
+  'settings.shortcuts.action.toggle_listening': 'Toggle listening',
   'settings.shortcuts.action.start_dictation': 'Start dictation',
   'settings.shortcuts.action.new_todo': 'New to-do',
   'settings.shortcuts.action.tab_board': 'Board tab',
   'settings.shortcuts.action.tab_people': 'People tab',
-  'settings.shortcuts.action.tab_recording': 'Recording tab',
+  'settings.shortcuts.action.tab_live': 'Live tab',
   'settings.shortcuts.action.tab_archive': 'Archive tab',
   'settings.shortcuts.action.tab_settings': 'Settings tab',
   'settings.shortcuts.action.card_up': 'Card up',
