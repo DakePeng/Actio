@@ -2,6 +2,7 @@ pub mod app_settings;
 pub mod asr;
 pub mod audio_capture;
 pub mod audio_quality;
+pub mod batch_processor;
 pub mod capture_daemon;
 pub mod clip_boundary;
 pub mod clip_storage;

@@ -238,6 +238,33 @@ pub async fn insert_segment(
     Ok(id)
 }
 
+/// Insert (or no-op-update clip_id on) an audio_segments row tied to a
+/// batch-processed clip. Used by the batch processor before transcripts
+/// land for each segment in a clip's manifest. Idempotent — re-running
+/// batch processing for a clip does not duplicate rows.
+pub async fn upsert_segment_for_clip(
+    pool: &SqlitePool,
+    id: Uuid,
+    session_id: Uuid,
+    clip_id: Uuid,
+    start_ms: i64,
+    end_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO audio_segments (id, session_id, clip_id, start_ms, end_ms) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(id) DO UPDATE SET clip_id = excluded.clip_id",
+    )
+    .bind(id.to_string())
+    .bind(session_id.to_string())
+    .bind(clip_id.to_string())
+    .bind(start_ms)
+    .bind(end_ms)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
