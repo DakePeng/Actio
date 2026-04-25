@@ -308,6 +308,161 @@ fn load_manifest(manifest_path: &str) -> anyhow::Result<ClipManifest> {
     Ok(serde_json::from_str(&body)?)
 }
 
+// ── BatchProcessor lifecycle handle ──────────────────────────────────────
+
+/// Long-lived handle that owns the claim → process → mark loop. The
+/// supervisor calls `ensure_running` when `always_listening = true` and
+/// `ensure_stopped` when the user toggles to privacy mode. The loop
+/// itself is single-worker process-wide, matching the spec's intent that
+/// only one clip at a time gets the cold-loaded archive ASR.
+pub struct BatchProcessorHandle {
+    inner: tokio::sync::Mutex<HandleInner>,
+}
+
+struct HandleInner {
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl BatchProcessorHandle {
+    pub fn new() -> Self {
+        Self {
+            inner: tokio::sync::Mutex::new(HandleInner { cancel: None }),
+        }
+    }
+
+    pub async fn is_running(&self) -> bool {
+        self.inner.lock().await.cancel.is_some()
+    }
+
+    /// Start the loop if it isn't already. Runner is a closure that
+    /// processes a single claimed clip — wired in by the supervisor with
+    /// the pool, ASR, and embedder it constructs from settings. Decoupled
+    /// this way so the handle module doesn't take a dependency on every
+    /// concrete sherpa type.
+    pub async fn ensure_running<R>(&self, pool: sqlx::SqlitePool, runner: Arc<R>)
+    where
+        R: ClipRunner + 'static,
+    {
+        let mut g = self.inner.lock().await;
+        if g.cancel.is_some() {
+            return;
+        }
+        let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
+        g.cancel = Some(cancel_tx);
+
+        // Boot housekeeping: revert orphan 'running' rows from a prior crash.
+        if let Err(e) = audio_clip::requeue_stale_running(&pool).await {
+            tracing::warn!(error=%e, "BatchProcessor: requeue stale on boot failed");
+        }
+
+        tokio::spawn(async move {
+            loop {
+                if cancel_rx.try_recv().is_ok() {
+                    break;
+                }
+                match audio_clip::claim_next_pending(&pool).await {
+                    Ok(Some(clip)) => match runner.run_clip(&pool, &clip).await {
+                        Ok(()) => {}
+                        Err(e) => {
+                            tracing::warn!(error=%e, clip_id=%clip.id, "BatchProcessor: clip failed");
+                            let _ = audio_clip::mark_failed(&pool, clip.id, &e.to_string()).await;
+                        }
+                    },
+                    Ok(None) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error=%e, "BatchProcessor: claim failed");
+                        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                    }
+                }
+            }
+            tracing::info!("BatchProcessor stopped");
+        });
+    }
+
+    pub async fn ensure_stopped(&self) {
+        let mut g = self.inner.lock().await;
+        if let Some(tx) = g.cancel.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+impl Default for BatchProcessorHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Strategy interface the supervisor wires to the handle. One impl pulls
+/// the production sherpa-onnx ASR + embedder; tests inject a stub. Using
+/// a boxed-future shape rather than `async fn in trait` keeps the trait
+/// dyn-safe so the supervisor can erase the concrete runner type.
+pub trait ClipRunner: Send + Sync {
+    fn run_clip<'a>(
+        &'a self,
+        pool: &'a sqlx::SqlitePool,
+        clip: &'a AudioClip,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>>;
+}
+
+#[cfg(test)]
+mod handle_tests {
+    use super::*;
+
+    struct CountingRunner {
+        count: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ClipRunner for CountingRunner {
+        fn run_clip<'a>(
+            &'a self,
+            pool: &'a sqlx::SqlitePool,
+            clip: &'a AudioClip,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                self.count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                audio_clip::mark_processed(pool, clip.id, None).await?;
+                Ok(())
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn handle_drains_pending_clips_then_idles() {
+        let pool = super::tests::fresh_pool().await;
+        let session_id = super::tests::mk_session(&pool).await;
+        let _ = audio_clip::insert_pending(&pool, session_id, 0, 100, 1, "/tmp/a")
+            .await
+            .unwrap();
+        let _ = audio_clip::insert_pending(&pool, session_id, 100, 200, 1, "/tmp/b")
+            .await
+            .unwrap();
+
+        let handle = BatchProcessorHandle::new();
+        let runner = Arc::new(CountingRunner {
+            count: std::sync::atomic::AtomicUsize::new(0),
+        });
+        handle.ensure_running(pool.clone(), runner.clone()).await;
+
+        // Give the loop a moment to drain. Two clips at idle-poll cadence
+        // should be claimed near-instantly.
+        for _ in 0..20 {
+            if runner.count.load(std::sync::atomic::Ordering::Relaxed) == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(runner.count.load(std::sync::atomic::Ordering::Relaxed), 2);
+
+        handle.ensure_stopped().await;
+        assert!(!handle.is_running().await);
+    }
+}
+
 fn audio_dir_of(manifest_path: &str) -> PathBuf {
     std::path::Path::new(manifest_path)
         .parent()
@@ -324,7 +479,7 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use tempfile::tempdir;
 
-    async fn fresh_pool() -> SqlitePool {
+    pub(super) async fn fresh_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
@@ -337,7 +492,7 @@ mod tests {
         pool
     }
 
-    async fn mk_session(pool: &SqlitePool) -> Uuid {
+    pub(super) async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();
         sqlx::query(
             r#"INSERT INTO audio_sessions (id, tenant_id, source_type, mode, routing_policy)
