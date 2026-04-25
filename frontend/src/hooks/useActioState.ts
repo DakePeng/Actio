@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store/use-store';
 import { useVoiceStore } from '../store/use-voice-store';
 import { useWordmarkPreview } from './useWordmarkPreview';
+import { useWordmarkFlash } from './useWordmarkFlash';
 import type { WordmarkState } from '../components/ActioWordmark';
 
 // Hold durations for transient feedback states. Long enough to register, short
@@ -18,12 +19,16 @@ function isErrorFeedback(messageKey: string | null | undefined) {
   return /Failed$|\.error\b/i.test(messageKey);
 }
 
-// Derives the ActioWordmark state from live app signals:
-//   • recording or dictating → listening
-//   • dictation transcribing → processing
-//   • recent success toast   → success (1.2s)
-//   • recent failure toast   → error   (1.8s)
-//   • otherwise              → standby
+// Derives the ActioWordmark state from live app signals. The dictation
+// hotkey (Ctrl+Shift+Space) lifecycle drives most of these transitions:
+//
+//   • dictating (1st press, mic capturing)        → transcribing
+//   • dictation finalizing (2nd press, awaiting)  → processing
+//   • AI extracting reminders                     → processing
+//   • background recording, no dictation          → listening
+//   • recent failure toast                        → error   (1.8s)
+//   • recent success toast / paste flash          → success (1.2s)
+//   • otherwise                                   → standby
 export function useActioState(): WordmarkState {
   const isRecording = useVoiceStore((s) => s.isRecording);
   const isExtracting = useStore((s) => s.reminders.some((reminder) => reminder.isExtracting));
@@ -32,6 +37,7 @@ export function useActioState(): WordmarkState {
   const feedback = useStore((s) => s.ui.feedback);
 
   const preview = useWordmarkPreview();
+  const flash = useWordmarkFlash();
   const [transient, setTransient] = useState<'success' | 'error' | null>(null);
 
   useEffect(() => {
@@ -53,9 +59,13 @@ export function useActioState(): WordmarkState {
   // Dev preview (Shift+Alt+Tab) takes precedence over every live signal so
   // designers can walk through states without actually recording.
   if (preview) return preview;
+  // One-shot flashes triggered by app events (e.g. the success pulse fired
+  // when a dictated transcript is pasted) win over the live derivation.
+  if (flash) return flash;
   if (transient) return transient;
-  if (isDictationTranscribing) return 'transcribing';
+  if (isDictationTranscribing) return 'processing';
   if (isExtracting) return 'processing';
-  if (isDictating || isRecording) return 'listening';
+  if (isDictating) return 'transcribing';
+  if (isRecording) return 'listening';
   return 'standby';
 }

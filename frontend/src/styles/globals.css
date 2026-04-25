@@ -1093,9 +1093,16 @@ body.body--standby .tray--launcher:hover {
   position: relative;
 }
 
+/* During the transcribing phase the wordmark switches to the compact 'a'
+ * glyph and the live transcript scrolls in beside it on the same row. */
 .tray-toggle--live {
   padding-left: 14px;
-  gap: 10px;
+  gap: 12px;
+}
+
+.tray-toggle--live .tray-brand-trigger {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .tray-brand-trigger,
@@ -1115,10 +1122,6 @@ body.body--standby .tray--launcher:hover {
   border-radius: 12px;
 }
 
-.tray-toggle--live .tray-brand-trigger {
-  flex: 0 0 46px;
-  justify-content: center;
-}
 
 .tray-chevron-button {
   width: 44px;
@@ -1164,22 +1167,12 @@ body.body--standby .tray--launcher:hover {
   letter-spacing: -0.02em;
 }
 
-.tray-brand--compact {
-  width: 44px;
-  height: 44px;
-  justify-content: center;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--color-accent-wash) 76%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
-}
-
 .tray-transcript {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  align-self: stretch;
+  align-self: center;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 2px;
   padding: 2px 2px 2px 0;
   color: var(--color-text);

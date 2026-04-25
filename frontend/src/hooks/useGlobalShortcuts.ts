@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/use-store';
+import { flashWordmark } from './useWordmarkFlash';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -11,8 +12,20 @@ const DEFAULT_GLOBAL_SHORTCUTS: Record<string, string> = {
   new_todo: 'Ctrl+N',
 };
 
-/** How long to wait for a final transcript after stopping dictation (ms) */
+/** How long to wait for a final transcript after stopping dictation (ms).
+ *  Used when at least one partial arrived during capture and we expect the
+ *  ASR to deliver a final shortly. */
 const TRANSCRIBING_TIMEOUT = 5000;
+
+/** Tail wait when no transcript chunks arrived during capture. The
+ *  obvious case is silence, but it also covers the (more common) case
+ *  where the user speaks a quick word and stops the hotkey before the
+ *  ASR has had time to emit even a partial — streaming Zipformer's
+ *  first-partial latency is ~300–500ms, and a final after end-of-speech
+ *  lands ~500–1000ms later. We need to wait long enough for that round
+ *  trip, while still being noticeably faster than the full 5s timeout
+ *  used when partials are already streaming. */
+const NO_SPEECH_TAIL_TIMEOUT = 2000;
 
 export function useGlobalShortcuts() {
   const setBoardWindow = useStore((s) => s.setBoardWindow);
@@ -22,6 +35,10 @@ export function useGlobalShortcuts() {
   const wsRef = useRef<WebSocket | null>(null);
   const fullTranscriptRef = useRef('');
   const transcribingTimerRef = useRef<number | null>(null);
+  // Tracks whether we saw any transcript message at all (partial or final)
+  // during the current dictation. If we didn't, there's nothing in flight
+  // to wait for at stop time and we can short-circuit the tail timeout.
+  const receivedAnyTranscriptRef = useRef(false);
 
   /** Paste accumulated transcript, close WS, clear transcribing state */
   function finishDictation() {
@@ -33,6 +50,10 @@ export function useGlobalShortcuts() {
     if (transcript) {
       console.log('[Actio] Pasting transcript:', transcript);
       invoke('paste_text', { text: transcript }).catch(console.error);
+      // Brief 'success' pulse on the wordmark to mark the paste; after it
+      // expires the wordmark falls back to the live state (listening if the
+      // background pipeline is on, standby otherwise).
+      flashWordmark('success', 1200);
     }
     if (wsRef.current) {
       wsRef.current.close();
@@ -91,10 +112,16 @@ export function useGlobalShortcuts() {
             useStore.setState((s) => ({
               ui: { ...s.ui, isDictating: false, isDictationTranscribing: true },
             }));
+            // If we never received any transcript during capture, there's
+            // nothing in flight — use a near-instant tail so the wordmark
+            // doesn't dwell on processing for 5s of silence.
+            const timeoutMs = receivedAnyTranscriptRef.current
+              ? TRANSCRIBING_TIMEOUT
+              : NO_SPEECH_TAIL_TIMEOUT;
             transcribingTimerRef.current = window.setTimeout(() => {
               console.log('[Actio] Transcribing timeout, pasting what we have');
               finishDictation();
-            }, TRANSCRIBING_TIMEOUT);
+            }, timeoutMs);
           }
         } else {
           console.log('[Actio] Starting dictation...');
@@ -133,6 +160,7 @@ export function useGlobalShortcuts() {
         setDictating(true);
         setDictationTranscript('');
         fullTranscriptRef.current = '';
+        receivedAnyTranscriptRef.current = false;
 
         const ws = new WebSocket('ws://127.0.0.1:3000/ws');
         wsRef.current = ws;
@@ -145,6 +173,7 @@ export function useGlobalShortcuts() {
               if (data.transcript_id && data.is_final && finalizedIds.has(data.transcript_id)) return;
               if (data.transcript_id && data.is_final) finalizedIds.add(data.transcript_id);
 
+              receivedAnyTranscriptRef.current = true;
               console.log('[Actio] Live transcript:', data.text, data.is_final ? '(final)' : '(partial)', 'id:', data.transcript_id);
               if (data.is_final) {
                 fullTranscriptRef.current += data.text;

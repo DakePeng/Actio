@@ -258,7 +258,14 @@ impl InferencePipeline {
                                         end_ms,
                                         t.segment_id,
                                     ).await {
-                                        warn!(%session_id, error = %e, "Failed to persist final transcript");
+                                        // Persist failed (e.g. orphaned
+                                        // session_id with no audio_sessions
+                                        // row). Still broadcast so live WS
+                                        // consumers — most importantly the
+                                        // dictation pipe in the frontend —
+                                        // don't go silent on a DB hiccup.
+                                        warn!(%session_id, error = %e, "Failed to persist final transcript; broadcasting unpersisted");
+                                        aggregator.broadcast_final_unpersisted(&t.text, start_ms, end_ms);
                                     }
                                 } else {
                                     // Partials: broadcast to WS only, no DB persist

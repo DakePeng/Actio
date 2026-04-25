@@ -28,9 +28,13 @@ export const ActioWordmark = memo(function ActioWordmark({
   className,
   compact = false,
 }: ActioWordmarkProps) {
-  // Compact viewBox frames the primary 'a' and leaves room for the ring /
-  // spin-arc overlays without clipping them.
-  const viewBox = compact ? '0 16 50 48' : '0 0 260 70';
+  // Compact viewBox: keep vbH at 48 (matches the 'a' glyph's vertical span
+  // of 24 SVG units) so the rendered 'a' is the same ~14px diameter it has
+  // inside the full wordmark. vbW is trimmed to 44 so the right-side
+  // padding mirrors the natural ~6px gap on the left, removing the
+  // off-center feel of the wider 50-unit crop without inflating the glyph
+  // the way the tight 28×28 crop did.
+  const viewBox = compact ? '0 16 44 48' : '0 0 260 70';
   const [, , vbW, vbH] = viewBox.split(' ').map(Number);
   const width = Math.round((height * vbW) / vbH);
   const rootClass = [

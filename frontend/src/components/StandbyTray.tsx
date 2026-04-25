@@ -34,7 +34,14 @@ export function StandbyTray() {
   const t = useT();
   const actioState = useActioState();
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
-  const showLiveTranscript = isDictating || isDictationTranscribing;
+  // The compact 'a' + transcript layout is reserved for the dictation
+  // capture phase (after pressing Ctrl+Shift+Space, before pressing again).
+  // We tie this directly to `isDictating` rather than the derived wordmark
+  // state — the latter can be overridden by flashes, previews, or AI
+  // extraction, and we don't want any of those to hide the transcript while
+  // the user is actively speaking.
+  const compactWordmark = isDictating;
+  const showLiveTranscript = isDictating;
   const transcriptText = dictationTranscript.trim();
 
   const topReminders = useMemo(() => {
@@ -148,12 +155,15 @@ export function StandbyTray() {
         {newCount > 0 && <span className="tray-badge">{newCount > 9 ? '9+' : newCount}</span>}
         <div className={`tray-toggle${showLiveTranscript ? ' tray-toggle--live' : ''}`}>
           <button type="button" className="tray-brand-trigger" onClick={() => setExpanded((prev) => !prev)}>
-            <div className={`tray-brand tray-brand--mark${showLiveTranscript ? ' tray-brand--compact' : ''}`}>
+            <div className="tray-brand tray-brand--mark">
               <ActioWordmark
                 state={actioState}
-                height={showLiveTranscript ? 34 : 40}
+                // Compact crop is much tighter (viewBox 50×48 vs 260×70), so the
+                // height needs to scale down for the 'a' to render at the same
+                // ~14px size it has inside the full wordmark.
+                height={compactWordmark ? 28 : 40}
+                compact={compactWordmark}
                 ariaLabel="Actio"
-                compact={showLiveTranscript}
               />
             </div>
           </button>

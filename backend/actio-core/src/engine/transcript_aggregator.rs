@@ -92,6 +92,22 @@ impl TranscriptAggregator {
         let _ = self.events.send(t.clone());
     }
 
+    /// Broadcast a final transcript without persisting to DB. Used as a
+    /// fallback when the DB write fails (e.g. an orphaned session_id whose
+    /// row got purged) — clients like dictation still need the text even
+    /// when we can't durably store it.
+    pub fn broadcast_final_unpersisted(&self, text: &str, start_ms: i64, end_ms: i64) {
+        let t = AggregatedTranscript {
+            id: String::new(),
+            text: text.to_string(),
+            start_ms,
+            end_ms,
+            speaker_id: None,
+            is_final: true,
+        };
+        self.publish(&t);
+    }
+
     /// Broadcast a partial transcript to WS subscribers without persisting to DB.
     pub fn broadcast_partial(&self, text: &str, start_ms: i64, end_ms: i64) {
         let t = AggregatedTranscript {
