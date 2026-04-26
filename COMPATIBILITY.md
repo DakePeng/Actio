@@ -816,6 +816,128 @@ Or just enumerate the known cases the user can record: `KeyboardSettings.tsx:135
 
 ---
 
+---
+
+# Fifth-pass additions (loop iteration 3)
+
+After landing the iteration-3 fixes, I scanned the network/CORS surface and bundle origin handling — areas not covered in earlier passes.
+
+---
+
+### 37. CORS allow-list omits Tauri webview origins — production fetches likely blocked on macOS / Linux
+
+`backend/actio-core/src/lib.rs:336-342`:
+
+```rust
+let cors = CorsLayer::new()
+    .allow_origin([
+        "http://localhost:1420".parse().unwrap(),
+        "http://127.0.0.1:1420".parse().unwrap(),
+        "http://localhost:5173".parse().unwrap(),
+        "http://127.0.0.1:5173".parse().unwrap(),
+    ])
+    .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+    .allow_headers([
+        HeaderName::from_static("content-type"),
+        HeaderName::from_static("x-tenant-id"),
+    ]);
+```
+
+These are the **dev-server** origins — vite on 5173, Tauri-dev wrapper on 1420. In a production bundle, the WebView serves the frontend from a custom protocol scheme and the `Origin` header on requests to `http://127.0.0.1:3000` becomes:
+
+| Platform | WebView | Origin header in production |
+|---|---|---|
+| Windows | WebView2 (Chromium) | `https://tauri.localhost` |
+| macOS | WKWebView | `tauri://localhost` |
+| Linux | WebKitGTK | `tauri://localhost` |
+
+None of those are in `allow_origin`. tower-http's `CorsLayer` returns no `Access-Control-Allow-Origin` header for unmatched origins, and the browser blocks the response. Every `fetch('/...')` from the bundled frontend — including the `getApiBaseUrl()` health probe in `frontend/src/api/backend-url.ts:17`, the `KeyboardSettings` GET `/settings` call, and all the `actio-api.ts` mutations — would 0-byte fail with a CORS error.
+
+The Windows production build apparently works today, suggesting WebView2's localhost-to-localhost fetches bypass CORS via a Chrome/Edge-specific exemption. WebKit-family WebViews (macOS WKWebView, Linux WebKitGTK) historically enforce CORS strictly even for localhost.
+
+**Severity:** High · **Platform:** macOS + Linux (probable; not yet tested on hardware)
+
+**Fix:** Either add the production origins explicitly:
+
+```rust
+.allow_origin([
+    "http://localhost:1420".parse().unwrap(),
+    "http://127.0.0.1:1420".parse().unwrap(),
+    "http://localhost:5173".parse().unwrap(),
+    "http://127.0.0.1:5173".parse().unwrap(),
+    "tauri://localhost".parse().unwrap(),
+    "https://tauri.localhost".parse().unwrap(),
+])
+```
+
+Or use a predicate that admits any localhost-bound origin:
+
+```rust
+use tower_http::cors::AllowOrigin;
+let cors = CorsLayer::new().allow_origin(AllowOrigin::predicate(|origin, _req| {
+    let s = origin.to_str().unwrap_or("");
+    s.starts_with("http://localhost")
+        || s.starts_with("http://127.0.0.1")
+        || s == "tauri://localhost"
+        || s == "https://tauri.localhost"
+}));
+```
+
+The predicate approach is safer because it admits the production scheme without hardcoding it everywhere.
+
+---
+
+### 38. Audio device names with non-ASCII characters may not round-trip cleanly
+
+`frontend/src/api/actio-api.ts` settings round-trip stores the audio input device name as a JSON string. cpal returns device names as `String` from the OS:
+- Windows: WASAPI returns names from the registry, often UTF-16 surrogate pairs (Japanese kana, Cyrillic, etc.)
+- macOS: CoreAudio returns CFString, normalized to UTF-8
+- Linux ALSA: returns whatever the device descriptor strings contain — which can be ASCII for built-in mics but raw bytes for some USB mics
+
+For users with non-ASCII device names (Japanese: "内蔵マイク", Chinese: "内置麦克风", Cyrillic, etc.), the device-picker UI is fine (JSON handles UTF-8), but the OS-side device matching uses byte-equality comparison in `audio_capture.rs:84-86`:
+
+```rust
+.find(|d| d.name().ok().as_deref() == Some(name))
+```
+
+If the device name was stored with one Unicode normalization (NFC) and the OS now reports a different normalization (NFD on macOS HFS+), the match fails and falls back to "Audio device not found".
+
+**Severity:** Low · **Platform:** All (more likely on macOS due to NFC↔NFD differences)
+
+**Fix:** Normalize both sides to NFC before comparison. Add the `unicode-normalization` crate and:
+
+```rust
+use unicode_normalization::UnicodeNormalization;
+let target: String = name.nfc().collect();
+.find(|d| d.name().ok().map(|n| n.nfc().collect::<String>()) == Some(target.clone()))
+```
+
+Worth doing only after macOS testing reveals an actual mismatch.
+
+---
+
+### 39. WebSocket URL hardcoded to `ws://127.0.0.1:3000/ws` ignores `getApiBaseUrl()` port discovery
+
+`frontend/src/hooks/useGlobalShortcuts.ts:180`:
+
+```ts
+const ws = new WebSocket('ws://127.0.0.1:3000/ws');
+```
+
+The HTTP layer probes ports 3000-3009 in `backend-url.ts:1-2` (`FALLBACK_PORTS`) so a developer can run the app while another process holds 3000. But the WebSocket is hardcoded to 3000 — if the backend bound to 3001, dictation can't open its WebSocket.
+
+The `useVoiceStore` has the same pattern (likely — see `frontend/src/store/use-voice-store.ts`'s `MockWebSocket` test fixture which uses `ws://127.0.0.1:3000/ws`).
+
+**Severity:** Medium · **Platform:** All (port-conflict scenario)
+
+**Fix:** Use `getWsUrl('/ws')` from `backend-url.ts` instead of hardcoding the URL. The helper is already exported but unused:
+
+```ts
+const ws = new WebSocket(await getWsUrl('/ws'));
+```
+
+---
+
 ## Combined summary table
 
 | # | File | Severity | Platform | Status |
@@ -855,4 +977,7 @@ Or just enumerate the known cases the user can record: `KeyboardSettings.tsx:135
 | 33 | `release.yml`, no `ci.yml` | High | All | Open |
 | 34 | `audio_capture.rs:124` | Critical | macOS + Linux | **Fixed** |
 | 35 | `lib.rs:99-104` | Medium | All | Open |
-| 36 | `useKeyboardShortcuts.ts` Space key | Low | All | Fixed |
+| 36 | `useKeyboardShortcuts.ts` Space key | Low | All | **Fixed** |
+| 37 | `lib.rs:336-342` CORS origins | High | macOS + Linux | Open |
+| 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
+| 39 | `useGlobalShortcuts.ts:180` hardcoded WS port | Medium | All | Open |
