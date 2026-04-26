@@ -67,44 +67,119 @@ pub fn build_translate_messages(
     ]
 }
 
-/// Parse the LLM response. Tolerates `</think>`-style preambles and
-/// prompt-echoed JSON by walking all balanced `{...}` blocks and
-/// keeping the LAST one that contains a valid `translations` array.
+/// Parse the LLM response. Tolerates a wide range of off-spec output:
+///   * `<think>...</think>` reasoning preambles
+///   * Markdown code fences (```json ... ```)
+///   * Prompt-echoed examples — we keep the LAST valid block found
+///   * The canonical envelope `{"translations": [...]}`
+///   * Bare arrays `[{"id":...,"text":...}, ...]` (model dropped the wrapper)
+///   * Trailing junk after the JSON (e.g. `]}]` tails seen in the wild)
 pub fn parse_translate_response(
     raw: &str,
 ) -> Result<Vec<TranslateLineResponse>, TranslateParseError> {
     let stripped = strip_think_tags(raw);
+    let stripped = strip_code_fences(&stripped);
 
     let mut best: Option<Vec<TranslateLineResponse>> = None;
-    let mut depth: i32 = 0;
-    let mut start: Option<usize> = None;
-    for (i, ch) in stripped.char_indices() {
-        match ch {
-            '{' => {
-                if depth == 0 {
-                    start = Some(i);
-                }
-                depth += 1;
+
+    // Pass 1: walk balanced `{...}` blocks and keep the last that
+    // parses as the canonical envelope.
+    for candidate in balanced_blocks(stripped, '{', '}') {
+        if let Ok(env) = serde_json::from_str::<TranslateBatchEnvelope>(&candidate) {
+            best = Some(env.translations);
+        }
+    }
+
+    // Pass 2: if no envelope matched, accept a bare `[{id, text}, ...]`
+    // array. The model occasionally drops the `{"translations": ...}`
+    // wrapper (especially when it gets truncated or wraps in a code
+    // fence).
+    if best.is_none() {
+        for candidate in balanced_blocks(stripped, '[', ']') {
+            if let Ok(items) = serde_json::from_str::<Vec<TranslateLineResponse>>(&candidate) {
+                best = Some(items);
             }
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    if let Some(s) = start {
-                        let candidate = &stripped[s..=i];
-                        if let Ok(env) =
-                            serde_json::from_str::<TranslateBatchEnvelope>(candidate)
-                        {
-                            best = Some(env.translations);
-                        }
-                    }
-                    start = None;
-                }
-            }
-            _ => {}
         }
     }
 
     best.ok_or(TranslateParseError::NoTranslationsFound)
+}
+
+/// Iterate every top-level balanced block delimited by `open`/`close`
+/// chars, in left-to-right order. Skips delimiters inside JSON strings
+/// (with backslash escape) so a quoted `"}"` doesn't end the block.
+fn balanced_blocks(s: &str, open: char, close: char) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = s.char_indices().peekable();
+    while let Some(&(i, ch)) = chars.peek() {
+        if ch != open {
+            chars.next();
+            continue;
+        }
+        // Walk this block.
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escape = false;
+        let mut end = None;
+        for (j, c) in s[i..].char_indices() {
+            if escape {
+                escape = false;
+                continue;
+            }
+            if in_string {
+                if c == '\\' {
+                    escape = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match c {
+                '"' => in_string = true,
+                c if c == open => depth += 1,
+                c if c == close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(i + j + c.len_utf8());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(e) = end {
+            out.push(s[i..e].to_string());
+            // Resume after this block.
+            while let Some(&(k, _)) = chars.peek() {
+                if k >= e {
+                    break;
+                }
+                chars.next();
+            }
+        } else {
+            // Unbalanced — don't keep walking inside it.
+            chars.next();
+        }
+    }
+    out
+}
+
+fn strip_code_fences(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    // ```json\n...\n``` or ```\n...\n```
+    let after_open = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"));
+    if let Some(rest) = after_open {
+        let rest = rest.trim_start();
+        if let Some(inner) = rest.strip_suffix("```") {
+            return inner.trim();
+        }
+        // Unclosed fence — strip just the opener so the parser can still
+        // walk balanced blocks in the remainder.
+        return rest;
+    }
+    trimmed
 }
 
 fn strip_think_tags(raw: &str) -> String {
@@ -168,6 +243,42 @@ mod tests {
         let raw = "Example: {\"translations\":[{\"id\":\"00000000-0000-0000-0000-000000000000\",\"text\":\"example\"}]}\nActual: {\"translations\":[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"text\":\"real\"}]}";
         let out = parse_translate_response(raw).unwrap();
         assert_eq!(out[0].text, "real");
+    }
+
+    #[test]
+    fn parse_strips_json_code_fence() {
+        let raw = "```json\n{\"translations\":[{\"id\":\"line-1\",\"text\":\"你好\"}]}\n```";
+        let out = parse_translate_response(raw).unwrap();
+        assert_eq!(out[0].text, "你好");
+    }
+
+    #[test]
+    fn parse_accepts_bare_array_fallback() {
+        // The qwen3.5-2b failure pattern: model drops the `{"translations": …}`
+        // wrapper and emits a bare array (sometimes inside a code fence).
+        let raw = "```json\n[{\"id\":\"line-1\",\"text\":\"hello\"}]\n```";
+        let out = parse_translate_response(raw).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, "hello");
+    }
+
+    #[test]
+    fn parse_tolerates_trailing_junk_after_array() {
+        // Real production output: bare array followed by a junk `}]` tail.
+        let raw = "```json\n[{\"id\":\"abc\",\"text\":\"first\"}]}]";
+        let out = parse_translate_response(raw).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "abc");
+        assert_eq!(out[0].text, "first");
+    }
+
+    #[test]
+    fn parse_string_with_close_brace_is_not_block_terminator() {
+        // Make sure a `}` inside a JSON string doesn't prematurely close
+        // the block during balanced-block walking.
+        let raw = r#"{"translations":[{"id":"x","text":"contains } literal"}]}"#;
+        let out = parse_translate_response(raw).unwrap();
+        assert_eq!(out[0].text, "contains } literal");
     }
 
     #[test]
