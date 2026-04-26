@@ -396,6 +396,37 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 54. Needs-Review dismiss has no undo affordance — accidental clicks lose information
+
+`frontend/src/components/NeedsReviewView.tsx:44-47` archives the reminder (`status='archived'`) on Dismiss with no confirmation and no undo. The Needs-Review queue holds medium-confidence auto-extracted items the user is **reviewing for accuracy** — they're already uncertain candidates, so an accidental Dismiss click loses information that's hard to recover. The only path back is opening the Archive view and unarchiving, which most users won't think to do.
+
+This is a worse UX trap than #43's `window.confirm()` problem because:
+
+- Confirm/Dismiss live next to each other on every card (the buttons are 12 px apart in the rendered layout). Misclicks happen.
+- The card slides off-screen the moment Dismiss is clicked — even a user who realizes their mistake immediately has no visual anchor to "undo from."
+- The existing `setFeedback('feedback.reminderDismissed', 'neutral')` toast (line 46) is the natural surface for an undo, but it currently shows just a label, not an action.
+
+The standard pattern for "destructive but reversible" actions is an undo toast: dismiss the item, show a 5–8 s toast with an "Undo" button that calls `restoreReminder(id)`. Gmail, Linear, GitHub PRs, Slack channel-leave all use this shape.
+
+**Out of scope for this issue (other findings from the same workflow trace, worth tracking separately if they get traction):**
+- No keyboard navigation between cards. `card_up`/`card_down`/`card_expand`/`card_archive` shortcuts are defined in `KeyboardSettings.tsx` but aren't wired into `NeedsReviewView`.
+- No "show source context" affordance. The backend's `GET /reminders/:id/trace` endpoint (CLAUDE.md line 92) supports this but the card doesn't link to the source clip / window.
+- No bulk-action support (Confirm-all / Dismiss-all) — long sessions can produce 20+ pending items.
+- No loading state on Confirm/Dismiss buttons; double-clicks during a slow PATCH could fire twice.
+
+**Severity:** Medium · **Platform:** All · **Type:** ui (bug-shaped UX gap) · **Scope:** small (extend `setFeedback` to support an action button, or add a dedicated undo-toast variant)
+
+**Acceptance:**
+1. After Dismiss on a Needs-Review card, the existing toast surface ("feedback.reminderDismissed") gains an "Undo" button.
+2. Clicking Undo within 5–8 s calls `restoreReminder(id)` (the PATCH that flips `status` back to its prior value — `'open'` for medium-confidence items that were going to land on the Board, or `'pending'` if the user prefers staying in the queue).
+3. After the grace period, the toast auto-dismisses and the action becomes durable.
+4. New i18n keys land in both `en.ts` and `zh-CN.ts` (`feedback.undo`, `feedback.reminderDismissedWithUndo` if needed).
+5. Vitest pins the flow: Dismiss → toast appears → Undo click → reminder reappears in `pendingReminders()`.
+
+Brainstorming pause is appropriate before code on this one — the toast component shape (single-action vs. two-action, lifecycle on tab switch, multiple stacked dismisses) is design-shaped, not pattern-match.
+
+---
+
 ### 53. `ConfirmDialog` lacks focus trap + autoFocuses the destructive action
 
 **Status:** Resolved 2026-04-26 — Tab/Shift-Tab now cycles within the modal; destructive tones autoFocus the cancel button (and the global Enter handler routes to `onCancel` when destructive); focus is captured at open via `document.activeElement` and restored on close. 6 new unit tests in `ConfirmDialog.test.tsx` pin all four behaviours; full suite 183/183.
@@ -567,3 +598,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 54 | Needs-Review dismiss has no undo affordance | Medium | All | Open |
