@@ -4961,6 +4961,73 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   margin: 0;
 }
 
+/* In-app confirm dialog (replaces window.confirm) */
+.confirm-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+.confirm-dialog {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+  width: min(420px, 92vw);
+  padding: 1.25rem 1.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.confirm-dialog__message {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: rgba(0, 0, 0, 0.82);
+}
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.confirm-dialog__btn {
+  padding: 0.45rem 0.95rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  background: transparent;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.confirm-dialog__btn--cancel {
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.78);
+}
+.confirm-dialog__btn--cancel:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+.confirm-dialog__btn--warning {
+  background: #2563eb;
+  color: #fff;
+}
+.confirm-dialog__btn--warning:hover {
+  background: #1d4ed8;
+}
+.confirm-dialog__btn--destructive {
+  background: #dc2626;
+  color: #fff;
+}
+.confirm-dialog__btn--destructive:hover {
+  background: #b91c1c;
+}
+.confirm-dialog__btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 /* Inline delete confirmation on person rows */
 .person-row.is-confirming-delete {
   background: rgba(229, 115, 115, 0.08);

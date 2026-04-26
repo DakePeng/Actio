@@ -100,6 +100,7 @@ export const zhCN: Translations = {
     '删除 {name}？模型文件会从磁盘移除，之后可重新下载。',
   'settings.models.switchEmbeddingConfirm':
     '切换嵌入模型会使之前录制的声纹失效。是否继续？',
+  'settings.models.switchEmbeddingConfirmAction': '切换模型',
   'settings.models.downloading': '正在下载：{label} — {file}',
   'settings.models.preparing': '准备中...',
   'settings.models.cancel': '取消',

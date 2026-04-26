@@ -99,6 +99,7 @@ export const en = {
     'Delete {name}? The files will be removed from disk. You can re-download later.',
   'settings.models.switchEmbeddingConfirm':
     'Switching embedding models will invalidate previously-enrolled voiceprints. Continue?',
+  'settings.models.switchEmbeddingConfirmAction': 'Switch model',
   'settings.models.downloading': 'Downloading: {label} — {file}',
   'settings.models.preparing': 'Preparing...',
   'settings.models.cancel': 'Cancel',

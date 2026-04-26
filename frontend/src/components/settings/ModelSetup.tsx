@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useT, useTMaybe, type TKey } from '../../i18n';
+import { ConfirmDialog, useConfirm } from '../ConfirmDialog';
 
 type DownloadTarget =
   | { type: 'shared' }
@@ -89,6 +90,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
   const [embeddingModels, setEmbeddingModels] = useState<SpeakerEmbeddingModelInfo[]>([]);
   const [activeEmbedding, setActiveEmbedding] = useState<string>('');
   const [hasSpeakers, setHasSpeakers] = useState<boolean>(false);
+  const { confirm, dialogProps } = useConfirm();
 
   const refreshAll = useCallback(async () => {
     try {
@@ -177,7 +179,11 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     const prev = embeddingModels.find((m) => m.id === activeEmbedding);
     const dimChanged = !!prev && !!next && prev.embedding_dim !== next.embedding_dim;
     if (hasSpeakers && prev && prev.id !== id && dimChanged) {
-      const ok = window.confirm(t('settings.models.switchEmbeddingConfirm'));
+      const ok = await confirm(t('settings.models.switchEmbeddingConfirm'), {
+        confirmLabel: t('settings.models.switchEmbeddingConfirmAction'),
+        cancelLabel: t('settings.models.cancel'),
+        tone: 'warning',
+      });
       if (!ok) return;
     }
     setActiveEmbedding(id);
@@ -194,8 +200,13 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
 
   const handleDelete = async (modelId: string, modelName: string) => {
     setError(null);
-    const confirmed = window.confirm(
+    const confirmed = await confirm(
       t('settings.models.deleteConfirm', { name: modelName }),
+      {
+        confirmLabel: t('settings.models.delete'),
+        cancelLabel: t('settings.models.cancel'),
+        tone: 'destructive',
+      },
     );
     if (!confirmed) return;
     try {
@@ -531,6 +542,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
           </div>
         </div>
       )}
+      <ConfirmDialog {...dialogProps} />
     </section>
   );
 }

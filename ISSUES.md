@@ -237,6 +237,8 @@ Without a designed icon yet, `cargo tauri icon` against a placeholder graphic st
 
 ### 43. Native `window.confirm()` dialogs render inconsistently across WebViews
 
+**Status:** Resolved — Option 2 implemented 2026-04-26. New `ConfirmDialog` + `useConfirm()` hook (`frontend/src/components/ConfirmDialog.tsx`) replaces all three `window.confirm()` callers. Promise-based, framer-motion animated, keyboard-driven (Esc cancels, Enter confirms), tone variants (`warning` / `destructive`), no new runtime dep. Vitest pins the modal flow.
+
 `frontend/src/components/CandidateSpeakersPanel.tsx:49`, `frontend/src/components/settings/ModelSetup.tsx:180`, and `:197` use `window.confirm(...)` for destructive-action confirmation:
 
 ```ts
@@ -333,5 +335,4 @@ Worth doing only after macOS testing reveals an actual mismatch.
 | 32 | `tauri.conf.json` (no Windows signing) | Medium | Windows | Open |
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
-| 43 | `window.confirm()` in 3 places | Medium | All (worst Linux) | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
