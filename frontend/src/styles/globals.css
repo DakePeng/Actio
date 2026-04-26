@@ -3546,8 +3546,8 @@ body.body--native-board .desktop-window {
 .live-tab__transcript {
   background: var(--color-surface);
   border-radius: 8px;
-  padding: 12px;
-  max-height: 300px;
+  padding: 16px;
+  max-height: min(60vh, 560px);
   overflow-y: auto;
 }
 
@@ -5018,13 +5018,13 @@ button.voiceprint-recorder__chip.is-done.is-playing {
 .live-transcript {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 1.25rem;
   padding: 0.25rem 0;
 }
 .live-transcript__bubble {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.4rem;
 }
 .live-transcript__header {
   display: flex;
@@ -5061,8 +5061,9 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   padding-left: calc(22px + 0.5rem);
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3em;
-  line-height: 1.55;
+  column-gap: 0.3em;
+  row-gap: 0.5rem;
+  line-height: 1.6;
 }
 .live-transcript__line {
   /* just flow inline */
@@ -5373,21 +5374,31 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   display: inline;
 }
 
+/* Translation annotation — visually subordinate to source. Indented +
+ * accented with a left-border so the role is unambiguous, even when
+ * source and target share a script (e.g. zh-CN → zh-CN passthrough).
+ * No italic — italic on CJK is an anti-pattern (synthesized slant,
+ * unreadable in most fonts). Hierarchy comes from size, color,
+ * and the indent rule, not slant. */
 .live-transcript__translation {
   display: block;
-  font-size: 0.85em;
-  color: var(--color-text-tertiary);
-  font-style: italic;
-  margin-top: 2px;
+  font-size: 0.875em;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border);
 }
 
 .live-transcript__translation--pending {
-  opacity: 0.6;
+  color: var(--color-text-tertiary);
+  border-left-color: var(--color-border);
+  opacity: 0.85;
 }
 
 .live-transcript__translation--error {
   color: #b91c1c;
-  font-style: normal;
+  border-left-color: #fca5a5;
 }
 
 .live-transcript__translation-retry {
