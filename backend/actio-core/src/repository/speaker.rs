@@ -315,6 +315,35 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+/// Atomically flip `is_self=1` on the target speaker, clearing any prior
+/// self-flag for the same tenant. Defense in depth alongside the partial
+/// unique index `idx_speakers_one_self_per_tenant`.
+pub async fn mark_as_self(pool: &SqlitePool, speaker_id: Uuid) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+
+    let row: (String,) = sqlx::query_as(
+        "SELECT tenant_id FROM speakers WHERE id = ?1",
+    )
+    .bind(speaker_id.to_string())
+    .fetch_one(&mut *tx)
+    .await?;
+    let tenant_id = row.0;
+
+    sqlx::query(
+        "UPDATE speakers SET is_self = 0 WHERE tenant_id = ?1 AND is_self = 1",
+    )
+    .bind(&tenant_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query("UPDATE speakers SET is_self = 1 WHERE id = ?1")
+        .bind(speaker_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,5 +442,72 @@ mod tests {
                 .await
                 .unwrap();
         assert!(seg_speaker.0.is_none());
+    }
+
+    #[tokio::test]
+    async fn mark_as_self_clears_prior_self_for_same_tenant() {
+        let pool = fresh_pool().await;
+
+        let tenant_id = Uuid::new_v4();
+        let alice = Uuid::new_v4();
+        let bob = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Alice')",
+        )
+        .bind(alice.to_string())
+        .bind(tenant_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Bob')",
+        )
+        .bind(bob.to_string())
+        .bind(tenant_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::mark_as_self(&pool, alice).await.unwrap();
+        super::mark_as_self(&pool, bob).await.unwrap();
+
+        let alice_flag: (i64,) = sqlx::query_as("SELECT is_self FROM speakers WHERE id = ?1")
+            .bind(alice.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let bob_flag: (i64,) = sqlx::query_as("SELECT is_self FROM speakers WHERE id = ?1")
+            .bind(bob.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(alice_flag.0, 0);
+        assert_eq!(bob_flag.0, 1);
+    }
+
+    #[tokio::test]
+    async fn partial_unique_index_blocks_two_self_speakers_per_tenant() {
+        let pool = fresh_pool().await;
+
+        let tenant_id = Uuid::new_v4();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO speakers (id, tenant_id, display_name, is_self) VALUES (?1, ?2, 'A', 1)",
+        )
+        .bind(a.to_string())
+        .bind(tenant_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = sqlx::query(
+            "INSERT INTO speakers (id, tenant_id, display_name, is_self) VALUES (?1, ?2, 'B', 1)",
+        )
+        .bind(b.to_string())
+        .bind(tenant_id.to_string())
+        .execute(&pool)
+        .await;
+        assert!(result.is_err(), "expected unique index violation");
     }
 }
