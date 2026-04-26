@@ -115,7 +115,10 @@ pub fn migrate_tab_recording_shortcut(keyboard: &mut KeyboardSettings) {
     let Some(value) = keyboard.shortcuts.remove("tab_recording") else {
         return;
     };
-    keyboard.shortcuts.entry("tab_live".to_string()).or_insert(value);
+    keyboard
+        .shortcuts
+        .entry("tab_live".to_string())
+        .or_insert(value);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +199,19 @@ pub struct AudioSettings {
     #[serde(default = "default_cluster_cosine_threshold")]
     pub cluster_cosine_threshold: f32,
 
+    /// Minimum cluster size to mint a provisional speaker. Clusters below
+    /// this floor leave their segments unattributed (`speaker_id = NULL`).
+    /// Floor exists to suppress noise / cross-talk / podcast-cameo blips
+    /// from flooding the People → Candidate Speakers panel.
+    #[serde(default = "default_cluster_min_segments")]
+    pub cluster_min_segments: u32,
+
+    /// Minimum total segment duration (sum of `end_ms - start_ms`) in
+    /// milliseconds to mint a provisional speaker. AND'd with
+    /// `cluster_min_segments` — both must pass.
+    #[serde(default = "default_cluster_min_duration_ms")]
+    pub cluster_min_duration_ms: u32,
+
     /// Per-clip WAV files older than this many days are swept by the
     /// background cleanup task. Replaces the per-failed-segment retention
     /// path that used `clip_retention_days`.
@@ -270,6 +286,14 @@ fn default_cluster_cosine_threshold() -> f32 {
     0.4
 }
 
+fn default_cluster_min_segments() -> u32 {
+    3
+}
+
+fn default_cluster_min_duration_ms() -> u32 {
+    8_000
+}
+
 fn default_audio_retention_days() -> u32 {
     14
 }
@@ -300,6 +324,8 @@ impl Default for AudioSettings {
             clip_max_secs: default_clip_max_secs(),
             clip_close_silence_ms: default_clip_close_silence_ms(),
             cluster_cosine_threshold: default_cluster_cosine_threshold(),
+            cluster_min_segments: default_cluster_min_segments(),
+            cluster_min_duration_ms: default_cluster_min_duration_ms(),
             audio_retention_days: default_audio_retention_days(),
             provisional_voiceprint_gc_days: default_provisional_voiceprint_gc_days(),
             use_batch_pipeline: default_use_batch_pipeline(),
@@ -433,8 +459,14 @@ impl AudioSettings {
     /// for callers that need to know which model to load.
     pub fn resolved_asr_models(&self) -> ResolvedAsrModels {
         ResolvedAsrModels {
-            live: self.live_asr_model.clone().or_else(|| self.asr_model.clone()),
-            archive: self.archive_asr_model.clone().or_else(|| self.asr_model.clone()),
+            live: self
+                .live_asr_model
+                .clone()
+                .or_else(|| self.asr_model.clone()),
+            archive: self
+                .archive_asr_model
+                .clone()
+                .or_else(|| self.asr_model.clone()),
         }
     }
 }
@@ -583,6 +615,12 @@ impl SettingsManager {
             if let Some(v) = audio.cluster_cosine_threshold {
                 settings.audio.cluster_cosine_threshold = v.clamp(0.0, 1.0);
             }
+            if let Some(v) = audio.cluster_min_segments {
+                settings.audio.cluster_min_segments = v.clamp(1, 50);
+            }
+            if let Some(v) = audio.cluster_min_duration_ms {
+                settings.audio.cluster_min_duration_ms = v.min(600_000);
+            }
             if let Some(v) = audio.audio_retention_days {
                 settings.audio.audio_retention_days = v;
             }
@@ -680,6 +718,8 @@ pub struct AudioSettingsPatch {
     pub clip_max_secs: Option<u32>,
     pub clip_close_silence_ms: Option<u32>,
     pub cluster_cosine_threshold: Option<f32>,
+    pub cluster_min_segments: Option<u32>,
+    pub cluster_min_duration_ms: Option<u32>,
     pub audio_retention_days: Option<u32>,
     pub provisional_voiceprint_gc_days: Option<u32>,
     pub use_batch_pipeline: Option<bool>,
@@ -834,7 +874,10 @@ mod tests {
         super::migrate_tab_recording_shortcut(&mut keyboard);
 
         assert!(!keyboard.shortcuts.contains_key("tab_recording"));
-        assert_eq!(keyboard.shortcuts.get("tab_live"), Some(&"Ctrl+9".to_string()));
+        assert_eq!(
+            keyboard.shortcuts.get("tab_live"),
+            Some(&"Ctrl+9".to_string())
+        );
     }
 
     #[test]
@@ -847,7 +890,10 @@ mod tests {
         super::migrate_tab_recording_shortcut(&mut keyboard);
 
         // tab_live keeps its existing value; tab_recording is removed
-        assert_eq!(keyboard.shortcuts.get("tab_live"), Some(&"Ctrl+3".to_string()));
+        assert_eq!(
+            keyboard.shortcuts.get("tab_live"),
+            Some(&"Ctrl+3".to_string())
+        );
         assert!(!keyboard.shortcuts.contains_key("tab_recording"));
     }
 

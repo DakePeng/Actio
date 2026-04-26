@@ -84,7 +84,7 @@ Even after #16 (Info.plist with `NSMicrophoneUsageDescription`) was fixed, users
 
 ### 46. Candidate Speakers panel floods with low-quality "Unknown" provisionals
 
-**Status:** IN-PROGRESS — plan at `.omc/plans/ISS-046.md` (2026-04-26)
+**Status:** Resolved — backend gate landed 2026-04-26. UI sort/cap and provisional-row GC remain as separate follow-ups (see Out-of-scope below).
 
 The People → Candidate Speakers panel ("建议添加的人") shows a long list of `Unknown YYYY-MM-DD HH:MM` rows after even a short session. Most of them are clusters of one or two short segments (background noise, mic blips, momentary cross-talk, podcast cameos) that should never have been promoted to a speaker row in the first place.
 
@@ -95,13 +95,15 @@ What "high quality" should mean here:
 - centroid distance from any existing speaker is comfortably above the confirm threshold (already enforced), AND
 - per-tenant cap on auto-created provisionals per clip (e.g. ≤ 3) so a single noisy clip can't spawn a dozen rows.
 
-Fix sketch:
-- Add `cluster_min_segments: u32` (default 3) and `cluster_min_duration_ms: u32` (default 8000) to `AudioSettings` (`engine/app_settings.rs`).
-- Plumb both into `ClusteringConfig` and apply the same `members.len() < min` (plus a duration sum) guard inside `process_clip_production`'s cluster loop, before the `insert_provisional` branch.
-- Segments dropped by the gate keep `speaker_id = NULL` (existing behavior for the with_clustering path) — they still appear in transcripts, just unattributed.
-- Backfill / GC: extend `provisional_voiceprint_gc_days` cleanup, or add a one-shot job, to delete provisional rows whose total `audio_segments` count is below the new threshold and whose `provisional_last_matched_at` hasn't been touched in N days.
+Fix landed (this commit):
+- Added `cluster_min_segments: u32` (default 3) and `cluster_min_duration_ms: u32` (default 8000) to `AudioSettings` with overlay clamps `[1,50]` and `[0, 600_000]`.
+- Extended `ClusteringConfig` with `min_duration_ms` and added a shared `cluster_passes_gate` helper. Both `process_clip_production` and `process_clip_with_clustering` now AND-gate clusters on segment count + summed duration before minting a provisional speaker. Segments in dropped clusters keep `speaker_id = NULL`.
+- Three new unit tests pin the behavior: cluster below count is dropped, cluster below duration is dropped, cluster meeting both floors mints exactly one provisional.
 
-UI follow-up (optional, after backend filter lands): sort the panel by aggregate evidence (segment count or total seconds spoken) descending so the user sees the strongest candidates first, and hide rows below a small floor entirely behind a "show all" affordance.
+Out of scope (follow-up tickets):
+- Backfill / GC of existing low-evidence provisional rows in user databases.
+- Frontend Settings UI to surface the two knobs (defaults are sensible; advanced users can edit settings.json directly today).
+- Reordering / hiding rows in the Candidate Speakers panel by aggregate evidence.
 
 **Severity:** High · **Platform:** All
 
@@ -333,4 +335,3 @@ Worth doing only after macOS testing reveals an actual mismatch.
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 43 | `window.confirm()` in 3 places | Medium | All (worst Linux) | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 46 | `batch_processor.rs:500` no min-cluster gate in production path | High | All | Open |
