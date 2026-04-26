@@ -395,6 +395,56 @@ impl RemoteLlmClient {
         info!(count = items.len(), "Remote LLM returned action items");
         Ok(items)
     }
+
+    /// Batch-translate finalized transcript lines to `target_lang`.
+    pub async fn translate_lines(
+        &self,
+        target_lang: &str,
+        lines: Vec<crate::engine::llm_translate::TranslateLineRequest>,
+    ) -> Result<Vec<crate::engine::llm_translate::TranslateLineResponse>, RemoteLlmError> {
+        info!(
+            target_lang = %target_lang,
+            line_count = lines.len(),
+            "Calling remote LLM for translation"
+        );
+
+        let messages = crate::engine::llm_translate::build_translate_messages(target_lang, &lines);
+        let openai_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+            .collect();
+
+        let payload = serde_json::json!({
+            "model": self.config.model,
+            "messages": openai_messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+            "max_tokens": 2000,
+        });
+
+        let base = self.config.base_url.trim_end_matches('/');
+        let url = format!("{base}/chat/completions");
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.config.api_key)
+            .json(&payload)
+            .send()
+            .await?;
+
+        let chat_resp: LlmChatResponse = resp.json().await?;
+        let content = chat_resp
+            .choices
+            .first()
+            .map(|c| &c.message.content)
+            .ok_or(RemoteLlmError::InvalidResponse)?;
+        tracing::info!(raw_json = %content, "Remote LLM translate raw response");
+
+        let parsed = crate::engine::llm_translate::parse_translate_response(content)
+            .map_err(|e| RemoteLlmError::Parse(e.into()))?;
+        Ok(parsed)
+    }
 }
 
 #[cfg(test)]

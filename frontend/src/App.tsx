@@ -6,10 +6,12 @@ import { StandbyTray } from './components/StandbyTray';
 import { OnboardingCard } from './components/OnboardingCard';
 import { NewReminderBar } from './components/NewReminderBar';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import { useLiveSocket } from './hooks/useLiveSocket';
 import { advanceWordmarkPreview } from './hooks/useWordmarkPreview';
 
 export default function App() {
   useGlobalShortcuts();
+  useLiveSocket();
 
   const hasSeenOnboarding = useStore((s) => s.ui.hasSeenOnboarding);
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);

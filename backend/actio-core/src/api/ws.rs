@@ -42,6 +42,12 @@ struct WsSpeakerResolvedEvent {
     carried_over: bool,
 }
 
+#[derive(Serialize)]
+struct WsAudioLevelEvent {
+    kind: &'static str,
+    rms: f32,
+}
+
 #[derive(Deserialize, Clone, Default)]
 pub struct WsSessionParams {
     pub session_id: Option<Uuid>,
@@ -90,6 +96,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
 
     let aggregator_rx = state.aggregator.subscribe();
     let speaker_rx = state.aggregator.subscribe_speaker();
+    let audio_level_rx = state.audio_levels.subscribe();
     let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
@@ -102,9 +109,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
         }
     });
 
-    // Send transcript + speaker-resolved events and heartbeats
+    // Send transcript + speaker-resolved + audio_level events and heartbeats
     let mut transcript_rx = aggregator_rx;
     let mut speaker_rx = speaker_rx;
+    let mut audio_level_rx = audio_level_rx;
     let send_task = tokio::spawn(async move {
         let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
         heartbeat.tick().await;
@@ -162,6 +170,25 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             warn!(skipped = n, "WebSocket send lagged behind speaker events");
                         }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                event = audio_level_rx.recv() => {
+                    match event {
+                        Ok(rms) => {
+                            let msg = WsAudioLevelEvent { kind: "audio_level", rms };
+                            match serde_json::to_string(&msg) {
+                                Ok(json) => {
+                                    if sender.send(Message::Text(json.into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(e) => warn!(error = %e, "Failed to serialize audio_level event"),
+                            }
+                        }
+                        // Lagged just means we dropped a few level updates —
+                        // it's a metering signal, no need to log spam.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
                 }

@@ -29,6 +29,20 @@ export const zhCN: Translations = {
   // Live transcript
   'transcript.identifying': '识别中…',
   'transcript.unknown': '未知说话人',
+  'transcript.translating': '·· 翻译中',
+  'transcript.translateError': '翻译失败 — 重试',
+
+  // Live tab — translation controls
+  'live.translate.toggle': '翻译',
+  'live.translate.targetLabel': '目标语言',
+  'live.translate.disabledTooltip': '请在设置 → AI 中启用大语言模型后再使用翻译。',
+  'live.translate.pausedToast': '翻译已暂停 — 大语言模型已禁用。',
+  'live.translate.lang.en': 'English',
+  'live.translate.lang.zh-CN': '简体中文',
+  'live.translate.lang.ja': '日本語',
+  'live.translate.lang.es': 'Español',
+  'live.translate.lang.fr': 'Français',
+  'live.translate.lang.de': 'Deutsch',
 
   // Settings tabs
   'settings.tab.general': '常规',

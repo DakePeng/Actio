@@ -28,6 +28,20 @@ export const en = {
   // Live transcript
   'transcript.identifying': 'Identifying…',
   'transcript.unknown': 'Unknown',
+  'transcript.translating': '·· translating',
+  'transcript.translateError': 'Translation failed — retry',
+
+  // Live tab — translation controls
+  'live.translate.toggle': 'Translate',
+  'live.translate.targetLabel': 'Target language',
+  'live.translate.disabledTooltip': 'Enable an LLM in Settings → AI to use translation.',
+  'live.translate.pausedToast': 'Translation paused — LLM is disabled.',
+  'live.translate.lang.en': 'English',
+  'live.translate.lang.zh-CN': '简体中文',
+  'live.translate.lang.ja': '日本語',
+  'live.translate.lang.es': 'Español',
+  'live.translate.lang.fr': 'Français',
+  'live.translate.lang.de': 'Deutsch',
 
   // Settings tabs
   'settings.tab.general': 'General',

@@ -36,6 +36,15 @@ pub struct GenerationParams {
     /// Qwen3-style chain-of-thought. The model's thinking tokens count
     /// against max_tokens, so we add this budget on top automatically.
     pub thinking_budget: Option<usize>,
+    /// Force-close the thinking block immediately so the model produces
+    /// the final answer without any reasoning tokens. Needed for models
+    /// (e.g. qwen3.5) whose chat template auto-opens `<think>` on every
+    /// assistant turn — leaving thinking_budget = None is not enough,
+    /// because the template's `<think>` is already there. Setting this
+    /// flag pushes `</think>\n\n` immediately after the assistant prompt
+    /// so the model emits the JSON directly. Mutually exclusive with
+    /// thinking_budget = Some(_).
+    pub suppress_thinking: bool,
 }
 
 impl Default for GenerationParams {
@@ -45,6 +54,7 @@ impl Default for GenerationParams {
             temperature: 0.1,
             json_mode: false,
             thinking_budget: None,
+            suppress_thinking: false,
         }
     }
 }
@@ -193,12 +203,12 @@ impl LocalLlmEngine {
         info!(model = %loaded_id, "chat_completion: sending to model");
         let t = std::time::Instant::now();
 
-        let content =
-            tokio::task::spawn_blocking(move || run_inference(&model, &messages, &params))
-                .await
-                .map_err(|e| {
-                    LocalLlmError::InferenceFailed(format!("spawn_blocking panicked: {e}"))
-                })??;
+        let model_id = self.loaded_id.clone();
+        let content = tokio::task::spawn_blocking(move || {
+            run_inference(&model, &model_id, &messages, &params)
+        })
+        .await
+        .map_err(|e| LocalLlmError::InferenceFailed(format!("spawn_blocking panicked: {e}")))??;
 
         info!(
             model = %self.loaded_id,
@@ -219,10 +229,45 @@ impl LocalLlmEngine {
     }
 }
 
+/// Format messages using Gemma's instruct chat template. Used as a fallback
+/// because llama.cpp's built-in C++ template engine cannot parse Gemma's
+/// embedded Jinja template (`apply_chat_template` returns ffi error -1).
+/// System messages are folded into the next user turn — Gemma instruct has
+/// no native system role. BOS is added by the tokenizer (`AddBos::Always`),
+/// so we omit `<bos>` here.
+#[cfg(feature = "local-llm")]
+fn format_gemma_prompt(messages: &[ChatMessage]) -> String {
+    let mut out = String::new();
+    let mut pending_system: Option<&str> = None;
+    for m in messages {
+        match m.role.as_str() {
+            "system" => pending_system = Some(m.content.as_str()),
+            "user" => {
+                out.push_str("<start_of_turn>user\n");
+                if let Some(sys) = pending_system.take() {
+                    out.push_str(sys);
+                    out.push_str("\n\n");
+                }
+                out.push_str(&m.content);
+                out.push_str("<end_of_turn>\n");
+            }
+            _ => {
+                // assistant or any other role
+                out.push_str("<start_of_turn>model\n");
+                out.push_str(&m.content);
+                out.push_str("<end_of_turn>\n");
+            }
+        }
+    }
+    out.push_str("<start_of_turn>model\n");
+    out
+}
+
 /// Run inference synchronously. Called inside `spawn_blocking`.
 #[cfg(feature = "local-llm")]
 fn run_inference(
     model: &llama_cpp_2::model::LlamaModel,
+    model_id: &str,
     messages: &[ChatMessage],
     params: &GenerationParams,
 ) -> Result<String, LocalLlmError> {
@@ -239,28 +284,41 @@ fn run_inference(
         .new_context(backend, ctx_params)
         .map_err(|e| LocalLlmError::InferenceFailed(format!("context creation failed: {e}")))?;
 
-    // 2. Apply chat template from GGUF metadata
-    let chat_messages: Vec<LlamaChatMessage> = messages
-        .iter()
-        .map(|m| {
-            LlamaChatMessage::new(m.role.clone(), m.content.clone())
-                .map_err(|e| LocalLlmError::InferenceFailed(format!("chat message error: {e}")))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    // 2. Build prompt. Gemma's GGUF carries a Jinja template that llama.cpp's
+    // built-in template parser rejects (ffi error -1), so we hand-format it.
+    let mut prompt = if model_id.starts_with("gemma-") {
+        format_gemma_prompt(messages)
+    } else {
+        let chat_messages: Vec<LlamaChatMessage> = messages
+            .iter()
+            .map(|m| {
+                LlamaChatMessage::new(m.role.clone(), m.content.clone()).map_err(|e| {
+                    LocalLlmError::InferenceFailed(format!("chat message error: {e}"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-    let template = model
-        .chat_template(None)
-        .map_err(|e| LocalLlmError::InferenceFailed(format!("chat template error: {e}")))?;
+        let template = model
+            .chat_template(None)
+            .map_err(|e| LocalLlmError::InferenceFailed(format!("chat template error: {e}")))?;
 
-    let mut prompt = model
-        .apply_chat_template(&template, &chat_messages, true)
-        .map_err(|e| LocalLlmError::InferenceFailed(format!("apply template error: {e}")))?;
+        model
+            .apply_chat_template(&template, &chat_messages, true)
+            .map_err(|e| LocalLlmError::InferenceFailed(format!("apply template error: {e}")))?
+    };
 
     // Activate Qwen3 chain-of-thought by injecting <think> after the
     // assistant generation prompt. The model continues inside the think
     // block and closes it before emitting the final answer.
     if params.thinking_budget.is_some() {
         prompt.push_str("<think>\n");
+    } else if params.suppress_thinking {
+        // Qwen3.5's chat template auto-opens `<think>` on every assistant
+        // turn. Closing it here forces the model out of thinking mode and
+        // straight into the final answer — without this, models emit
+        // unbounded reasoning that occasionally hits max_tokens before
+        // any usable output appears.
+        prompt.push_str("</think>\n\n");
     }
 
     // 3. Tokenize
@@ -284,11 +342,27 @@ fn run_inference(
         .map_err(|e| LocalLlmError::InferenceFailed(format!("prompt decode error: {e}")))?;
 
     // 6. Set up sampler
+    //
+    // Penalties run first so they shape logits before temp/greedy picks.
+    //   * penalty_last_n=128  : look back ~128 tokens
+    //   * penalty_repeat=1.1  : mild — bumps the logit of any token in
+    //     the window by 1.1×, just enough to discourage degenerate
+    //     loops without harming legitimate repetition (e.g. punctuation).
+    //   * penalty_freq=0.3    : critical for translation. qwen3.5-2b
+    //     has been observed to emit the same 6-token phrase ~100 times
+    //     until max_tokens (e.g. "and a person behind him, and a person
+    //     behind him, …"), truncating the JSON mid-string and crashing
+    //     the parser. A frequency penalty subtracts proportionally to
+    //     how many times a token has appeared, breaking the loop.
+    //   * penalty_present=0.0 : disabled — we don't want to discourage
+    //     a token simply because it appeared once.
     let seed = rand_seed();
+    let penalties = LlamaSampler::penalties(128, 1.1, 0.3, 0.0);
     let mut sampler = if params.temperature <= 0.0 {
-        LlamaSampler::chain_simple([LlamaSampler::greedy()])
+        LlamaSampler::chain_simple([penalties, LlamaSampler::greedy()])
     } else {
         LlamaSampler::chain_simple([
+            penalties,
             LlamaSampler::temp(params.temperature),
             LlamaSampler::dist(seed),
         ])
@@ -306,6 +380,10 @@ fn run_inference(
     let token_limit = params.max_tokens + thinking_budget;
     let mut in_thinking = params.thinking_budget.is_some(); // we injected <think>\n
     let mut thinking_tokens: usize = 0;
+    // Gemma's `<end_of_turn>` is not registered as an EOG token in current
+    // GGUFs, so the standard `is_eog_token` check misses it and the literal
+    // string leaks into output. We watch the decoded stream and stop on it.
+    let is_gemma = model_id.starts_with("gemma-");
 
     // Live-decode buffer so we can detect </think> and cut thinking mid-stream
     let mut live_decoder = encoding_rs::UTF_8.new_decoder();
@@ -321,6 +399,15 @@ fn run_inference(
         }
 
         output_tokens.push(token);
+
+        if is_gemma {
+            if let Ok(piece) = model.token_to_piece(token, &mut live_decoder, false, None) {
+                live_text.push_str(&piece);
+            }
+            if live_text.ends_with("<end_of_turn>") {
+                break;
+            }
+        }
 
         // Live-decode for thinking detection
         if in_thinking {
@@ -375,6 +462,12 @@ fn run_inference(
             .token_to_piece(token, &mut decoder, false, None)
             .map_err(|e| LocalLlmError::InferenceFailed(format!("detokenization error: {e}")))?;
         content.push_str(&piece);
+    }
+
+    if is_gemma {
+        if let Some(stripped) = content.strip_suffix("<end_of_turn>") {
+            content = stripped.trim_end().to_string();
+        }
     }
 
     Ok(content)

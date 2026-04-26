@@ -75,14 +75,20 @@ impl InferencePipeline {
         clips_dir: PathBuf,
         live_enrollment: LiveEnrollment,
         speaker_id_config: SpeakerIdConfig,
+        audio_levels: Option<Arc<tokio::sync::broadcast::Sender<f32>>>,
     ) -> anyhow::Result<()> {
         // 1. Start audio capture
         let (capture_handle, audio_rx) = audio_capture::start_capture(device_name)?;
 
-        // Tap audio chunks to publish smoothed RMS into the live-enrollment
-        // state, so the enrollment UI can render a real mic-level meter.
-        // Cheap no-op when no enrollment is armed.
-        let audio_rx = install_level_observer(audio_rx, live_enrollment.clone());
+        // Tap audio chunks: publish smoothed RMS into live-enrollment state
+        // (for the enrollment UI mic meter) AND broadcast to anyone holding
+        // a subscription on `audio_levels` (the WS handler, for the live
+        // tab's voice wave). Both consumers are no-ops when not active.
+        let audio_rx = install_level_observer(
+            audio_rx,
+            live_enrollment.clone(),
+            audio_levels,
+        );
 
         // 2. Select ASR model based on user setting and route audio to the
         //    appropriate recognizer.
@@ -444,18 +450,33 @@ async fn run_segment_hook(
 fn install_level_observer(
     mut rx: mpsc::Receiver<Vec<f32>>,
     live_enrollment: LiveEnrollment,
+    audio_levels: Option<Arc<tokio::sync::broadcast::Sender<f32>>>,
 ) -> mpsc::Receiver<Vec<f32>> {
     let (tx, out_rx) = mpsc::channel::<Vec<f32>>(64);
     tokio::spawn(async move {
         // Exponential moving average — a single loud sample shouldn't peg
         // the meter. ~20ms chunks × 0.3 alpha gives roughly a 70ms response.
         let mut ema = 0.0f32;
+        // Throttle the broadcast to ~15Hz regardless of chunk rate; the
+        // live tab's voice wave doesn't need every sample, and dropping
+        // updates here keeps the WS quiet on busy devices.
+        let mut last_broadcast = std::time::Instant::now()
+            - std::time::Duration::from_millis(200);
         while let Some(chunk) = rx.recv().await {
             if !chunk.is_empty() {
                 let sum_sq: f32 = chunk.iter().map(|x| x * x).sum();
                 let rms = (sum_sq / chunk.len() as f32).sqrt();
                 ema = 0.7 * ema + 0.3 * rms;
                 crate::engine::live_enrollment::publish_level(&live_enrollment, ema);
+                if let Some(levels) = &audio_levels {
+                    if last_broadcast.elapsed()
+                        >= std::time::Duration::from_millis(66)
+                    {
+                        // Lossy: we don't care if no receivers are attached.
+                        let _ = levels.send(ema);
+                        last_broadcast = std::time::Instant::now();
+                    }
+                }
             }
             if tx.send(chunk).await.is_err() {
                 break;

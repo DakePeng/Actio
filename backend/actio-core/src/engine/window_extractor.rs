@@ -264,6 +264,7 @@ async fn process_window(
     state: &AppState,
     window: &window_repo::ExtractionWindow,
 ) -> Result<ProcessOutcome, ProcessError> {
+    let _guard = state.llm_inflight.lock().await;
     let router = state.router.read().await;
     process_window_with(&state.pool, &router, window).await
 }

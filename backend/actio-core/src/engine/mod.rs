@@ -12,6 +12,7 @@ pub mod llm_catalog;
 pub mod llm_downloader;
 pub mod llm_endpoint;
 pub mod llm_prompt;
+pub mod llm_translate;
 pub mod llm_router;
 pub mod local_llm_engine;
 pub mod metrics;
