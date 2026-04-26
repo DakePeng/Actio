@@ -320,6 +320,9 @@ Worth doing only after macOS testing reveals an actual mismatch.
 
 ### 47. Dead i18n keys in `en.ts` / `zh-CN.ts` — orphaned strings from removed UI
 
+**Status:** Resolved 2026-04-26 — all 22 keys deleted from both `en.ts` and `zh-CN.ts`. Stale section comments removed (`// Priority values (for interpolation)`, `// State descriptors…`). Parity test green; tsc clean; full test suite 177/177; prod bundle dropped 2.1 kB.
+
+
 A grep pass over `frontend/src/` for each key declared in `frontend/src/i18n/locales/en.ts` finds **22 keys with zero usages** in code (excluding the locale files themselves and excluding dynamic patterns like `t(\`model.desc.${id}\`)`, `t(\`live.translate.lang.${lang}\`)`, `t(\`settings.preferences.theme.${key}\`)`). They've been carried in both `en.ts` and `zh-CN.ts` since at least the always-on listening refactor — likely orphans from feature renames (`tray.state.*` → `tray.aria.*`, `priority.*` → `board.priority.*` / `card.priority.*`).
 
 Confirmed dead (en + zh-CN parity preserved — both files have the same dead set):
@@ -411,4 +414,3 @@ No behaviour change; this is a comment-only fix.
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 47 | 22 dead i18n keys in `en.ts` + `zh-CN.ts` | Low | All | Open |

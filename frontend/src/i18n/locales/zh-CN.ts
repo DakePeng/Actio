@@ -18,13 +18,8 @@ export const zhCN: Translations = {
   'board.action.captureNote': '记录想法',
 
   // Recording tab
-  'recording.tapToTranscribe': '点击开始转写',
-  'recording.loadingModel': '正在加载模型',
-  'recording.modelLoadFailed': '模型加载失败 — 点击仍可尝试',
   'recording.startingUp': '正在启动',
   'recording.listening': '正在聆听…',
-  'recording.aria.startTranscribing': '开始转写',
-  'recording.aria.stopTranscribing': '停止转写',
 
   // Live transcript
   'transcript.identifying': '识别中…',
@@ -35,8 +30,6 @@ export const zhCN: Translations = {
   // Live tab — translation controls
   'live.translate.toggle': '翻译',
   'live.translate.targetLabel': '目标语言',
-  'live.translate.disabledTooltip': '请在设置 → AI 中启用大语言模型后再使用翻译。',
-  'live.translate.pausedToast': '翻译已暂停 — 大语言模型已禁用。',
   'live.translate.lang.en': 'English',
   'live.translate.lang.zh-CN': '简体中文',
   'live.translate.lang.ja': '日本語',
@@ -157,16 +150,10 @@ export const zhCN: Translations = {
   'feedback.extractedSingle': '已提取 1 条提醒',
   'feedback.extractedMany': '已提取 {count} 条提醒',
   'feedback.extractFailed': '无法提取提醒',
-  'feedback.modelSwitched': '已为新语言切换模型：{model}',
   'feedback.llmNotConfiguredFormMode': '尚未配置大语言模型，已切换到表单模式',
   'feedback.listeningOn': '已开启聆听',
   'feedback.listeningOff': '已关闭聆听',
   'feedback.listeningToggleFailed': '无法切换聆听状态',
-
-  // Priority values (for interpolation)
-  'priority.low': '低',
-  'priority.medium': '中',
-  'priority.high': '高',
 
   // 托盘（收起 + 展开）
   'tray.aria.drag': '拖动调整位置',
@@ -179,20 +166,9 @@ export const zhCN: Translations = {
   'tray.tooltip.muted': '已静音',
   'tray.status.transcribing': '转写中...',
   'tray.status.listening': '聆听中...',
-  'tray.status.freshCapturesOne': '有 1 条新记录',
-  'tray.status.freshCapturesMany': '有 {count} 条新记录',
-  'tray.status.quiet': '暂无新内容，看板就绪',
   'tray.viewFullBoard': '查看完整看板',
   'tray.swipe.done': '完成',
   'tray.swipe.confirm': '确认',
-
-  // 状态描述：与 wordmark 的当前状态保持一致。
-  'tray.state.standby': '待机中，静待',
-  'tray.state.listening': '聆听中，专注',
-  'tray.state.transcribing': '转写中，行云流水',
-  'tray.state.processing': '处理中，归纳',
-  'tray.state.success': '已完成，就绪',
-  'tray.state.error': '出错，请重试',
 
   // Top-level tab bar
   'tab.people': '人员',
@@ -207,7 +183,6 @@ export const zhCN: Translations = {
   'live.header.off': '已静音',
   'live.listeningSince': '从 {time} 开始 • 已运行 {duration}',
   'live.pausedHint': '聆听已暂停。在托盘或此处开启以开始捕捉。',
-  'live.aria.toggleListening': '切换聆听',
 
   // Needs-review queue (medium-confidence auto-extracted items)
   'needsReview.empty.title': '暂无待审核事项',
