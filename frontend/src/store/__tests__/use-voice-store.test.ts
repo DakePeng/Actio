@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useVoiceStore, pruneSegments, isMeaningfulFinal } from '../use-voice-store';
+import {
+  useVoiceStore,
+  pruneSegments,
+  isMeaningfulFinal,
+  looksLikeTargetLang,
+} from '../use-voice-store';
 import type { Segment } from '../../types';
 import { resetBackendUrlCache } from '../../api/backend-url';
 
@@ -96,6 +101,49 @@ describe('isMeaningfulFinal', () => {
 
   it('keeps long sentences even with heavy punctuation', () => {
     expect(isMeaningfulFinal('神网站第82期，今天分享的是。')).toBe(true);
+  });
+});
+
+describe('looksLikeTargetLang', () => {
+  it('recognizes English text against an en target', () => {
+    expect(looksLikeTargetLang('Hello world how are you', 'en')).toBe(true);
+    expect(looksLikeTargetLang('The quick brown fox jumps', 'en')).toBe(true);
+  });
+
+  it('recognizes Chinese text against zh-CN', () => {
+    expect(looksLikeTargetLang('你好世界，今天天气真好', 'zh-CN')).toBe(true);
+    expect(looksLikeTargetLang('神奇网站第82期', 'zh-CN')).toBe(true);
+  });
+
+  it('recognizes Japanese (with kana) against ja', () => {
+    expect(looksLikeTargetLang('こんにちは世界', 'ja')).toBe(true);
+    expect(looksLikeTargetLang('カタカナとひらがな', 'ja')).toBe(true);
+  });
+
+  it('does NOT match pure-kanji text against ja (could be zh-CN)', () => {
+    // No kana → fall through to translate.
+    expect(looksLikeTargetLang('神奇网站第八十二期', 'ja')).toBe(false);
+  });
+
+  it('does NOT match Japanese against zh-CN (kana present)', () => {
+    expect(looksLikeTargetLang('こんにちは世界', 'zh-CN')).toBe(false);
+  });
+
+  it('does NOT match cross-script content', () => {
+    expect(looksLikeTargetLang('Hello world', 'zh-CN')).toBe(false);
+    expect(looksLikeTargetLang('你好世界', 'en')).toBe(false);
+  });
+
+  it('falls through to translate for very short text (<3 letter graphemes)', () => {
+    // Two-letter words are too short to classify confidently — better
+    // to send them to the LLM than risk a false positive.
+    expect(looksLikeTargetLang('ok', 'en')).toBe(false);
+    expect(looksLikeTargetLang('你好', 'zh-CN')).toBe(false);
+  });
+
+  it('punctuation and digits are ignored when classifying', () => {
+    // Numbers and punctuation don't tip the count one way or the other.
+    expect(looksLikeTargetLang('Hello, 1234! World!', 'en')).toBe(true);
   });
 });
 

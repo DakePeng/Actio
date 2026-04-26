@@ -16,12 +16,15 @@ function mkLine(id: string, text: string, isFinal = true): TranscriptLine {
 }
 
 beforeEach(() => {
+  // Use Chinese text so the same-script-skip optimisation doesn't
+  // short-circuit translation when target is 'en'. Tests that
+  // specifically exercise the skip path use Latin text explicitly.
   useVoiceStore.setState({
     isRecording: true,
     currentSession: {
       id: 'live',
       startedAt: new Date().toISOString(),
-      lines: [mkLine('a', 'hello'), mkLine('b', 'world'), mkLine('c', 'partial', false)],
+      lines: [mkLine('a', '你好世界'), mkLine('b', '今天天气真好'), mkLine('c', '部分文字', false)],
       pendingPartial: null,
       pipelineReady: true,
     },
@@ -29,6 +32,7 @@ beforeEach(() => {
       enabled: false,
       targetLang: 'en',
       byLineId: {},
+      cache: {},
     },
   });
 });
@@ -42,48 +46,50 @@ describe('translation slice', () => {
     const spy = vi
       .spyOn(translateApi, 'translateLines')
       .mockResolvedValue([
-        { id: 'a', text: 'HELLO' },
-        { id: 'b', text: 'WORLD' },
+        { id: 'a', text: 'Hello world' },
+        { id: 'b', text: 'The weather is nice today' },
       ]);
     await useVoiceStore.getState().setTranslationEnabled(true);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0]?.[1].map((l) => l.id)).toEqual(['a', 'b']);
     const t = useVoiceStore.getState().translation;
     expect(t.enabled).toBe(true);
-    expect(t.byLineId['a']).toEqual({ status: 'done', text: 'HELLO' });
-    expect(t.byLineId['b']).toEqual({ status: 'done', text: 'WORLD' });
+    expect(t.byLineId['a']).toEqual({ status: 'done', text: 'Hello world' });
+    expect(t.byLineId['b']).toEqual({ status: 'done', text: 'The weather is nice today' });
     expect(t.byLineId['c']).toBeUndefined();
   });
 
-  it('setTranslationTargetLang clears byLineId and re-batches', async () => {
+  it('setTranslationTargetLang clears byLineId; same-script lines short-circuit', async () => {
     useVoiceStore.setState({
       translation: {
         enabled: true,
         targetLang: 'en',
         byLineId: {
-          a: { status: 'done', text: 'HELLO' },
+          a: { status: 'done', text: 'Hello world' },
         },
+        cache: {},
       },
     });
     const spy = vi.spyOn(translateApi, 'translateLines').mockResolvedValue([]);
     await useVoiceStore.getState().setTranslationTargetLang('zh-CN');
     const t = useVoiceStore.getState().translation;
     expect(t.targetLang).toBe('zh-CN');
-    expect(spy).toHaveBeenCalledWith('zh-CN', expect.arrayContaining([
-      expect.objectContaining({ id: 'a' }),
-      expect.objectContaining({ id: 'b' }),
-    ]));
+    // Lines a + b are Chinese → already match zh-CN target → no LLM call.
+    expect(spy).not.toHaveBeenCalled();
+    expect(t.byLineId['a']).toEqual({ status: 'done', text: '你好世界' });
+    expect(t.byLineId['b']).toEqual({ status: 'done', text: '今天天气真好' });
   });
 
   it('queueLineForTranslation only adds when enabled', () => {
-    useVoiceStore.getState().queueLineForTranslation('new-id');
-    expect(useVoiceStore.getState().translation.byLineId['new-id']).toBeUndefined();
+    useVoiceStore.getState().queueLineForTranslation('a');
+    expect(useVoiceStore.getState().translation.byLineId['a']).toBeUndefined();
 
     useVoiceStore.setState({
-      translation: { enabled: true, targetLang: 'en', byLineId: {} },
+      translation: { enabled: true, targetLang: 'en', byLineId: {}, cache: {} },
     });
-    useVoiceStore.getState().queueLineForTranslation('new-id');
-    expect(useVoiceStore.getState().translation.byLineId['new-id']).toEqual({ status: 'pending' });
+    // Line 'a' is Chinese, target is 'en' → still gets queued as pending.
+    useVoiceStore.getState().queueLineForTranslation('a');
+    expect(useVoiceStore.getState().translation.byLineId['a']).toEqual({ status: 'pending' });
   });
 
   it('flushTranslationBatch sends all pending and marks done on success', async () => {
@@ -96,6 +102,7 @@ describe('translation slice', () => {
           b: { status: 'pending' },
           c: { status: 'done', text: 'cached' },
         },
+        cache: {},
       },
     });
     vi.spyOn(translateApi, 'translateLines').mockResolvedValue([
@@ -115,6 +122,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'en',
         byLineId: { a: { status: 'pending' } },
+        cache: {},
       },
     });
     vi.spyOn(translateApi, 'translateLines').mockRejectedValue(new Error('boom'));
@@ -147,6 +155,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'en',
         byLineId: { a: { status: 'error', attempts: 3 } },
+        cache: {},
       },
     });
     vi.spyOn(translateApi, 'translateLines').mockRejectedValue(new Error('boom'));
@@ -167,6 +176,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'en',
         byLineId: { a: { status: 'pending' } },
+        cache: {},
       },
     });
     vi.spyOn(translateApi, 'translateLines').mockRejectedValue(new translateApi.LlmDisabledError());
@@ -183,6 +193,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'ja',
         byLineId: { a: { status: 'done', text: 'A!' } },
+        cache: {},
       },
     });
     useVoiceStore.getState().stopRecording();
@@ -197,6 +208,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'en',
         byLineId: { a: { status: 'pending' }, b: { status: 'pending' } },
+        cache: {},
       },
     });
     vi.spyOn(translateApi, 'translateLines').mockResolvedValue([{ id: 'a', text: 'A!' }]);
@@ -213,6 +225,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'en',
         byLineId: { a: { status: 'pending' } },
+        cache: {},
       },
     });
     let resolve: (v: { id: string; text: string }[]) => void = () => {};
@@ -257,6 +270,7 @@ describe('translation slice', () => {
           e: { status: 'pending' },
           f: { status: 'pending' },
         },
+        cache: {},
       },
     });
     const spy = vi.spyOn(translateApi, 'translateLines').mockResolvedValue([]);
@@ -276,6 +290,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'en',
         byLineId: { a: { status: 'pending' }, b: { status: 'pending' } },
+        cache: {},
       },
     });
     vi.spyOn(translateApi, 'translateLines').mockResolvedValue([
@@ -297,6 +312,7 @@ describe('translation slice', () => {
         enabled: true,
         targetLang: 'en',
         byLineId: { a: { status: 'pending' } },
+        cache: {},
       },
     });
     let resolve: (v: { id: string; text: string }[]) => void = () => {};
@@ -312,6 +328,7 @@ describe('translation slice', () => {
         ...useVoiceStore.getState().translation,
         targetLang: 'zh-CN',
         byLineId: { a: { status: 'pending' } },
+        cache: {},
       },
     });
     resolve([{ id: 'a', text: 'HELLO_EN' }]);
@@ -320,5 +337,56 @@ describe('translation slice', () => {
     expect(useVoiceStore.getState().translation.byLineId['a']).toEqual({
       status: 'pending',
     });
+  });
+
+  it('queueLineForTranslation skips LLM when source script matches target', () => {
+    useVoiceStore.setState({
+      currentSession: {
+        id: 'live',
+        startedAt: '',
+        lines: [mkLine('en1', 'Hello world')],
+        pendingPartial: null,
+        pipelineReady: true,
+      },
+      translation: { enabled: true, targetLang: 'en', byLineId: {}, cache: {} },
+    });
+    useVoiceStore.getState().queueLineForTranslation('en1');
+    // Source already English → marked done with text === source so the
+    // UI's passthrough-suppression renders no annotation. No LLM round-trip.
+    expect(useVoiceStore.getState().translation.byLineId['en1']).toEqual({
+      status: 'done',
+      text: 'Hello world',
+    });
+  });
+
+  it('cache hit returns prior translation instantly on lang-flip', async () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: { a: { status: 'pending' }, b: { status: 'pending' } },
+        cache: {},
+      },
+    });
+    vi.spyOn(translateApi, 'translateLines').mockResolvedValue([
+      { id: 'a', text: 'Hello world' },
+      { id: 'b', text: 'The weather is nice today' },
+    ]);
+    await useVoiceStore.getState().flushTranslationBatch();
+    // Cache should now hold both source→translation pairs.
+    const cache = useVoiceStore.getState().translation.cache;
+    expect(cache['en']?.['你好世界']).toBe('Hello world');
+    expect(cache['en']?.['今天天气真好']).toBe('The weather is nice today');
+
+    // Flip to ja (no cache yet) then back to en — cached entries
+    // should re-appear without another LLM call.
+    const spy = vi.spyOn(translateApi, 'translateLines').mockClear();
+    await useVoiceStore.getState().setTranslationTargetLang('ja');
+    spy.mockClear();
+    await useVoiceStore.getState().setTranslationTargetLang('en');
+    expect(spy).not.toHaveBeenCalled();
+    const t = useVoiceStore.getState().translation;
+    expect(t.byLineId['a']).toEqual({ status: 'done', text: 'Hello world' });
+    expect(t.byLineId['b']).toEqual({ status: 'done', text: 'The weather is nice today' });
   });
 });

@@ -56,7 +56,7 @@ describe('useLiveSocket', () => {
     const flushSpy = vi.fn();
     useVoiceStore.setState({
       flushTranslationBatch: flushSpy,
-      translation: { enabled: true, targetLang: 'en', byLineId: {} },
+      translation: { enabled: true, targetLang: 'en', byLineId: {}, cache: {} },
       currentSession: {
         id: 'live',
         startedAt: '',
@@ -78,7 +78,7 @@ describe('useLiveSocket', () => {
     const flushSpy = vi.fn();
     useVoiceStore.setState({
       flushTranslationBatch: flushSpy,
-      translation: { enabled: false, targetLang: 'en', byLineId: {} },
+      translation: { enabled: false, targetLang: 'en', byLineId: {}, cache: {} },
       currentSession: {
         id: 'live',
         startedAt: '',

@@ -20,7 +20,7 @@ function mkLine(id: string, text: string): TranscriptLine {
 beforeEach(() => {
   useVoiceStore.setState({
     speakers: [],
-    translation: { enabled: false, targetLang: 'en', byLineId: {} },
+    translation: { enabled: false, targetLang: 'en', byLineId: {}, cache: {} },
   });
 });
 
@@ -31,6 +31,7 @@ describe('LiveTranscript translation rendering', () => {
         enabled: false,
         targetLang: 'zh-CN',
         byLineId: { a: { status: 'done', text: '你好' } },
+        cache: {},
       },
     });
     render(<LanguageProvider><LiveTranscript lines={[mkLine('a', 'hello')]} pendingPartial={null} /></LanguageProvider>);
@@ -44,6 +45,7 @@ describe('LiveTranscript translation rendering', () => {
         enabled: true,
         targetLang: 'zh-CN',
         byLineId: { a: { status: 'done', text: '你好' } },
+        cache: {},
       },
     });
     render(<LanguageProvider><LiveTranscript lines={[mkLine('a', 'hello')]} pendingPartial={null} /></LanguageProvider>);
@@ -57,6 +59,7 @@ describe('LiveTranscript translation rendering', () => {
         enabled: true,
         targetLang: 'zh-CN',
         byLineId: { a: { status: 'pending' } },
+        cache: {},
       },
     });
     render(<LanguageProvider><LiveTranscript lines={[mkLine('a', 'hello')]} pendingPartial={null} /></LanguageProvider>);
@@ -69,6 +72,7 @@ describe('LiveTranscript translation rendering', () => {
         enabled: true,
         targetLang: 'zh-CN',
         byLineId: { a: { status: 'done', text: '你好' } },
+        cache: {},
       },
     });
     render(<LanguageProvider><LiveTranscript lines={[mkLine('a', '你好')]} pendingPartial={null} /></LanguageProvider>);
@@ -84,6 +88,7 @@ describe('LiveTranscript translation rendering', () => {
         enabled: true,
         targetLang: 'zh-CN',
         byLineId: { a: { status: 'error' } },
+        cache: {},
       },
     });
     render(<LanguageProvider><LiveTranscript lines={[mkLine('a', 'hello')]} pendingPartial={null} /></LanguageProvider>);

@@ -29,7 +29,7 @@ beforeEach(() => {
       pendingPartial: null,
       pipelineReady: true,
     },
-    translation: { enabled: false, targetLang: 'en', byLineId: {} },
+    translation: { enabled: false, targetLang: 'en', byLineId: {}, cache: {} },
   });
 });
 
@@ -65,7 +65,7 @@ describe('LiveTab translation controls', () => {
 
   it('select is enabled while toggle is on', () => {
     useVoiceStore.setState({
-      translation: { enabled: true, targetLang: 'en', byLineId: {} },
+      translation: { enabled: true, targetLang: 'en', byLineId: {}, cache: {} },
     });
     renderTab();
     const select = screen.getByRole('combobox', { name: /target language/i });
