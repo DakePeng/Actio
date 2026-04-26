@@ -6,5 +6,6 @@ pub mod reminder;
 pub mod segment;
 pub mod session;
 pub mod speaker;
+pub mod tenant_profile;
 pub mod todo;
 pub mod transcript;
