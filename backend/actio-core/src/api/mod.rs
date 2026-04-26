@@ -50,6 +50,9 @@ use std::sync::atomic::Ordering;
         segment::dismiss_candidate,
         segment::assign_segment,
         segment::unassign_segment,
+        candidate_speaker::list_candidates,
+        candidate_speaker::promote,
+        candidate_speaker::dismiss,
     ),
     components(schemas(
         CreateSessionRequest,
@@ -63,6 +66,8 @@ use std::sync::atomic::Ordering;
         crate::engine::live_enrollment::Status,
         UnknownSegmentResponse,
         VoiceprintCandidateResponse,
+        candidate_speaker::CandidateSpeaker,
+        candidate_speaker::PromoteBody,
         ConfirmCandidateRequest,
         DismissCandidateRequest,
         AssignSegmentRequest,

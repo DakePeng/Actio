@@ -13,13 +13,14 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::api::session::AppApiError;
 use crate::repository::speaker as speaker_repo;
 use crate::AppState;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct CandidateSpeaker {
     pub id: Uuid,
     pub display_name: String,
@@ -27,6 +28,15 @@ pub struct CandidateSpeaker {
     pub last_matched_at: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/candidate-speakers",
+    tag = "candidate-speakers",
+    responses(
+        (status = 200, description = "Provisional speakers awaiting promote/dismiss", body = Vec<CandidateSpeaker>),
+        (status = 500, description = "Internal server error", body = AppApiError),
+    ),
+)]
 pub async fn list_candidates(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<CandidateSpeaker>>, AppApiError> {
@@ -45,11 +55,24 @@ pub async fn list_candidates(
     ))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct PromoteBody {
+    /// New display name for the speaker. If null/empty, the auto-generated
+    /// "Unknown YYYY-MM-DD HH:MM" name is preserved.
     pub display_name: Option<String>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/candidate-speakers/{id}/promote",
+    tag = "candidate-speakers",
+    params(("id" = Uuid, Path, description = "Provisional speaker ID")),
+    request_body = PromoteBody,
+    responses(
+        (status = 204, description = "Promoted to enrolled"),
+        (status = 400, description = "No provisional row with that id", body = AppApiError),
+    ),
+)]
 pub async fn promote(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -72,6 +95,16 @@ pub async fn promote(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/candidate-speakers/{id}",
+    tag = "candidate-speakers",
+    params(("id" = Uuid, Path, description = "Provisional speaker ID")),
+    responses(
+        (status = 204, description = "Dismissed (row deleted; segments unlinked)"),
+        (status = 400, description = "No provisional row with that id", body = AppApiError),
+    ),
+)]
 pub async fn dismiss(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
