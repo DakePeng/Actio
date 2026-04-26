@@ -368,6 +368,9 @@ Empty output → safe to drop.
 
 ### 48. Stale `TODO(Phase 3-4)` comment in `api/ws.rs:93` misrepresents pipeline state
 
+**Status:** Resolved 2026-04-26 — comment block deleted; replaced with a one-paragraph note clarifying that `/ws` is broadcast-out only (capture comes from `CaptureDaemon` / `LiveStreamingService`).
+
+
 `backend/actio-core/src/api/ws.rs:93` carries the comment
 
 ```rust
@@ -409,4 +412,3 @@ No behaviour change; this is a comment-only fix.
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 47 | 22 dead i18n keys in `en.ts` + `zh-CN.ts` | Low | All | Open |
-| 48 | Stale `TODO(Phase 3-4)` in `api/ws.rs:93` | Low | All | Open |
