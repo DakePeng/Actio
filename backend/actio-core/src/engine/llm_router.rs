@@ -105,12 +105,19 @@ impl LlmRouter {
                     .map_err(LlmRouterError::Local)?;
 
                 const MAX_ATTEMPTS: usize = 3;
+                // Suppress thinking. qwen3.5's chat template auto-opens
+                // `<think>` on every assistant turn; even with the engine's
+                // budget enforcement, the model has been observed to keep
+                // emitting thinking-shaped prose past the force-closed
+                // `</think>` tag, eating the whole max_tokens budget
+                // without producing JSON. Closing the block immediately
+                // is more reliable than capping reasoning length.
                 let params = GenerationParams {
                     max_tokens: 2000,
                     temperature: 0.1,
                     json_mode: true,
-                    thinking_budget: Some((transcript.len() / 10).clamp(100, 500)),
-                    suppress_thinking: false,
+                    thinking_budget: None,
+                    suppress_thinking: true,
                 };
 
                 let mut last_raw = String::new();
@@ -182,12 +189,17 @@ impl LlmRouter {
                     .get_or_load(model_id)
                     .await
                     .map_err(LlmRouterError::Local)?;
+                // Same rationale as `generate_todos` — see comment there.
+                // The action-item prompt is more structured (confidence
+                // tier, evidence quote, speaker name) but qwen3.5-2b on
+                // CPU is more reliable when forced to answer directly
+                // than when given rope to reason.
                 let params = GenerationParams {
                     max_tokens: 2000,
                     temperature: 0.1,
                     json_mode: true,
-                    thinking_budget: Some((attributed_transcript.len() / 10).clamp(100, 500)),
-                    suppress_thinking: false,
+                    thinking_budget: None,
+                    suppress_thinking: true,
                 };
                 let messages =
                     build_window_messages(attributed_transcript, label_names, window_local_date);
