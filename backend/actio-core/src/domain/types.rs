@@ -13,6 +13,8 @@ pub struct Speaker {
     pub color: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub is_self: bool,
 }
 
 #[allow(dead_code)]

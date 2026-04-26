@@ -42,6 +42,7 @@ use std::sync::atomic::Ordering;
         update_speaker,
         delete_speaker,
         enroll_speaker,
+        mark_speaker_as_self,
         session::start_live_enrollment,
         session::cancel_live_enrollment,
         session::get_live_enrollment_status,
@@ -128,6 +129,10 @@ pub fn router(state: AppState) -> Router {
         .route("/speakers/:id", patch(session::update_speaker))
         .route("/speakers/:id", delete(session::delete_speaker))
         .route("/speakers/:id/enroll", post(session::enroll_speaker))
+        .route(
+            "/speakers/:id/mark-self",
+            post(session::mark_speaker_as_self),
+        )
         .route(
             "/speakers/:id/enroll-live/start",
             post(session::start_live_enrollment),

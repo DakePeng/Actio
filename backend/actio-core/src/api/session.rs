@@ -1,6 +1,7 @@
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -344,6 +345,35 @@ pub async fn delete_speaker(
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppApiError::Internal("speaker not found".into()))
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/speakers/{id}/mark-self",
+    tag = "speakers",
+    params(("id" = String, Path, description = "Speaker ID")),
+    responses(
+        (status = 204, description = "Marked as self"),
+        (status = 404, description = "Speaker not found"),
+        (status = 400, description = "Invalid speaker id"),
+    )
+)]
+pub async fn mark_speaker_as_self(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl axum::response::IntoResponse {
+    let speaker_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    match crate::repository::speaker::mark_as_self(&state.pool, speaker_id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(sqlx::Error::RowNotFound) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            warn!(error = %e, "mark_as_self failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 
