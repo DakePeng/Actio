@@ -470,14 +470,20 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       .map((id) => ({ id, text: idToText.get(id) ?? '' }))
       .filter((l) => l.text);
     if (lines.length === 0) return;
+    const flushLang = translation.targetLang;
     flushInFlight = true;
     try {
-      const out = await translateLines(translation.targetLang, lines);
+      const out = await translateLines(flushLang, lines);
       const post = get();
-      // If the user muted or toggled off mid-flush, the byLineId we'd be
-      // writing to has either been cleared or is for a closed session —
-      // dropping the response is correct.
-      if (!post.translation.enabled || !post.currentSession) return;
+      // If the user muted, toggled off, or switched target language
+      // mid-flush, this response is for a stale request — dropping it
+      // is correct. setTranslationTargetLang already cleared byLineId
+      // and re-pended the lines for the new language.
+      if (
+        !post.translation.enabled ||
+        !post.currentSession ||
+        post.translation.targetLang !== flushLang
+      ) return;
       const returnedIds = new Set(out.map((t) => t.id));
       set((state) => {
         const next = { ...state.translation.byLineId };
@@ -498,7 +504,11 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         return;
       }
       const post = get();
-      if (!post.translation.enabled || !post.currentSession) return;
+      if (
+        !post.translation.enabled ||
+        !post.currentSession ||
+        post.translation.targetLang !== flushLang
+      ) return;
       const askedIds = new Set(lines.map((l) => l.id));
       set((state) => {
         const next = { ...state.translation.byLineId };

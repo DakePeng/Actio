@@ -29,7 +29,7 @@ export const en = {
   'transcript.identifying': 'Identifying…',
   'transcript.unknown': 'Unknown',
   'transcript.translating': '·· translating',
-  'transcript.translateError': 'retry',
+  'transcript.translateError': 'Translation failed — retry',
 
   // Live tab — translation controls
   'live.translate.toggle': 'Translate',

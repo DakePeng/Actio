@@ -5,19 +5,24 @@
 //! for in the prompt but not relied on — we map by id.
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::engine::llm_prompt::ChatMessage;
 
+/// We treat the line id as an opaque string end-to-end. The transcript
+/// pipeline currently happens to mint UUIDs, but the backend never uses
+/// the id semantically — it just echoes it back to the frontend, which
+/// matches against its own `TranscriptLine.id`. Keeping it `String`
+/// avoids 422-on-deserialize if a caller (e.g. a future synthetic id
+/// from `appendLiveTranscript`) sends a non-UUID id.
 #[derive(Debug, Clone, Serialize)]
 pub struct TranslateLineRequest {
-    pub id: Uuid,
+    pub id: String,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TranslateLineResponse {
-    pub id: Uuid,
+    pub id: String,
     pub text: String,
 }
 
@@ -119,7 +124,7 @@ mod tests {
     fn build_messages_includes_target_lang_and_lines_json() {
         let lines = vec![
             TranslateLineRequest {
-                id: Uuid::nil(),
+                id: "line-1".into(),
                 text: "hello".into(),
             },
         ];
@@ -129,7 +134,7 @@ mod tests {
         assert_eq!(msgs[1].role, "user");
         assert!(msgs[1].content.contains("Target language: zh-CN"));
         assert!(msgs[1].content.contains("\"hello\""));
-        assert!(msgs[1].content.contains(&Uuid::nil().to_string()));
+        assert!(msgs[1].content.contains("line-1"));
     }
 
     #[test]

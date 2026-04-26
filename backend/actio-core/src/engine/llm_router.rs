@@ -559,7 +559,7 @@ mod tests {
     async fn translate_lines_disabled_returns_disabled_error() {
         let router = LlmRouter::Disabled;
         let lines = vec![TranslateLineRequest {
-            id: uuid::Uuid::nil(),
+            id: "line-1".into(),
             text: "hello".into(),
         }];
         let err = router.translate_lines("zh-CN", lines).await.unwrap_err();
@@ -569,17 +569,15 @@ mod tests {
     #[tokio::test]
     async fn translate_lines_stub_appends_suffix_in_order() {
         let router = LlmRouter::stub_with_translation_suffix(" [zh]");
-        let id1 = uuid::Uuid::new_v4();
-        let id2 = uuid::Uuid::new_v4();
         let lines = vec![
-            TranslateLineRequest { id: id1, text: "first".into() },
-            TranslateLineRequest { id: id2, text: "second".into() },
+            TranslateLineRequest { id: "line-1".into(), text: "first".into() },
+            TranslateLineRequest { id: "line-2".into(), text: "second".into() },
         ];
         let out = router.translate_lines("zh-CN", lines).await.unwrap();
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].id, id1);
+        assert_eq!(out[0].id, "line-1");
         assert_eq!(out[0].text, "first [zh]");
-        assert_eq!(out[1].id, id2);
+        assert_eq!(out[1].id, "line-2");
         assert_eq!(out[1].text, "second [zh]");
     }
 }

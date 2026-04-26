@@ -189,4 +189,38 @@ describe('translation slice', () => {
     await flush;
     expect(useVoiceStore.getState().translation.byLineId).toEqual({});
   });
+
+  it('drops the response if targetLang changes mid-flush', async () => {
+    // Without the lang-snapshot guard, an in-flight English flush would
+    // overwrite zh-CN's freshly-cleared byLineId with the EN translations,
+    // and the user would see English subtitles labeled as Chinese.
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: { a: { status: 'pending' } },
+      },
+    });
+    let resolve: (v: { id: string; text: string }[]) => void = () => {};
+    vi.spyOn(translateApi, 'translateLines').mockImplementation(
+      () => new Promise((r) => { resolve = r; }),
+    );
+    const flush = useVoiceStore.getState().flushTranslationBatch();
+    // Mid-flush, user picks a different target language. The store would
+    // normally call setTranslationTargetLang here; we simulate just the
+    // state mutation that matters.
+    useVoiceStore.setState({
+      translation: {
+        ...useVoiceStore.getState().translation,
+        targetLang: 'zh-CN',
+        byLineId: { a: { status: 'pending' } },
+      },
+    });
+    resolve([{ id: 'a', text: 'HELLO_EN' }]);
+    await flush;
+    // The EN response must NOT have landed on the zh-CN-labeled entry.
+    expect(useVoiceStore.getState().translation.byLineId['a']).toEqual({
+      status: 'pending',
+    });
+  });
 });
