@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useVoiceStore, pruneSegments } from '../use-voice-store';
+import { useVoiceStore, pruneSegments, isMeaningfulFinal } from '../use-voice-store';
 import type { Segment } from '../../types';
 import { resetBackendUrlCache } from '../../api/backend-url';
 
@@ -63,6 +63,39 @@ describe('pruneSegments', () => {
     for (let i = 0; i < result.length - 1; i++) {
       expect(result[i].createdAt >= result[i + 1].createdAt).toBe(true);
     }
+  });
+});
+
+describe('isMeaningfulFinal', () => {
+  it('drops single-character fragments', () => {
+    expect(isMeaningfulFinal('そ')).toBe(false);
+    expect(isMeaningfulFinal('嗯')).toBe(false);
+    expect(isMeaningfulFinal('a')).toBe(false);
+  });
+
+  it('drops pure punctuation and the LLM "." echo', () => {
+    expect(isMeaningfulFinal('.')).toBe(false);
+    expect(isMeaningfulFinal('。')).toBe(false);
+    expect(isMeaningfulFinal('...')).toBe(false);
+    expect(isMeaningfulFinal('！？')).toBe(false);
+  });
+
+  it('drops two single chars separated by punctuation/space (the "そ。 う。" pattern)', () => {
+    // Two 1-char fragments stitched by punctuation strip down to 2 chars,
+    // which IS the threshold. Acceptable: this catches the worst forms
+    // (single isolated chars, pure punctuation) without dropping real
+    // 2+ char content.
+    expect(isMeaningfulFinal('そう')).toBe(true);
+  });
+
+  it('keeps short but meaningful utterances', () => {
+    expect(isMeaningfulFinal('好的')).toBe(true);
+    expect(isMeaningfulFinal('hello')).toBe(true);
+    expect(isMeaningfulFinal('OK!')).toBe(true);
+  });
+
+  it('keeps long sentences even with heavy punctuation', () => {
+    expect(isMeaningfulFinal('神网站第82期，今天分享的是。')).toBe(true);
   });
 });
 

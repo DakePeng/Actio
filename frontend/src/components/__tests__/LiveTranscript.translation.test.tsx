@@ -63,6 +63,19 @@ describe('LiveTranscript translation rendering', () => {
     expect(screen.getByText(/translating/i)).toBeInTheDocument();
   });
 
+  it('suppresses translation when output equals source (already-in-target passthrough)', () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'zh-CN',
+        byLineId: { a: { status: 'done', text: '你好' } },
+      },
+    });
+    render(<LanguageProvider><LiveTranscript lines={[mkLine('a', '你好')]} pendingPartial={null} /></LanguageProvider>);
+    // Source visible exactly once, no duplicate translation annotation.
+    expect(screen.getAllByText('你好')).toHaveLength(1);
+  });
+
   it('renders error link and retry calls retryTranslationLine', () => {
     const retrySpy = vi.fn();
     useVoiceStore.setState({

@@ -85,6 +85,28 @@ interface VoiceState {
 const MAX_UNSTARRED = 30;
 const STORAGE_KEY = 'actio-voice';
 
+/** Whitespace + the most common terminal punctuation across Latin and
+ *  CJK. Used to test whether a finalized ASR line carries any actual
+ *  content — see `isMeaningfulFinal`. */
+const NOISE_STRIP_RE = /[\s.,!?;:'"`()[\]{}。、！？，；：·…—\-]+/gu;
+
+/** Drop ASR finals that, after stripping whitespace and punctuation,
+ *  carry fewer than 2 graphemes of content. This catches the breath /
+ *  click / tail-of-partial mishearings ("そ", "。", "u") that the
+ *  recognizer routinely emits as standalone finals on quiet windows.
+ *
+ *  Single-grapheme affirmations like "嗯" or "好" are dropped too —
+ *  acceptable trade for live transcripts; the user can scan past
+ *  these but visually they're indistinguishable from noise. If we
+ *  ever need to keep them, raise the threshold to 1 with an
+ *  additional duration guard. */
+export function isMeaningfulFinal(text: string): boolean {
+  const stripped = text.replace(NOISE_STRIP_RE, '');
+  // Array.from gives codepoint count, not UTF-16 unit count — important
+  // for surrogate-pair scripts (some kanji extensions, emoji).
+  return Array.from(stripped).length >= 2;
+}
+
 // Exported for unit testing
 export function pruneSegments(segments: Segment[]): Segment[] {
   // segments are newest-first; keep all starred, keep at most MAX_UNSTARRED unstarred
@@ -231,6 +253,22 @@ function handleTranscriptMessage(
 ) {
   if (!msg.text.trim()) return;
   const isFinal = msg.is_final ?? false;
+
+  // Drop ASR noise on finals (single-char fragments, pure punctuation).
+  // These come from breath / clicks / partial-tail mishearings and add
+  // pure visual noise to the transcript. Partials are left alone — they
+  // either grow into something substantial or get replaced.
+  if (isFinal && !isMeaningfulFinal(msg.text)) {
+    // Clear any pending partial too, otherwise a stale "in progress"
+    // bubble can hang around for the dropped final.
+    set((state) => {
+      if (!state.currentSession?.pendingPartial) return state;
+      return {
+        currentSession: { ...state.currentSession, pendingPartial: null },
+      };
+    });
+    return;
+  }
 
   const id = msg.transcript_id || `local-${crypto.randomUUID()}`;
 

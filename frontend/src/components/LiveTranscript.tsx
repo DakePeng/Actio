@@ -102,10 +102,20 @@ function TranscriptLineRow({ line }: { line: TranscriptLine }) {
   const entry = useVoiceStore((s) => s.translation.byLineId[line.id]);
   const retry = useVoiceStore((s) => s.retryTranslationLine);
 
+  // The translation prompt instructs the LLM to echo the source verbatim
+  // when it's already in the target language. Rendering the same text
+  // twice is just visual noise — suppress the annotation in that case.
+  // Compare on trimmed strings so trailing-whitespace drift doesn't
+  // count as "different".
+  const isPassthrough =
+    entry?.status === 'done' &&
+    entry.text !== undefined &&
+    entry.text.trim() === line.text.trim();
+
   return (
     <span className="live-transcript__line">
       <span className="live-transcript__line-text">{line.text}</span>
-      {enabled && entry && (
+      {enabled && entry && !isPassthrough && (
         <span
           className={`live-transcript__translation live-transcript__translation--${entry.status}`}
         >
