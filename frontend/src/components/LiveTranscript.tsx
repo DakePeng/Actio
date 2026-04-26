@@ -96,17 +96,47 @@ function SpeakerHeader({
   );
 }
 
+/** A chunk of consecutive lines whose translation state is being
+ *  rendered together. Pending/error chunks collapse into a single
+ *  status indicator (no point in showing 4 spinners side-by-side
+ *  for 4 short lines on the same visual row). 'done' lines remain
+ *  individual since each translation is distinct content. */
+type Chunk =
+  | { kind: 'individual'; line: TranscriptLine }
+  | { kind: 'group'; status: 'pending' | 'error'; lines: TranscriptLine[] };
+
+function chunkBubbleLines(
+  lines: TranscriptLine[],
+  byLineId: Record<string, { status: 'pending' | 'done' | 'error'; text?: string } | undefined>,
+  enabled: boolean,
+): Chunk[] {
+  const chunks: Chunk[] = [];
+  for (const line of lines) {
+    const entry = byLineId[line.id];
+    const status = entry?.status;
+    const groupable: 'pending' | 'error' | null =
+      enabled && (status === 'pending' || status === 'error') ? status : null;
+    if (groupable === null) {
+      chunks.push({ kind: 'individual', line });
+      continue;
+    }
+    const last = chunks[chunks.length - 1];
+    if (last && last.kind === 'group' && last.status === groupable) {
+      last.lines.push(line);
+    } else {
+      chunks.push({ kind: 'group', status: groupable, lines: [line] });
+    }
+  }
+  return chunks;
+}
+
 function TranscriptLineRow({ line }: { line: TranscriptLine }) {
-  const t = useT();
   const enabled = useVoiceStore((s) => s.translation.enabled);
   const entry = useVoiceStore((s) => s.translation.byLineId[line.id]);
-  const retry = useVoiceStore((s) => s.retryTranslationLine);
 
   // The translation prompt instructs the LLM to echo the source verbatim
   // when it's already in the target language. Rendering the same text
   // twice is just visual noise — suppress the annotation in that case.
-  // Compare on trimmed strings so trailing-whitespace drift doesn't
-  // count as "different".
   const isPassthrough =
     entry?.status === 'done' &&
     entry.text !== undefined &&
@@ -114,24 +144,48 @@ function TranscriptLineRow({ line }: { line: TranscriptLine }) {
 
   return (
     <span className="live-transcript__line">
-      <span className="live-transcript__line-text">{line.text}</span>
-      {enabled && entry && !isPassthrough && (
-        <span
-          className={`live-transcript__translation live-transcript__translation--${entry.status}`}
-        >
-          {entry.status === 'pending' && t('transcript.translating')}
-          {entry.status === 'done' && entry.text}
-          {entry.status === 'error' && (
-            <button
-              type="button"
-              className="live-transcript__translation-retry"
-              onClick={() => retry(line.id)}
-            >
-              ⚠ {t('transcript.translateError')}
-            </button>
-          )}
+      <span className="live-transcript__line-text">{line.text} </span>
+      {enabled && entry?.status === 'done' && !isPassthrough && (
+        <span className="live-transcript__translation live-transcript__translation--done">
+          {entry.text}
         </span>
       )}
+    </span>
+  );
+}
+
+/** One indicator for a run of consecutive pending/error lines. The
+ *  source lines flow inline as a single block of text; the status
+ *  indicator sits underneath spanning the whole block. */
+function ChunkGroup({
+  status,
+  lines,
+}: {
+  status: 'pending' | 'error';
+  lines: TranscriptLine[];
+}) {
+  const t = useT();
+  const retry = useVoiceStore((s) => s.retryTranslationLine);
+  const onRetry = () => {
+    for (const l of lines) retry(l.id);
+  };
+  return (
+    <span className="live-transcript__chunk">
+      <span className="live-transcript__line-text">
+        {lines.map((l) => `${l.text} `).join('')}
+      </span>
+      <span className={`live-transcript__translation live-transcript__translation--${status}`}>
+        {status === 'pending' && t('transcript.translating')}
+        {status === 'error' && (
+          <button
+            type="button"
+            className="live-transcript__translation-retry"
+            onClick={onRetry}
+          >
+            ⚠ {t('transcript.translateError')}
+          </button>
+        )}
+      </span>
     </span>
   );
 }
@@ -147,6 +201,8 @@ export function LiveTranscript({
   pendingPartial: TranscriptLine | null;
 }) {
   const speakers = useVoiceStore((s) => s.speakers);
+  const translationEnabled = useVoiceStore((s) => s.translation.enabled);
+  const byLineId = useVoiceStore((s) => s.translation.byLineId);
   const t = useT();
   const bubbles = useMemo(() => groupLines(lines), [lines]);
 
@@ -183,9 +239,20 @@ export function LiveTranscript({
                 speakers={speakers}
               />
               <div className="live-transcript__body">
-                {b.lines.map((l) => (
-                  <TranscriptLineRow key={l.id} line={l} />
-                ))}
+                {chunkBubbleLines(b.lines, byLineId, translationEnabled).map(
+                  (chunk, idx) => {
+                    if (chunk.kind === 'individual') {
+                      return <TranscriptLineRow key={chunk.line.id} line={chunk.line} />;
+                    }
+                    return (
+                      <ChunkGroup
+                        key={`chunk-${idx}-${chunk.lines[0]!.id}`}
+                        status={chunk.status}
+                        lines={chunk.lines}
+                      />
+                    );
+                  },
+                )}
                 {attachedPartial && (
                   <span className="live-transcript__partial">
                     {' '}

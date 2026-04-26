@@ -5374,6 +5374,15 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   display: inline;
 }
 
+/* A chunk of consecutive pending/error lines collapsed into a single
+ * status indicator. The chunk takes up a full row in the bubble body
+ * (so the indicator spans its source lines), but its source text flows
+ * inline with whatever follows on the same row. */
+.live-transcript__chunk {
+  display: block;
+  width: 100%;
+}
+
 /* Translation annotation — visually subordinate to source. Indented +
  * accented with a left-border so the role is unambiguous, even when
  * source and target share a script (e.g. zh-CN → zh-CN passthrough).

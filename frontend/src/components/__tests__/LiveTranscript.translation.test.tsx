@@ -66,6 +66,98 @@ describe('LiveTranscript translation rendering', () => {
     expect(screen.getByText(/translating/i)).toBeInTheDocument();
   });
 
+  it('collapses consecutive pending lines into one translating placeholder', () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: {
+          a: { status: 'pending' },
+          b: { status: 'pending' },
+          c: { status: 'pending' },
+          d: { status: 'pending' },
+        },
+        cache: {},
+      },
+    });
+    render(
+      <LanguageProvider>
+        <LiveTranscript
+          lines={[
+            mkLine('a', '有问嗯'),
+            mkLine('b', '一二三'),
+            mkLine('c', '资源的分布'),
+            mkLine('d', '做一个好的基础设计'),
+          ]}
+          pendingPartial={null}
+        />
+      </LanguageProvider>,
+    );
+    // 4 pending lines should render exactly ONE translating indicator.
+    const indicators = screen.getAllByText(/translating/i);
+    expect(indicators).toHaveLength(1);
+  });
+
+  it('collapses consecutive error lines and retry hits all of them', () => {
+    const retrySpy = vi.fn();
+    useVoiceStore.setState({
+      retryTranslationLine: retrySpy,
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: {
+          a: { status: 'error' },
+          b: { status: 'error' },
+        },
+        cache: {},
+      },
+    });
+    render(
+      <LanguageProvider>
+        <LiveTranscript
+          lines={[mkLine('a', '一二三'), mkLine('b', '四五六')]}
+          pendingPartial={null}
+        />
+      </LanguageProvider>,
+    );
+    const retries = screen.getAllByRole('button', { name: /retry/i });
+    expect(retries).toHaveLength(1);
+    fireEvent.click(retries[0]!);
+    expect(retrySpy).toHaveBeenCalledTimes(2);
+    expect(retrySpy).toHaveBeenCalledWith('a');
+    expect(retrySpy).toHaveBeenCalledWith('b');
+  });
+
+  it('splits chunks across status boundaries (done in the middle)', () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: {
+          a: { status: 'pending' },
+          b: { status: 'done', text: 'second' },
+          c: { status: 'pending' },
+        },
+        cache: {},
+      },
+    });
+    render(
+      <LanguageProvider>
+        <LiveTranscript
+          lines={[
+            mkLine('a', '第一'),
+            mkLine('b', '第二'),
+            mkLine('c', '第三'),
+          ]}
+          pendingPartial={null}
+        />
+      </LanguageProvider>,
+    );
+    // Two distinct pending chunks (a) and (c), separated by the done b.
+    expect(screen.getAllByText(/translating/i)).toHaveLength(2);
+    expect(screen.getByText('second')).toBeInTheDocument();
+  });
+
   it('suppresses translation when output equals source (already-in-target passthrough)', () => {
     useVoiceStore.setState({
       translation: {
