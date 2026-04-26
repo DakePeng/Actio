@@ -29,6 +29,29 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  // Focus management: capture the previously-focused element when the dialog
+  // opens, move focus to the safer button (cancel for destructive tones, so
+  // an accidental Enter doesn't fire the destructive action), and restore
+  // focus to the original element on close. Without this, keyboard users
+  // get dropped on <body> after dismissing the dialog.
+  const isDestructive = tone === 'destructive';
+  useEffect(() => {
+    if (!open) return;
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const target = isDestructive ? cancelBtnRef.current : confirmBtnRef.current;
+    target?.focus();
+    return () => {
+      previouslyFocusedRef.current?.focus();
+    };
+  }, [open, isDestructive]);
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -37,12 +60,37 @@ export function ConfirmDialog({
         onCancel();
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        onConfirm();
+        // Enter triggers whichever action is the safer default for this
+        // tone — confirm for warnings, cancel for destructive prompts.
+        if (isDestructive) {
+          onCancel();
+        } else {
+          onConfirm();
+        }
+      } else if (e.key === 'Tab') {
+        // Trap focus between the two buttons. Without this, Tab leaves the
+        // modal even though aria-modal="true" claims the rest of the page
+        // is inert.
+        const cancelBtn = cancelBtnRef.current;
+        const confirmBtn = confirmBtnRef.current;
+        if (!cancelBtn || !confirmBtn) return;
+        const active = document.activeElement;
+        if (e.shiftKey) {
+          if (active === cancelBtn) {
+            e.preventDefault();
+            confirmBtn.focus();
+          }
+        } else {
+          if (active === confirmBtn) {
+            e.preventDefault();
+            cancelBtn.focus();
+          }
+        }
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [open, onConfirm, onCancel]);
+  }, [open, onConfirm, onCancel, isDestructive]);
 
   return (
     <AnimatePresence>
@@ -71,6 +119,7 @@ export function ConfirmDialog({
             </p>
             <div className="confirm-dialog__actions">
               <button
+                ref={cancelBtnRef}
                 type="button"
                 className="confirm-dialog__btn confirm-dialog__btn--cancel"
                 onClick={onCancel}
@@ -78,10 +127,10 @@ export function ConfirmDialog({
                 {cancelLabel}
               </button>
               <button
+                ref={confirmBtnRef}
                 type="button"
                 className={`confirm-dialog__btn confirm-dialog__btn--${tone}`}
                 onClick={onConfirm}
-                autoFocus
               >
                 {confirmLabel}
               </button>

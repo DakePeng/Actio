@@ -398,6 +398,9 @@ No behaviour change; this is a comment-only fix.
 
 ### 53. `ConfirmDialog` lacks focus trap + autoFocuses the destructive action
 
+**Status:** Resolved 2026-04-26 — Tab/Shift-Tab now cycles within the modal; destructive tones autoFocus the cancel button (and the global Enter handler routes to `onCancel` when destructive); focus is captured at open via `document.activeElement` and restored on close. 6 new unit tests in `ConfirmDialog.test.tsx` pin all four behaviours; full suite 183/183.
+
+
 `frontend/src/components/ConfirmDialog.tsx` (added in #43) implements a promise-based modal that's now used for three destructive flows (dismiss candidate speaker, switch embedding model, delete model). Two a11y gaps surfaced on review:
 
 **1. No focus trap.** When the dialog opens, focus moves to the confirm button (via `autoFocus`), but Tab/Shift-Tab can leave the modal and focus elements behind the backdrop — even though the rest of the page is meant to be inert (`aria-modal="true"`). Keyboard-only users can land on a button, link, or input that's visually obscured by the backdrop and click "blind." Standard pattern is to either:
@@ -565,4 +568,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
-| 53 | `ConfirmDialog` — no focus trap; destructive autoFocus | Low | All | Open |
