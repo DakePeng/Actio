@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useVoiceStore, pruneSegments } from '../use-voice-store';
+import {
+  useVoiceStore,
+  pruneSegments,
+  isMeaningfulFinal,
+  looksLikeTargetLang,
+} from '../use-voice-store';
 import type { Segment } from '../../types';
 import { resetBackendUrlCache } from '../../api/backend-url';
 
@@ -66,6 +71,82 @@ describe('pruneSegments', () => {
   });
 });
 
+describe('isMeaningfulFinal', () => {
+  it('drops single-character fragments', () => {
+    expect(isMeaningfulFinal('そ')).toBe(false);
+    expect(isMeaningfulFinal('嗯')).toBe(false);
+    expect(isMeaningfulFinal('a')).toBe(false);
+  });
+
+  it('drops pure punctuation and the LLM "." echo', () => {
+    expect(isMeaningfulFinal('.')).toBe(false);
+    expect(isMeaningfulFinal('。')).toBe(false);
+    expect(isMeaningfulFinal('...')).toBe(false);
+    expect(isMeaningfulFinal('！？')).toBe(false);
+  });
+
+  it('drops two single chars separated by punctuation/space (the "そ。 う。" pattern)', () => {
+    // Two 1-char fragments stitched by punctuation strip down to 2 chars,
+    // which IS the threshold. Acceptable: this catches the worst forms
+    // (single isolated chars, pure punctuation) without dropping real
+    // 2+ char content.
+    expect(isMeaningfulFinal('そう')).toBe(true);
+  });
+
+  it('keeps short but meaningful utterances', () => {
+    expect(isMeaningfulFinal('好的')).toBe(true);
+    expect(isMeaningfulFinal('hello')).toBe(true);
+    expect(isMeaningfulFinal('OK!')).toBe(true);
+  });
+
+  it('keeps long sentences even with heavy punctuation', () => {
+    expect(isMeaningfulFinal('神网站第82期，今天分享的是。')).toBe(true);
+  });
+});
+
+describe('looksLikeTargetLang', () => {
+  it('recognizes English text against an en target', () => {
+    expect(looksLikeTargetLang('Hello world how are you', 'en')).toBe(true);
+    expect(looksLikeTargetLang('The quick brown fox jumps', 'en')).toBe(true);
+  });
+
+  it('recognizes Chinese text against zh-CN', () => {
+    expect(looksLikeTargetLang('你好世界，今天天气真好', 'zh-CN')).toBe(true);
+    expect(looksLikeTargetLang('神奇网站第82期', 'zh-CN')).toBe(true);
+  });
+
+  it('recognizes Japanese (with kana) against ja', () => {
+    expect(looksLikeTargetLang('こんにちは世界', 'ja')).toBe(true);
+    expect(looksLikeTargetLang('カタカナとひらがな', 'ja')).toBe(true);
+  });
+
+  it('does NOT match pure-kanji text against ja (could be zh-CN)', () => {
+    // No kana → fall through to translate.
+    expect(looksLikeTargetLang('神奇网站第八十二期', 'ja')).toBe(false);
+  });
+
+  it('does NOT match Japanese against zh-CN (kana present)', () => {
+    expect(looksLikeTargetLang('こんにちは世界', 'zh-CN')).toBe(false);
+  });
+
+  it('does NOT match cross-script content', () => {
+    expect(looksLikeTargetLang('Hello world', 'zh-CN')).toBe(false);
+    expect(looksLikeTargetLang('你好世界', 'en')).toBe(false);
+  });
+
+  it('falls through to translate for very short text (<3 letter graphemes)', () => {
+    // Two-letter words are too short to classify confidently — better
+    // to send them to the LLM than risk a false positive.
+    expect(looksLikeTargetLang('ok', 'en')).toBe(false);
+    expect(looksLikeTargetLang('你好', 'zh-CN')).toBe(false);
+  });
+
+  it('punctuation and digits are ignored when classifying', () => {
+    // Numbers and punctuation don't tip the count one way or the other.
+    expect(looksLikeTargetLang('Hello, 1234! World!', 'en')).toBe(true);
+  });
+});
+
 describe('useVoiceStore', () => {
   beforeEach(() => {
     resetBackendUrlCache();
@@ -113,6 +194,40 @@ describe('useVoiceStore', () => {
     expect(s.currentSession!.lines).toEqual([]);
     expect(s.currentSession!.pendingPartial).toBeNull();
     expect(MockWebSocket.instances[0].url).toBe('ws://127.0.0.1:3000/ws');
+  });
+
+  it('audio_level WS frames update audioLevel', async () => {
+    useVoiceStore.getState().startRecording();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ kind: 'audio_level', rms: 0.123 }),
+    }));
+    expect(useVoiceStore.getState().audioLevel).toBeCloseTo(0.123, 5);
+    // A second frame replaces, doesn't accumulate.
+    ws.onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ kind: 'audio_level', rms: 0.045 }),
+    }));
+    expect(useVoiceStore.getState().audioLevel).toBeCloseTo(0.045, 5);
+  });
+
+  it('audio_level frames with non-numeric rms are ignored', async () => {
+    useVoiceStore.setState({ audioLevel: 0.5 });
+    useVoiceStore.getState().startRecording();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ kind: 'audio_level', rms: 'not a number' }),
+    }));
+    // No update — guard rejected the frame.
+    expect(useVoiceStore.getState().audioLevel).toBe(0.5);
+  });
+
+  it('stopRecording resets audioLevel to 0', () => {
+    useVoiceStore.setState({ audioLevel: 0.42 });
+    useVoiceStore.getState().startRecording();
+    useVoiceStore.getState().stopRecording();
+    expect(useVoiceStore.getState().audioLevel).toBe(0);
   });
 
   it('appendLiveTranscript appends lines to currentSession', () => {

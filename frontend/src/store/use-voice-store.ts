@@ -1,3 +1,9 @@
+// This store assumes a single app instance per process. Module-level
+// state below (`pendingResolutions`, `flushInFlight`) is shared across
+// all consumers — fine for the desktop shell that only ever runs one
+// LiveTab at a time. If we ever support multiple windows / tabs of
+// the same backend, both need to move into the store or be keyed by
+// session id.
 import { create } from 'zustand';
 import type { Segment } from '../types';
 import type { Speaker } from '../types/speaker';
@@ -6,6 +12,17 @@ import * as speakerApi from '../api/speakers';
 import { translateLines, LlmDisabledError } from '../api/translate';
 
 export type ClipInterval = 1 | 2 | 5 | 10 | 30;
+
+/** A translation slice entry per transcript line.
+ *  `attempts` counts how many times the LLM has been asked about this
+ *  line. Bumped on each batch failure / dropped id; once it exceeds
+ *  MAX_AUTO_RETRIES the entry stays 'error' until the user clicks
+ *  retry (which resets attempts to 0). */
+export type TranslationEntry = {
+  status: 'pending' | 'done' | 'error';
+  text?: string;
+  attempts?: number;
+};
 
 /** A single finalized transcript line. `speaker_id` starts null and fills
  *  in when the backend emits a `speaker_resolved` WS event whose time
@@ -53,6 +70,11 @@ interface VoiceState {
   /** Internal — not serialised to localStorage */
   _ws: WebSocket | null;
 
+  /** EMA-smoothed mic RMS, sampled by the backend at ~15Hz and pushed
+   *  on the WebSocket as `{kind: "audio_level", rms: …}`. Drives the
+   *  voice-wave visualisation. Reset to 0 on stopRecording. */
+  audioLevel: number;
+
   // Recording + segment CRUD (unchanged).
   startRecording: () => void;
   stopRecording: () => void;
@@ -72,7 +94,13 @@ interface VoiceState {
   translation: {
     enabled: boolean;
     targetLang: string;
-    byLineId: Record<string, { status: 'pending' | 'done' | 'error'; text?: string }>;
+    byLineId: Record<string, TranslationEntry>;
+    /** Per-language translation cache, keyed by source text. Populated
+     *  on every successful LLM response. Lets target-lang changes reuse
+     *  prior translations instantly instead of re-billing the LLM —
+     *  flipping `en → zh-CN → en` should not re-translate. Bounded
+     *  to MAX_CACHE_ENTRIES_PER_LANG and cleared on stopRecording. */
+    cache: Record<string, Record<string, string>>;
   };
 
   setTranslationEnabled: (enabled: boolean) => Promise<void>;
@@ -84,6 +112,103 @@ interface VoiceState {
 
 const MAX_UNSTARRED = 30;
 const STORAGE_KEY = 'actio-voice';
+
+/** Whitespace + the most common terminal punctuation across Latin and
+ *  CJK. Used to test whether a finalized ASR line carries any actual
+ *  content — see `isMeaningfulFinal`. */
+const NOISE_STRIP_RE = /[\s.,!?;:'"`()[\]{}。、！？，；：·…—\-]+/gu;
+
+/** Drop ASR finals that, after stripping whitespace and punctuation,
+ *  carry fewer than 2 graphemes of content. This catches the breath /
+ *  click / tail-of-partial mishearings ("そ", "。", "u") that the
+ *  recognizer routinely emits as standalone finals on quiet windows.
+ *
+ *  Single-grapheme affirmations like "嗯" or "好" are dropped too —
+ *  acceptable trade for live transcripts; the user can scan past
+ *  these but visually they're indistinguishable from noise. If we
+ *  ever need to keep them, raise the threshold to 1 with an
+ *  additional duration guard. */
+export function isMeaningfulFinal(text: string): boolean {
+  const stripped = text.replace(NOISE_STRIP_RE, '');
+  // Array.from gives codepoint count, not UTF-16 unit count — important
+  // for surrogate-pair scripts (some kanji extensions, emoji).
+  return Array.from(stripped).length >= 2;
+}
+
+/** Cheap script-based check for whether a transcript line is already in
+ *  the user's target language. Counts letter-like graphemes by Unicode
+ *  block and decides by majority. The point is to skip the LLM entirely
+ *  for already-target lines — the system prompt would just echo them
+ *  back after a 5–15s round-trip. We err toward FALSE (translate) when
+ *  ambiguous; a wasted LLM call is better than a missed translation.
+ *
+ *  Latin targets (en/es/fr/de) share the same script bucket. We don't
+ *  try to distinguish English from Spanish — the LLM round-trip would
+ *  catch that case anyway and the prompt instructs it to passthrough. */
+const CJK_UNIFIED_RE = /[一-鿿㐀-䶿]/;
+const HIRAGANA_KATAKANA_RE = /[぀-ゟ゠-ヿ]/;
+const LATIN_LETTER_RE = /[A-Za-zÀ-ɏ]/;
+
+export function looksLikeTargetLang(text: string, targetLang: string): boolean {
+  let total = 0;
+  let cjkUnified = 0;
+  let kana = 0;
+  let latin = 0;
+  for (const ch of text) {
+    if (CJK_UNIFIED_RE.test(ch)) {
+      cjkUnified++;
+      total++;
+    } else if (HIRAGANA_KATAKANA_RE.test(ch)) {
+      kana++;
+      total++;
+    } else if (LATIN_LETTER_RE.test(ch)) {
+      latin++;
+      total++;
+    }
+    // Punctuation, digits, whitespace: ignored.
+  }
+  if (total < 3) return false; // Too short to classify confidently — translate.
+  const threshold = 0.7;
+  switch (targetLang) {
+    case 'en':
+    case 'es':
+    case 'fr':
+    case 'de':
+      return latin / total >= threshold;
+    case 'zh-CN':
+      // Predominantly CJK and not actually Japanese.
+      return cjkUnified / total >= threshold && kana === 0;
+    case 'ja':
+      // Japanese requires kana; pure-kanji could be zh-CN, fall through to translate.
+      return kana > 0 && (kana + cjkUnified) / total >= threshold;
+    default:
+      return false;
+  }
+}
+
+/** Decide what entry to store for a newly-queued line. Three outcomes:
+ *  - same script as target → instant `done` with text === source
+ *    (LiveTranscript suppresses the duplicate annotation).
+ *  - cache hit for prior translation → instant `done` with cached text.
+ *  - otherwise → `pending`, awaits the next flush.  */
+type ClassifiedEntry =
+  | { status: 'pending' }
+  | { status: 'done'; text: string };
+
+function classifyLine(
+  text: string,
+  targetLang: string,
+  cache: Record<string, Record<string, string>>,
+): ClassifiedEntry {
+  if (looksLikeTargetLang(text, targetLang)) {
+    return { status: 'done', text };
+  }
+  const cached = cache[targetLang]?.[text];
+  if (cached !== undefined) {
+    return { status: 'done', text: cached };
+  }
+  return { status: 'pending' };
+}
 
 // Exported for unit testing
 export function pruneSegments(segments: Segment[]): Segment[] {
@@ -134,6 +259,62 @@ function saveTranslateTarget(lang: string): void {
   try {
     localStorage.setItem(TRANSLATE_LANG_KEY, lang);
   } catch { /* private mode etc. */ }
+}
+
+// Single-flight guard for translation flushes. The 3s interval can fire
+// while a prior flush is still awaiting the LLM response — without this
+// guard, a second flush would re-send the same pending ids and the two
+// responses would race into the same byLineId.
+let flushInFlight = false;
+
+// Cap on lines per translation request. qwen3.5-2b on CPU is slow
+// (~50 tokens/sec); a 5-line batch ran 20s in production. With a 3s
+// flush tick, smaller batches mean translations trickle in instead of
+// landing all-at-once after a long blank period — better perceived
+// latency. Excess pending lines wait for the next tick.
+const MAX_LINES_PER_BATCH = 4;
+
+// How many times we silently re-queue a line after the LLM drops it
+// (whole batch parse error, network blip, id missing from response)
+// before showing the user-facing 'error' retry button. Local LLMs go
+// transient on degenerate responses (repetition loops, code-fence
+// hallucinations), so a couple of free retries clears most cases
+// without user intervention. The user's manual retry resets the
+// counter.
+const MAX_AUTO_RETRIES = 2;
+
+/** Soft cap on per-language cache entries. JS objects iterate in
+ *  insertion order, so trimming the oldest keys when the bucket grows
+ *  past this cap keeps memory bounded in long sessions without breaking
+ *  the lang-flip-back-and-forth UX (recent lines stay cached). */
+const MAX_CACHE_ENTRIES_PER_LANG = 200;
+
+function trimCacheBucket(
+  bucket: Record<string, string>,
+): Record<string, string> {
+  const keys = Object.keys(bucket);
+  if (keys.length <= MAX_CACHE_ENTRIES_PER_LANG) return bucket;
+  const overflow = keys.length - MAX_CACHE_ENTRIES_PER_LANG;
+  const trimmed: Record<string, string> = {};
+  for (let i = overflow; i < keys.length; i++) {
+    const k = keys[i]!;
+    trimmed[k] = bucket[k]!;
+  }
+  return trimmed;
+}
+
+/** Increment the attempt counter on a previously-pending entry. While
+ *  attempts < MAX_AUTO_RETRIES the entry stays 'pending' so the next
+ *  flush tick re-sends it; once exceeded, it becomes 'error' and waits
+ *  for a manual retry. */
+function bumpRetry(
+  entry: TranslationEntry | undefined,
+): { status: 'pending' | 'error'; attempts: number } {
+  const attempts = (entry?.attempts ?? 0) + 1;
+  if (attempts > MAX_AUTO_RETRIES) {
+    return { status: 'error', attempts };
+  }
+  return { status: 'pending', attempts };
 }
 
 const { segments: initialSegments, clipInterval: initialClipInterval } = loadVoiceData();
@@ -225,6 +406,22 @@ function handleTranscriptMessage(
 ) {
   if (!msg.text.trim()) return;
   const isFinal = msg.is_final ?? false;
+
+  // Drop ASR noise on finals (single-char fragments, pure punctuation).
+  // These come from breath / clicks / partial-tail mishearings and add
+  // pure visual noise to the transcript. Partials are left alone — they
+  // either grow into something substantial or get replaced.
+  if (isFinal && !isMeaningfulFinal(msg.text)) {
+    // Clear any pending partial too, otherwise a stale "in progress"
+    // bubble can hang around for the dropped final.
+    set((state) => {
+      if (!state.currentSession?.pendingPartial) return state;
+      return {
+        currentSession: { ...state.currentSession, pendingPartial: null },
+      };
+    });
+    return;
+  }
 
   const id = msg.transcript_id || `local-${crypto.randomUUID()}`;
 
@@ -349,9 +546,12 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     enabled: false,
     targetLang: loadTranslateTarget(),
     byLineId: {},
+    cache: {},
   },
 
   _ws: null,
+
+  audioLevel: 0,
 
   startRecording: () => {
     // The backend starts microphone capture while at least one WebSocket
@@ -376,6 +576,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
               handleTranscriptMessage(set, msg);
             } else if (msg.kind === 'speaker_resolved') {
               handleSpeakerResolved(set, msg);
+            } else if (msg.kind === 'audio_level' && typeof msg.rms === 'number') {
+              // Hot-path frame at ~15Hz; keep this lean.
+              set({ audioLevel: msg.rms });
             }
           } catch { /* ignore malformed frames */ }
         };
@@ -394,7 +597,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       isRecording: false,
       currentSession: null,
       _ws: null,
-      translation: { ...state.translation, byLineId: {} },
+      audioLevel: 0,
+      translation: { ...state.translation, byLineId: {}, cache: {} },
     }));
   },
 
@@ -404,12 +608,13 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     const { currentSession, translation } = get();
     if (!currentSession) return;
     const missing = currentSession.lines
-      .filter((l) => l.is_final && !translation.byLineId[l.id])
-      .map((l) => ({ id: l.id, text: l.text }));
+      .filter((l) => l.is_final && !translation.byLineId[l.id]);
     if (missing.length === 0) return;
     set((state) => {
       const next = { ...state.translation.byLineId };
-      for (const m of missing) next[m.id] = { status: 'pending' };
+      for (const l of missing) {
+        next[l.id] = classifyLine(l.text, state.translation.targetLang, state.translation.cache);
+      }
       return { translation: { ...state.translation, byLineId: next } };
     });
     await get().flushTranslationBatch();
@@ -417,72 +622,133 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   setTranslationTargetLang: async (lang) => {
     saveTranslateTarget(lang);
+    // Clear byLineId for the new target lang, but keep `cache` —
+    // translations for the OLD lang stay accessible if the user flips
+    // back. classifyLine below repopulates byLineId from `cache` where
+    // possible.
     set((state) => ({
       translation: { ...state.translation, targetLang: lang, byLineId: {} },
     }));
-    if (get().translation.enabled) {
-      const { currentSession } = get();
-      if (currentSession) {
-        const missing = currentSession.lines
-          .filter((l) => l.is_final)
-          .map((l) => ({ id: l.id, text: l.text }));
-        if (missing.length > 0) {
-          set((state) => {
-            const next: Record<string, { status: 'pending' | 'done' | 'error'; text?: string }> = {};
-            for (const m of missing) next[m.id] = { status: 'pending' };
-            return { translation: { ...state.translation, byLineId: next } };
-          });
-          await get().flushTranslationBatch();
-        }
+    if (!get().translation.enabled) return;
+    const { currentSession } = get();
+    if (!currentSession) return;
+    const finals = currentSession.lines.filter((l) => l.is_final);
+    if (finals.length === 0) return;
+    set((state) => {
+      const next: VoiceState['translation']['byLineId'] = {};
+      for (const l of finals) {
+        next[l.id] = classifyLine(l.text, lang, state.translation.cache);
       }
-    }
+      return { translation: { ...state.translation, byLineId: next } };
+    });
+    await get().flushTranslationBatch();
   },
 
   queueLineForTranslation: (lineId) => {
     if (!get().translation.enabled) return;
+    const session = get().currentSession;
+    if (!session) return;
+    const line = session.lines.find((l) => l.id === lineId);
+    if (!line) return;
     set((state) => {
       if (state.translation.byLineId[lineId]) return state;
       return {
         translation: {
           ...state.translation,
-          byLineId: { ...state.translation.byLineId, [lineId]: { status: 'pending' } },
+          byLineId: {
+            ...state.translation.byLineId,
+            [lineId]: classifyLine(line.text, state.translation.targetLang, state.translation.cache),
+          },
         },
       };
     });
   },
 
   flushTranslationBatch: async () => {
+    if (flushInFlight) return;
     const { translation, currentSession } = get();
     if (!translation.enabled || !currentSession) return;
     const pending = Object.entries(translation.byLineId)
       .filter(([, v]) => v.status === 'pending')
-      .map(([id]) => id);
+      .map(([id]) => id)
+      .slice(0, MAX_LINES_PER_BATCH);
     if (pending.length === 0) return;
     const idToText = new Map(currentSession.lines.map((l) => [l.id, l.text] as const));
     const lines = pending
       .map((id) => ({ id, text: idToText.get(id) ?? '' }))
       .filter((l) => l.text);
     if (lines.length === 0) return;
+    const flushLang = translation.targetLang;
+    flushInFlight = true;
     try {
-      const out = await translateLines(translation.targetLang, lines);
+      const out = await translateLines(flushLang, lines);
+      const post = get();
+      // If the user muted, toggled off, or switched target language
+      // mid-flush, this response is for a stale request — dropping it
+      // is correct. setTranslationTargetLang already cleared byLineId
+      // and re-pended the lines for the new language.
+      if (
+        !post.translation.enabled ||
+        !post.currentSession ||
+        post.translation.targetLang !== flushLang
+      ) return;
+      const returnedIds = new Set(out.map((t) => t.id));
       set((state) => {
         const next = { ...state.translation.byLineId };
-        for (const t of out) next[t.id] = { status: 'done', text: t.text };
-        return { translation: { ...state.translation, byLineId: next } };
+        const nextCache = { ...state.translation.cache };
+        const langBucket = { ...(nextCache[flushLang] ?? {}) };
+        for (const t of out) {
+          // Empty / whitespace-only text from the LLM means the model
+          // intentionally returned nothing — not a transient failure.
+          // Skip auto-retry; surface the retry UI immediately so the
+          // user can intervene. (Empty translations almost always
+          // indicate the model gave up, not a parse blip.)
+          if (t.text && t.text.trim()) {
+            next[t.id] = { status: 'done', text: t.text };
+            // Cache by source text so flipping target lang and back
+            // re-uses this translation without re-billing the LLM.
+            const srcText = idToText.get(t.id);
+            if (srcText) langBucket[srcText] = t.text;
+          } else {
+            next[t.id] = { status: 'error', attempts: next[t.id]?.attempts };
+          }
+        }
+        nextCache[flushLang] = trimCacheBucket(langBucket);
+        // Ids we asked about that the LLM didn't return are usually a
+        // model-side miss (truncated response, code-fence wrap, dropped
+        // entries) — the kind of transient failure that often clears
+        // on a fresh batch. Auto-retry up to MAX_AUTO_RETRIES, then
+        // give up.
+        for (const id of lines.map((l) => l.id)) {
+          if (returnedIds.has(id)) continue;
+          if (next[id]?.status !== 'pending') continue;
+          next[id] = bumpRetry(next[id]);
+        }
+        return {
+          translation: { ...state.translation, byLineId: next, cache: nextCache },
+        };
       });
     } catch (e) {
       if (e instanceof LlmDisabledError) {
         set({ translation: { ...get().translation, enabled: false, byLineId: {} } });
         return;
       }
+      const post = get();
+      if (
+        !post.translation.enabled ||
+        !post.currentSession ||
+        post.translation.targetLang !== flushLang
+      ) return;
       const askedIds = new Set(lines.map((l) => l.id));
       set((state) => {
         const next = { ...state.translation.byLineId };
         for (const id of askedIds) {
-          if (next[id]?.status === 'pending') next[id] = { status: 'error' };
+          if (next[id]?.status === 'pending') next[id] = bumpRetry(next[id]);
         }
         return { translation: { ...state.translation, byLineId: next } };
       });
+    } finally {
+      flushInFlight = false;
     }
   },
 
@@ -490,7 +756,12 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set((state) => ({
       translation: {
         ...state.translation,
-        byLineId: { ...state.translation.byLineId, [lineId]: { status: 'pending' } },
+        byLineId: {
+          ...state.translation.byLineId,
+          // Reset attempts: the user is taking over from auto-retry,
+          // so they get a fresh budget if it fails again.
+          [lineId]: { status: 'pending', attempts: 0 },
+        },
       },
     }));
     void get().flushTranslationBatch();

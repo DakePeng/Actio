@@ -105,11 +105,19 @@ impl LlmRouter {
                     .map_err(LlmRouterError::Local)?;
 
                 const MAX_ATTEMPTS: usize = 3;
+                // Suppress thinking. qwen3.5's chat template auto-opens
+                // `<think>` on every assistant turn; even with the engine's
+                // budget enforcement, the model has been observed to keep
+                // emitting thinking-shaped prose past the force-closed
+                // `</think>` tag, eating the whole max_tokens budget
+                // without producing JSON. Closing the block immediately
+                // is more reliable than capping reasoning length.
                 let params = GenerationParams {
                     max_tokens: 2000,
                     temperature: 0.1,
                     json_mode: true,
-                    thinking_budget: Some((transcript.len() / 10).clamp(100, 500)),
+                    thinking_budget: None,
+                    suppress_thinking: true,
                 };
 
                 let mut last_raw = String::new();
@@ -181,11 +189,17 @@ impl LlmRouter {
                     .get_or_load(model_id)
                     .await
                     .map_err(LlmRouterError::Local)?;
+                // Same rationale as `generate_todos` — see comment there.
+                // The action-item prompt is more structured (confidence
+                // tier, evidence quote, speaker name) but qwen3.5-2b on
+                // CPU is more reliable when forced to answer directly
+                // than when given rope to reason.
                 let params = GenerationParams {
                     max_tokens: 2000,
                     temperature: 0.1,
                     json_mode: true,
-                    thinking_budget: Some((attributed_transcript.len() / 10).clamp(100, 500)),
+                    thinking_budget: None,
+                    suppress_thinking: true,
                 };
                 let messages =
                     build_window_messages(attributed_transcript, label_names, window_local_date);
@@ -235,12 +249,29 @@ impl LlmRouter {
                     .get_or_load(model_id)
                     .await
                     .map_err(LlmRouterError::Local)?;
+                // Translation is mechanical — no reasoning needed. Disabling
+                // the thinking budget skips the <think>\n injection that
+                // otherwise pushes models like qwen3.5 into a long
+                // chain-of-thought, occasionally a degenerate repetition
+                // loop that burns the whole token budget before emitting
+                // the JSON.
+                //
+                // Output size is bounded by input length — Chinese→English
+                // is roughly 2–3× tokens out per char in (CJK ≈ 1 token/
+                // char, English ≈ 1.3 tokens/word), plus ~30 tokens of
+                // JSON envelope overhead per line. The frontend caps
+                // batches at 4 lines of typical-utterance length, so 1000
+                // tokens is plenty; the previous 2000-token ceiling was
+                // pure dead weight that just gave a runaway model more
+                // rope.
                 let total_chars: usize = lines.iter().map(|l| l.text.len()).sum();
+                let max_tokens = (120 + total_chars * 3).min(1000);
                 let params = GenerationParams {
-                    max_tokens: 2000,
+                    max_tokens,
                     temperature: 0.1,
                     json_mode: true,
-                    thinking_budget: Some((total_chars / 10).clamp(100, 500)),
+                    thinking_budget: None,
+                    suppress_thinking: true,
                 };
                 let messages =
                     crate::engine::llm_translate::build_translate_messages(target_lang, &lines);
@@ -559,7 +590,7 @@ mod tests {
     async fn translate_lines_disabled_returns_disabled_error() {
         let router = LlmRouter::Disabled;
         let lines = vec![TranslateLineRequest {
-            id: uuid::Uuid::nil(),
+            id: "line-1".into(),
             text: "hello".into(),
         }];
         let err = router.translate_lines("zh-CN", lines).await.unwrap_err();
@@ -569,17 +600,15 @@ mod tests {
     #[tokio::test]
     async fn translate_lines_stub_appends_suffix_in_order() {
         let router = LlmRouter::stub_with_translation_suffix(" [zh]");
-        let id1 = uuid::Uuid::new_v4();
-        let id2 = uuid::Uuid::new_v4();
         let lines = vec![
-            TranslateLineRequest { id: id1, text: "first".into() },
-            TranslateLineRequest { id: id2, text: "second".into() },
+            TranslateLineRequest { id: "line-1".into(), text: "first".into() },
+            TranslateLineRequest { id: "line-2".into(), text: "second".into() },
         ];
         let out = router.translate_lines("zh-CN", lines).await.unwrap();
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].id, id1);
+        assert_eq!(out[0].id, "line-1");
         assert_eq!(out[0].text, "first [zh]");
-        assert_eq!(out[1].id, id2);
+        assert_eq!(out[1].id, "line-2");
         assert_eq!(out[1].text, "second [zh]");
     }
 }

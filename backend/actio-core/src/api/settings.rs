@@ -257,6 +257,7 @@ pub async fn test_llm(State(state): State<AppState>) -> Result<Json<LlmTestResul
                         temperature: 0.0,
                         json_mode: false,
                         thinking_budget: None,
+                        suppress_thinking: false,
                     },
                     EnginePriority::Internal,
                 )

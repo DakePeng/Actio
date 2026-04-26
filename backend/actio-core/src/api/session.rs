@@ -80,6 +80,7 @@ pub async fn create_session(
                     min_duration_ms: settings.audio.speaker_min_duration_ms,
                     continuity_window_ms: settings.audio.speaker_continuity_window_ms,
                 },
+                Some(state.audio_levels.clone()),
             ) {
                 warn!(session_id = %s.id, error = %e, "Failed to start inference pipeline — CRUD-only mode");
             }
@@ -662,6 +663,7 @@ pub async fn start_live_enrollment(
                         min_duration_ms: settings.audio.speaker_min_duration_ms,
                         continuity_window_ms: settings.audio.speaker_continuity_window_ms,
                     },
+                    Some(state.audio_levels.clone()),
                 ) {
                     warn!(error = %e, "Failed to start pipeline for enrollment");
                 } else {

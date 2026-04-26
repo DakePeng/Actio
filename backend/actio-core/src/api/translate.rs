@@ -3,7 +3,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::api::session::AppApiError;
 use crate::engine::llm_router::LlmRouterError;
@@ -18,7 +17,7 @@ pub struct TranslateRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct TranslateLineRequestWire {
-    pub id: Uuid,
+    pub id: String,
     pub text: String,
 }
 
@@ -29,7 +28,7 @@ pub struct TranslateResponse {
 
 #[derive(Debug, Serialize)]
 pub struct TranslateLineWire {
-    pub id: Uuid,
+    pub id: String,
     pub text: String,
 }
 
@@ -168,6 +167,7 @@ mod tests {
             remote_client_envseed: None,
             router: Arc::new(tokio::sync::RwLock::new(router)),
             llm_inflight: Arc::new(tokio::sync::Mutex::new(())),
+            audio_levels: Arc::new(tokio::sync::broadcast::channel::<f32>(8).0),
             llm_endpoint: Arc::new(tokio::sync::Mutex::new(LocalLlmEndpoint::new())),
         };
         (state, tmp)
@@ -191,7 +191,7 @@ mod tests {
         let (state, _tmp) = make_state(LlmRouter::Disabled).await;
         let body = serde_json::json!({
             "target_lang": "zh-CN",
-            "lines": [{"id": Uuid::new_v4(), "text": "hello"}],
+            "lines": [{"id": "line-1", "text": "hello"}],
         });
         let req = Request::builder()
             .method("POST")
@@ -209,13 +209,11 @@ mod tests {
     async fn returns_translations_for_stub_router() {
         let (state, _tmp) =
             make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
-        let id1 = Uuid::new_v4();
-        let id2 = Uuid::new_v4();
         let body = serde_json::json!({
             "target_lang": "zh-CN",
             "lines": [
-                {"id": id1, "text": "first"},
-                {"id": id2, "text": "second"},
+                {"id": "line-1", "text": "first"},
+                {"id": "line-2", "text": "second"},
             ],
         });
         let req = Request::builder()
@@ -229,9 +227,31 @@ mod tests {
         let json = read_body(resp).await;
         let arr = json["translations"].as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["id"], id1.to_string());
+        assert_eq!(arr[0]["id"], "line-1");
         assert_eq!(arr[0]["text"], "first [zh]");
-        assert_eq!(arr[1]["id"], id2.to_string());
+        assert_eq!(arr[1]["id"], "line-2");
         assert_eq!(arr[1]["text"], "second [zh]");
+    }
+
+    #[tokio::test]
+    async fn accepts_non_uuid_ids() {
+        // Defensive — keeps this endpoint usable even if a caller sends
+        // a synthetic id like `local-…` from `appendLiveTranscript`.
+        let (state, _tmp) =
+            make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
+        let body = serde_json::json!({
+            "target_lang": "zh-CN",
+            "lines": [{"id": "local-not-a-uuid", "text": "hello"}],
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/llm/translate")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app(state).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), AxumStatus::OK);
+        let json = read_body(resp).await;
+        assert_eq!(json["translations"][0]["id"], "local-not-a-uuid");
     }
 }

@@ -3509,25 +3509,42 @@ body.body--native-board .desktop-window {
 
 /* ─── Live tab ───────────────────────────────────────────────────── */
 
+/* ─── Live tab — full-page layout ──────────────────────────────────
+ * Three rows: a slim topbar (status + duration), a transcript that
+ * fills the remaining viewport, and a footer that anchors the
+ * controls (translation + voice wave + mic toggle). The grid parent
+ * (.desktop-window__body) supplies the height; min-height: 0 on the
+ * column children is what lets the transcript actually scroll
+ * instead of pushing the footer off-screen. */
 .live-tab {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  height: 100%;
+  min-height: 0;
 }
 
-.live-tab__header {
+.live-tab__topbar {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  font-weight: 600;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.live-tab__topbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
 }
 
 .live-tab__status {
   color: var(--color-text-secondary);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .live-tab__status.is-on {
@@ -3538,28 +3555,84 @@ body.body--native-board .desktop-window {
   font-size: 13px;
   color: var(--color-text-secondary);
   margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.live-tab__paused-hint {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  border-radius: 8px;
-  padding: 12px;
-  margin: 0;
-}
-
-.live-tab__transcript {
-  background: var(--color-surface);
-  border-radius: 8px;
-  padding: 12px;
-  max-height: 300px;
+.live-tab__main {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  padding: 16px 24px;
+}
+
+.live-tab__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 32px;
+  color: var(--color-text-tertiary);
+}
+
+.live-tab__empty-body {
+  font-size: 0.95rem;
+  margin: 0;
+  max-width: 360px;
+  line-height: 1.55;
+}
+
+.live-tab__footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-surface);
 }
 
 .live-tab__transcript-placeholder {
   color: var(--color-text-tertiary);
   font-style: italic;
+}
+
+/* ─── Voice wave — real mic-RMS visualisation ─────────────────────
+ * Five bars whose heights are computed per-frame from the EMA-smoothed
+ * RMS that the backend broadcasts at ~15Hz on the WebSocket. Each
+ * bar's height is set inline via the --bar-h CSS variable; the
+ * height transition smooths the discrete updates into a continuous
+ * wave. Per-bar amplitude multipliers (in JS) give the array of bars
+ * an organic shape — middle bars peak higher than edge bars.
+ *
+ * States:
+ *   --idle : muted; flat gray, no input. CSS variable falls back.
+ *   --live : listening; height tracks RMS in real time. */
+.voice-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 32px;
+  margin-left: auto;
+}
+
+.voice-wave__bar {
+  width: 4px;
+  background: var(--color-accent);
+  border-radius: 2px;
+  height: var(--bar-h, 4px);
+  transition: height 80ms linear;
+}
+
+.voice-wave--idle .voice-wave__bar {
+  background: var(--color-text-tertiary);
+  opacity: 0.4;
+  height: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-wave__bar { transition: none; }
 }
 
 /* ─── People tab ─────────────────────────────────────────────────── */
@@ -5024,13 +5097,13 @@ button.voiceprint-recorder__chip.is-done.is-playing {
 .live-transcript {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 1.25rem;
   padding: 0.25rem 0;
 }
 .live-transcript__bubble {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.4rem;
 }
 .live-transcript__header {
   display: flex;
@@ -5067,8 +5140,9 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   padding-left: calc(22px + 0.5rem);
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3em;
-  line-height: 1.55;
+  column-gap: 0.3em;
+  row-gap: 0.5rem;
+  line-height: 1.6;
 }
 .live-transcript__line {
   /* just flow inline */
@@ -5407,4 +5481,109 @@ button.voiceprint-recorder__chip.is-done.is-playing {
 .candidate-row__actions button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Live tab — translation cluster, sits left in the footer. The voice
+ * wave fills the middle (margin-left: auto on .voice-wave) and the
+ * mic toggle anchors the right edge. */
+.live-tab__translate-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-tab__translate-toggle {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+  padding: 6px 14px;
+  height: 32px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.live-tab__translate-toggle:hover:not(:disabled) {
+  background: var(--color-accent-wash);
+  color: var(--color-accent-strong);
+  border-color: var(--color-accent);
+}
+
+.live-tab__translate-toggle.is-on {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.live-tab__translate-select {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 4px 24px 4px 8px;
+  height: 32px;
+  font-size: 0.78rem;
+}
+
+.live-tab__translate-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.live-transcript__line-text {
+  display: inline;
+}
+
+/* A chunk of consecutive pending/error lines collapsed into a single
+ * status indicator. The chunk takes up a full row in the bubble body
+ * (so the indicator spans its source lines), but its source text flows
+ * inline with whatever follows on the same row. */
+.live-transcript__chunk {
+  display: block;
+  width: 100%;
+}
+
+/* Translation annotation — visually subordinate to source. Indented +
+ * accented with a left-border so the role is unambiguous, even when
+ * source and target share a script (e.g. zh-CN → zh-CN passthrough).
+ * No italic — italic on CJK is an anti-pattern (synthesized slant,
+ * unreadable in most fonts). Hierarchy comes from size, color,
+ * and the indent rule, not slant. */
+.live-transcript__translation {
+  display: block;
+  font-size: 0.875em;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border);
+}
+
+.live-transcript__translation--pending {
+  color: var(--color-text-tertiary);
+  border-left-color: var(--color-border);
+  opacity: 0.85;
+}
+
+.live-transcript__translation--error {
+  color: #b91c1c;
+  border-left-color: #fca5a5;
+}
+
+.live-transcript__translation-retry {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.live-transcript__translation-retry:hover {
+  color: #7f1d1d;
 }

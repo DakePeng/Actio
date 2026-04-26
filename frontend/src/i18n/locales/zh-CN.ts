@@ -30,7 +30,7 @@ export const zhCN: Translations = {
   'transcript.identifying': '识别中…',
   'transcript.unknown': '未知说话人',
   'transcript.translating': '·· 翻译中',
-  'transcript.translateError': '重试',
+  'transcript.translateError': '翻译失败 — 重试',
 
   // Live tab — translation controls
   'live.translate.toggle': '翻译',

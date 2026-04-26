@@ -85,6 +85,11 @@ pub struct AppState {
     /// extraction + translation). Tokio's mutex is FIFO so neither
     /// feature starves.
     pub llm_inflight: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// Broadcast of EMA-smoothed mic RMS, sampled per audio chunk
+    /// (~20–60ms). The WS handler subscribes and emits `audio_level`
+    /// events so the live tab's voice wave reflects real input.
+    /// Lossy by design — receivers that fall behind drop frames.
+    pub audio_levels: Arc<tokio::sync::broadcast::Sender<f32>>,
     /// Optional second listener for the /v1/* endpoint on a configurable port.
     pub llm_endpoint: Arc<tokio::sync::Mutex<LocalLlmEndpoint>>,
 }
@@ -195,6 +200,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         remote_client_envseed,
         router,
         llm_inflight: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+        audio_levels: Arc::new(tokio::sync::broadcast::channel::<f32>(32).0),
         llm_endpoint,
     };
 
@@ -613,6 +619,7 @@ async fn start_always_on_pipeline(state: &AppState) -> anyhow::Result<()> {
                 min_duration_ms: settings.audio.speaker_min_duration_ms,
                 continuity_window_ms: settings.audio.speaker_continuity_window_ms,
             },
+            Some(state.audio_levels.clone()),
         )?;
     }
 
