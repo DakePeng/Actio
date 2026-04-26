@@ -235,12 +235,16 @@ impl LlmRouter {
                     .get_or_load(model_id)
                     .await
                     .map_err(LlmRouterError::Local)?;
-                let total_chars: usize = lines.iter().map(|l| l.text.len()).sum();
+                // Translation is a transduction task, not a reasoning task —
+                // disable the <think> preamble. Caps the cost of qwen-style
+                // models that otherwise emit long thinking blocks (and
+                // sometimes degenerate into infinite repetition that eats
+                // the whole token budget).
                 let params = GenerationParams {
                     max_tokens: 2000,
                     temperature: 0.1,
                     json_mode: true,
-                    thinking_budget: Some((total_chars / 10).clamp(100, 500)),
+                    thinking_budget: None,
                 };
                 let messages =
                     crate::engine::llm_translate::build_translate_messages(target_lang, &lines);

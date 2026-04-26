@@ -36,14 +36,16 @@ You are a translation assistant. You will receive a JSON array of \
 transcript lines, each with an `id` and `text`. Translate each `text` \
 into the requested target language. If a line is already in the \
 target language, return it verbatim. Preserve speaker tone and \
-punctuation. Do not add commentary or notes.\n\
+punctuation.\n\
 \n\
 Output ONLY a single JSON object — no markdown, no fences, no \
-explanation:\n\
-{\"translations\": [{\"id\": \"...uuid...\", \"text\": \"...\"}, ...]}\n\
+explanation, no reasoning, no thinking, no <think> tags, no \
+commentary or notes of any kind:\n\
+{\"translations\": [{\"id\": \"...\", \"text\": \"...\"}, ...]}\n\
 \n\
 The `translations` array MUST contain one entry per input id, in the \
-same order. Do not omit, merge, or split lines.";
+same order. Do not omit, merge, or split lines. Begin your reply \
+with `{` and end with `}`.";
 
 pub fn build_translate_messages(
     target_lang: &str,
