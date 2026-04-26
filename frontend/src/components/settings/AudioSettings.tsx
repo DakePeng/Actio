@@ -8,8 +8,18 @@ interface AudioDeviceInfo {
   is_default: boolean;
 }
 
+interface AsrModelOption {
+  id: string;
+  name: string;
+  languages: string;
+  streaming: boolean;
+  downloaded: boolean;
+}
+
 interface AudioSettingsShape {
   device_name?: string;
+  live_asr_model?: string | null;
+  archive_asr_model?: string | null;
   speaker_confirm_threshold?: number;
   speaker_tentative_threshold?: number;
   speaker_min_duration_ms?: number;
@@ -66,7 +76,17 @@ export function AudioSettings() {
   const [audioRetentionDays, setAudioRetentionDays] = useState(14);
   const [provisionalGcDays, setProvisionalGcDays] = useState(30);
   const [useBatchPipeline, setUseBatchPipeline] = useState(false);
+  const [models, setModels] = useState<AsrModelOption[]>([]);
+  const [liveModel, setLiveModel] = useState<string>('');
+  const [archiveModel, setArchiveModel] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/settings/models/available`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: AsrModelOption[]) => setModels(rows))
+      .catch(() => setModels([]));
+  }, []);
 
   useEffect(() => {
     Promise.all([fetchDevices(), fetchSettings()])
@@ -117,6 +137,12 @@ export function AudioSettings() {
         }
         if (typeof settings.audio?.use_batch_pipeline === 'boolean') {
           setUseBatchPipeline(settings.audio.use_batch_pipeline);
+        }
+        if (typeof settings.audio?.live_asr_model === 'string') {
+          setLiveModel(settings.audio.live_asr_model);
+        }
+        if (typeof settings.audio?.archive_asr_model === 'string') {
+          setArchiveModel(settings.audio.archive_asr_model);
         }
       })
       .catch(() => {});
@@ -369,6 +395,66 @@ export function AudioSettings() {
       </label>
       <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
         {t('settings.audio.useBatchPipelineHint')}
+      </p>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.liveAsrModel')}
+        </span>
+        <select
+          className="settings-row__select"
+          value={liveModel}
+          onChange={(e) => {
+            setLiveModel(e.target.value);
+            void commit('live_asr_model', e.target.value || null);
+          }}
+        >
+          <option value="">
+            {t('settings.audio.liveAsrFallback')}
+          </option>
+          {models
+            .filter((m) => m.downloaded)
+            .map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} ·{' '}
+                {m.streaming
+                  ? t('settings.audio.streamingTag')
+                  : t('settings.audio.offlineTag')}{' '}
+                · {m.languages}
+              </option>
+            ))}
+        </select>
+      </label>
+      <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
+        {t('settings.audio.liveAsrModelHint')}
+      </p>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.archiveAsrModel')}
+        </span>
+        <select
+          className="settings-row__select"
+          value={archiveModel}
+          onChange={(e) => {
+            setArchiveModel(e.target.value);
+            void commit('archive_asr_model', e.target.value || null);
+          }}
+        >
+          <option value="">
+            {t('settings.audio.archiveAsrFallback')}
+          </option>
+          {models
+            .filter((m) => m.downloaded && !m.streaming)
+            .map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} · {m.languages}
+              </option>
+            ))}
+        </select>
+      </label>
+      <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
+        {t('settings.audio.archiveAsrModelHint')}
       </p>
 
       <label className="settings-row">

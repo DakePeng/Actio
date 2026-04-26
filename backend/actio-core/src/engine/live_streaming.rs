@@ -84,15 +84,15 @@ impl LiveStreamingService {
     /// running (the supervisor handles that). Idempotent — calling start a
     /// second time with the same session updates `mode` and returns Ok.
     ///
-    /// `live_asr_model` selects which sherpa-onnx offline ASR runs against
-    /// each VAD speech segment. SenseVoice is the only catalog id wired in
-    /// this commit; other offline models (Whisper / Moonshine / Paraformer
-    /// / Zipformer-CTC / FunASR) follow the same pattern from
-    /// engine::asr — adding them is a switch-statement update with no
-    /// architectural changes. Streaming Zipformer is deliberately not
-    /// supported here because it consumes raw audio chunks rather than
-    /// VAD segments; live mode falls back to the default offline model
-    /// when a streaming-only id is requested.
+    /// `live_asr_model` picks which sherpa-onnx ASR runs the live path.
+    /// Two dispatch shapes:
+    ///   * **Streaming Transducer** (any id present in
+    ///     `model_paths.transducers`): tap raw PCM via the daemon's
+    ///     `Pcm` broadcast and feed `engine::asr::start_streaming_asr`.
+    ///   * **Offline** (Whisper / Moonshine / Paraformer / Zipformer-CTC /
+    ///     FunASR / SenseVoice): tap VAD `Speech` segments and feed the
+    ///     matching `engine::asr::start_*_asr`.
+    /// Unknown ids fall back to SenseVoice.
     pub async fn start(
         &self,
         session_id: Uuid,
@@ -164,11 +164,113 @@ impl LiveStreamingService {
     }
 }
 
-/// Bridge CaptureDaemon's broadcast → mpsc Receiver<SpeechSegment>, run
-/// per-segment offline ASR, broadcast results on the WS via the
-/// aggregator. No DB writes — the persisted archive comes from
-/// BatchProcessor's clip-level pass.
+/// Bridge CaptureDaemon's broadcast → mpsc Receiver, run the chosen
+/// ASR, broadcast results on the WS via the aggregator. No DB writes —
+/// the persisted archive comes from BatchProcessor's clip-level pass.
 async fn run_streaming_loop(
+    session_id: Uuid,
+    asr_model_id: &str,
+    model_paths: &ModelPaths,
+    events: tokio::sync::broadcast::Receiver<CaptureEvent>,
+    aggregator: Arc<TranscriptAggregator>,
+    cancel_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    if model_paths.transducers.contains_key(asr_model_id) {
+        run_streaming_transducer_loop(
+            session_id,
+            asr_model_id,
+            model_paths,
+            events,
+            aggregator,
+            cancel_rx,
+        )
+        .await;
+    } else {
+        run_offline_segment_loop(
+            session_id,
+            asr_model_id,
+            model_paths,
+            events,
+            aggregator,
+            cancel_rx,
+        )
+        .await;
+    }
+}
+
+/// Streaming-Transducer path: feed raw PCM chunks into start_streaming_asr.
+async fn run_streaming_transducer_loop(
+    session_id: Uuid,
+    asr_model_id: &str,
+    model_paths: &ModelPaths,
+    mut events: tokio::sync::broadcast::Receiver<CaptureEvent>,
+    aggregator: Arc<TranscriptAggregator>,
+    mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    let files = match model_paths.transducers.get(asr_model_id) {
+        Some(f) => f,
+        None => {
+            warn!(model = asr_model_id, "streaming transducer files missing");
+            return;
+        }
+    };
+    let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>(64);
+    let mut transcript_rx = match crate::engine::asr::start_streaming_asr(files, audio_rx) {
+        Ok(rx) => rx,
+        Err(e) => {
+            warn!(%session_id, model = asr_model_id, error = %e,
+                "LiveStreaming could not start streaming Transducer");
+            return;
+        }
+    };
+
+    let forward = tokio::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(CaptureEvent::Pcm(chunk)) => {
+                    if audio_tx.send((*chunk).clone()).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(CaptureEvent::Speech(_))
+                | Ok(CaptureEvent::Muted)
+                | Ok(CaptureEvent::Unmuted) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    warn!(skipped = n, "LiveStreaming lagged on PCM broadcast");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    loop {
+        tokio::select! {
+            _ = &mut cancel_rx => break,
+            t = transcript_rx.recv() => {
+                match t {
+                    Some(t) => {
+                        if t.text.trim().is_empty() {
+                            continue;
+                        }
+                        let start_ms = (t.start_sample as i64 * 1000) / 16000;
+                        let end_ms = (t.end_sample as i64 * 1000) / 16000;
+                        if t.is_final {
+                            aggregator.broadcast_final_unpersisted(&t.text, start_ms, end_ms);
+                        } else {
+                            aggregator.broadcast_partial(&t.text, start_ms, end_ms);
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+    forward.abort();
+    info!(%session_id, "LiveStreamingService (streaming transducer) loop exited");
+}
+
+/// Offline path: feed VAD-segmented Speech events through start_*_asr.
+async fn run_offline_segment_loop(
     session_id: Uuid,
     asr_model_id: &str,
     model_paths: &ModelPaths,
@@ -223,7 +325,9 @@ async fn run_streaming_loop(
                         break; // ASR consumer dropped
                     }
                 }
-                Ok(CaptureEvent::Muted) | Ok(CaptureEvent::Unmuted) => {}
+                Ok(CaptureEvent::Pcm(_))
+                | Ok(CaptureEvent::Muted)
+                | Ok(CaptureEvent::Unmuted) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     warn!(skipped = n, "LiveStreaming lagged on capture broadcast");
                 }

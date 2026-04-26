@@ -245,11 +245,21 @@ export const en = {
   'settings.audio.batchTitle': 'Batch clip processing',
   'settings.audio.batchHint':
     'Clips of recorded audio are processed in the background to produce transcripts and group voices. Tune how clips are sized, how aggressively voices are merged, and how long raw audio is kept.',
-  'settings.audio.useBatchPipeline': 'Use new batch pipeline (experimental)',
+  'settings.audio.useBatchPipeline': 'Use batch clip pipeline',
   'settings.audio.useBatchPipelineHint':
-    'Switches the always-on path from the live recognizer to the new clip-based pipeline. Live transcripts come from the same source but archive transcripts now arrive ~5 min after the audio, with global speaker clustering. Restart the app after changing this.',
+    'On by default. Splits transcription into a live path (dictation / translation) and a batch path that re-transcribes 5-min clips for the archive with global speaker clustering. Turn off only if you need the legacy single-pipeline behaviour. Restart the app after changing this.',
   'settings.audio.legacyOnlyHint':
-    'The window-length / step / tick controls below only apply when the batch pipeline is off (see "Use new batch pipeline" further down).',
+    'The window-length / step / tick controls below only apply when the batch pipeline is off (see "Use batch clip pipeline" further down).',
+  'settings.audio.liveAsrModel': 'Live ASR model',
+  'settings.audio.liveAsrModelHint':
+    'Used for dictation and live translation. Streaming models give the lowest latency; non-streaming (offline) models trade ~1-2 s of delay for higher accuracy and language coverage.',
+  'settings.audio.liveAsrFallback': 'Fall back to the model picker below',
+  'settings.audio.archiveAsrModel': 'Archive ASR model',
+  'settings.audio.archiveAsrModelHint':
+    'Used by the batch pipeline to re-transcribe 5-min clips for the archive. Only non-streaming models are listed — they have full audio context and produce better transcripts than the live path.',
+  'settings.audio.archiveAsrFallback': 'Fall back to the model picker below',
+  'settings.audio.streamingTag': 'streaming',
+  'settings.audio.offlineTag': 'offline',
   'settings.audio.clipTarget': 'Clip target length',
   'settings.audio.clusterThreshold': 'Voice clustering threshold',
   'settings.audio.audioRetention': 'Audio retention',

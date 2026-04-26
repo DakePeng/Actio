@@ -13,18 +13,41 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::{info, warn};
 
 use crate::engine::audio_capture::{self, AudioCaptureHandle};
 use crate::engine::vad::{self, SpeechSegment, VadConfig};
 
-/// Bus event broadcast to all subscribers. Speech segments arrive through
-/// the same channel as mute/unmute notifications so a subscriber's loop
-/// can react to capture lifecycle without a second channel.
+/// Fan-out one audio mpsc into two so VAD and the Pcm broadcast can
+/// each consume a copy. Best-effort: if one consumer disconnects, the
+/// other keeps receiving.
+fn tee_audio_rx(
+    mut rx: mpsc::Receiver<Vec<f32>>,
+) -> (mpsc::Receiver<Vec<f32>>, mpsc::Receiver<Vec<f32>>) {
+    let (tx_a, rx_a) = mpsc::channel::<Vec<f32>>(64);
+    let (tx_b, rx_b) = mpsc::channel::<Vec<f32>>(64);
+    tokio::spawn(async move {
+        while let Some(chunk) = rx.recv().await {
+            let _ = tx_a.send(chunk.clone()).await;
+            let _ = tx_b.send(chunk).await;
+        }
+    });
+    (rx_a, rx_b)
+}
+
+/// Bus event broadcast to all subscribers. Speech segments + raw PCM
+/// chunks arrive through the same channel as mute/unmute notifications
+/// so a subscriber's loop can react to capture lifecycle without a
+/// second channel.
+///
+/// `Pcm` carries cpal-callback-rate raw audio (16 kHz mono f32). Used by
+/// the streaming-Transducer branch of LiveStreamingService — Whisper /
+/// SenseVoice / Moonshine etc. consume `Speech` segments instead.
 #[derive(Debug, Clone)]
 pub enum CaptureEvent {
     Speech(Arc<SpeechSegment>),
+    Pcm(Arc<Vec<f32>>),
     Muted,
     Unmuted,
 }
@@ -90,9 +113,21 @@ impl CaptureDaemon {
         }
 
         let (handle, audio_rx) = audio_capture::start_capture(g.device_name.as_deref())?;
-        let seg_rx = vad::start_vad(&g.vad_model_path, VadConfig::default(), audio_rx)?;
+
+        // Tee audio: one branch drives Silero VAD (produces Speech), the
+        // other broadcasts as Pcm for streaming-Transducer subscribers.
+        let (vad_audio_rx, mut pcm_audio_rx) = tee_audio_rx(audio_rx);
+        let seg_rx = vad::start_vad(&g.vad_model_path, VadConfig::default(), vad_audio_rx)?;
 
         let tx = self.tx.clone();
+        // Pcm pump.
+        let tx_pcm = tx.clone();
+        tokio::spawn(async move {
+            while let Some(chunk) = pcm_audio_rx.recv().await {
+                let _ = tx_pcm.send(CaptureEvent::Pcm(Arc::new(chunk)));
+            }
+        });
+        // Speech pump.
         let pump = tokio::spawn(async move {
             let mut seg_rx = seg_rx;
             while let Some(seg) = seg_rx.recv().await {

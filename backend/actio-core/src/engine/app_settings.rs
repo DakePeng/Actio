@@ -206,13 +206,16 @@ pub struct AudioSettings {
     #[serde(default = "default_provisional_voiceprint_gc_days")]
     pub provisional_voiceprint_gc_days: u32,
 
-    /// Opt-in for the new batch-clip-processing pipeline. When true,
-    /// start_server boots the always-on CaptureDaemon + ClipWriter +
-    /// BatchProcessor instead of the legacy InferencePipeline supervisor.
-    /// The two paths are mutually exclusive — both would try to grab the
-    /// microphone. Default false so existing installs are unchanged.
-    #[serde(default)]
+    /// The always-on path. true (default) boots the CaptureDaemon +
+    /// ClipWriter + BatchProcessor pipeline. false uses the legacy
+    /// InferencePipeline supervisor. The two are mutually exclusive
+    /// because both would try to grab the microphone.
+    #[serde(default = "default_use_batch_pipeline")]
     pub use_batch_pipeline: bool,
+}
+
+fn default_use_batch_pipeline() -> bool {
+    true
 }
 
 fn default_clip_retention_days() -> u32 {
@@ -299,7 +302,7 @@ impl Default for AudioSettings {
             cluster_cosine_threshold: default_cluster_cosine_threshold(),
             audio_retention_days: default_audio_retention_days(),
             provisional_voiceprint_gc_days: default_provisional_voiceprint_gc_days(),
-            use_batch_pipeline: false,
+            use_batch_pipeline: default_use_batch_pipeline(),
         }
     }
 }

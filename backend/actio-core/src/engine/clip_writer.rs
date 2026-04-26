@@ -104,7 +104,7 @@ pub async fn run_clip_writer_loop(
                 end_ms: ms_from_sample(seg.end_sample),
             }),
             CaptureEvent::Muted => Some(BoundaryEvent::Mute),
-            CaptureEvent::Unmuted => None,
+            CaptureEvent::Pcm(_) | CaptureEvent::Unmuted => None,
         };
 
         if let CaptureEvent::Speech(seg) = &ev {

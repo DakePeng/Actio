@@ -243,11 +243,21 @@ export const zhCN: Translations = {
   'settings.audio.batchTitle': '后台片段处理',
   'settings.audio.batchHint':
     '录制的音频会在后台分片段处理,生成转写并归并相同声音。可调整每个片段时长、声音聚类强度,以及原始音频的保留期。',
-  'settings.audio.useBatchPipeline': '启用新的后台处理管线(实验性)',
+  'settings.audio.useBatchPipeline': '启用片段化处理管线',
   'settings.audio.useBatchPipelineHint':
-    '将始终监听的实时识别管线切换为新的片段化管线。实时转写来源不变,但归档转写会在录音约 5 分钟后才出现,并附带全局声音聚类。修改后需重启应用。',
+    '默认启用。将转写拆分为实时路径(听写 / 翻译)与后台路径(每 5 分钟重新转写片段,生成归档转写并进行全局声音聚类)。除非需要旧版单管线行为,否则保持开启。修改后需重启应用。',
   'settings.audio.legacyOnlyHint':
-    '下面的窗口长度 / 步长 / 调度周期仅在新管线关闭时生效(见下方"启用新的后台处理管线")。',
+    '下面的窗口长度 / 步长 / 调度周期仅在新管线关闭时生效(见下方"启用片段化处理管线")。',
+  'settings.audio.liveAsrModel': '实时识别模型',
+  'settings.audio.liveAsrModelHint':
+    '用于听写与实时翻译。流式模型延迟最低;非流式(离线)模型多约 1-2 秒延迟,但准确度和语言覆盖更高。',
+  'settings.audio.liveAsrFallback': '回退到下方模型选择器',
+  'settings.audio.archiveAsrModel': '归档识别模型',
+  'settings.audio.archiveAsrModelHint':
+    '后台管线用其重新转写 5 分钟片段并归档。仅列出非流式模型 — 它们能看到完整音频上下文,转写质量优于实时路径。',
+  'settings.audio.archiveAsrFallback': '回退到下方模型选择器',
+  'settings.audio.streamingTag': '流式',
+  'settings.audio.offlineTag': '离线',
   'settings.audio.clipTarget': '目标片段时长',
   'settings.audio.clusterThreshold': '声音聚类阈值',
   'settings.audio.audioRetention': '音频保留',
