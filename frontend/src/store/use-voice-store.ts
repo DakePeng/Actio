@@ -1,3 +1,9 @@
+// This store assumes a single app instance per process. Module-level
+// state below (`pendingResolutions`, `flushInFlight`) is shared across
+// all consumers — fine for the desktop shell that only ever runs one
+// LiveTab at a time. If we ever support multiple windows / tabs of
+// the same backend, both need to move into the store or be keyed by
+// session id.
 import { create } from 'zustand';
 import type { Segment } from '../types';
 import type { Speaker } from '../types/speaker';
@@ -6,6 +12,17 @@ import * as speakerApi from '../api/speakers';
 import { translateLines, LlmDisabledError } from '../api/translate';
 
 export type ClipInterval = 1 | 2 | 5 | 10 | 30;
+
+/** A translation slice entry per transcript line.
+ *  `attempts` counts how many times the LLM has been asked about this
+ *  line. Bumped on each batch failure / dropped id; once it exceeds
+ *  MAX_AUTO_RETRIES the entry stays 'error' until the user clicks
+ *  retry (which resets attempts to 0). */
+export type TranslationEntry = {
+  status: 'pending' | 'done' | 'error';
+  text?: string;
+  attempts?: number;
+};
 
 /** A single finalized transcript line. `speaker_id` starts null and fills
  *  in when the backend emits a `speaker_resolved` WS event whose time
@@ -77,19 +94,12 @@ interface VoiceState {
   translation: {
     enabled: boolean;
     targetLang: string;
-    /** `attempts` counts how many times the LLM has been asked about
-     *  this line. Bumped on each batch failure / dropped id; once it
-     *  exceeds MAX_AUTO_RETRIES the entry stays 'error' until the user
-     *  clicks retry (which resets attempts to 0). */
-    byLineId: Record<
-      string,
-      { status: 'pending' | 'done' | 'error'; text?: string; attempts?: number }
-    >;
+    byLineId: Record<string, TranslationEntry>;
     /** Per-language translation cache, keyed by source text. Populated
      *  on every successful LLM response. Lets target-lang changes reuse
      *  prior translations instantly instead of re-billing the LLM —
-     *  flipping `en → zh-CN → en` should not re-translate. Cleared on
-     *  stopRecording. Bounded by session length. */
+     *  flipping `en → zh-CN → en` should not re-translate. Bounded
+     *  to MAX_CACHE_ENTRIES_PER_LANG and cleared on stopRecording. */
     cache: Record<string, Record<string, string>>;
   };
 
@@ -273,12 +283,32 @@ const MAX_LINES_PER_BATCH = 4;
 // counter.
 const MAX_AUTO_RETRIES = 2;
 
+/** Soft cap on per-language cache entries. JS objects iterate in
+ *  insertion order, so trimming the oldest keys when the bucket grows
+ *  past this cap keeps memory bounded in long sessions without breaking
+ *  the lang-flip-back-and-forth UX (recent lines stay cached). */
+const MAX_CACHE_ENTRIES_PER_LANG = 200;
+
+function trimCacheBucket(
+  bucket: Record<string, string>,
+): Record<string, string> {
+  const keys = Object.keys(bucket);
+  if (keys.length <= MAX_CACHE_ENTRIES_PER_LANG) return bucket;
+  const overflow = keys.length - MAX_CACHE_ENTRIES_PER_LANG;
+  const trimmed: Record<string, string> = {};
+  for (let i = overflow; i < keys.length; i++) {
+    const k = keys[i]!;
+    trimmed[k] = bucket[k]!;
+  }
+  return trimmed;
+}
+
 /** Increment the attempt counter on a previously-pending entry. While
  *  attempts < MAX_AUTO_RETRIES the entry stays 'pending' so the next
  *  flush tick re-sends it; once exceeded, it becomes 'error' and waits
  *  for a manual retry. */
 function bumpRetry(
-  entry: { status: 'pending' | 'done' | 'error'; text?: string; attempts?: number } | undefined,
+  entry: TranslationEntry | undefined,
 ): { status: 'pending' | 'error'; attempts: number } {
   const attempts = (entry?.attempts ?? 0) + 1;
   if (attempts > MAX_AUTO_RETRIES) {
@@ -683,7 +713,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
             next[t.id] = { status: 'error', attempts: next[t.id]?.attempts };
           }
         }
-        nextCache[flushLang] = langBucket;
+        nextCache[flushLang] = trimCacheBucket(langBucket);
         // Ids we asked about that the LLM didn't return are usually a
         // model-side miss (truncated response, code-fence wrap, dropped
         // entries) — the kind of transient failure that often clears

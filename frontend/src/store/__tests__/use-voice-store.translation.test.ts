@@ -389,4 +389,44 @@ describe('translation slice', () => {
     expect(t.byLineId['a']).toEqual({ status: 'done', text: 'Hello world' });
     expect(t.byLineId['b']).toEqual({ status: 'done', text: 'The weather is nice today' });
   });
+
+  it('cache bucket is capped at MAX_CACHE_ENTRIES_PER_LANG; oldest entries are evicted', async () => {
+    // Pre-fill the cache with 199 fake entries so a new translation
+    // brings the bucket up to the cap, and the next one (200th + 1)
+    // forces eviction.
+    const seed: Record<string, string> = {};
+    for (let i = 0; i < 199; i++) seed[`src-${i}`] = `tx-${i}`;
+    useVoiceStore.setState({
+      currentSession: {
+        id: 'live',
+        startedAt: '',
+        lines: [
+          mkLine('a', '一句新的中文'),
+          mkLine('b', '另一句新的中文'),
+        ],
+        pendingPartial: null,
+        pipelineReady: true,
+      },
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: { a: { status: 'pending' }, b: { status: 'pending' } },
+        cache: { en: seed },
+      },
+    });
+    vi.spyOn(translateApi, 'translateLines').mockResolvedValue([
+      { id: 'a', text: 'A new sentence' },
+      { id: 'b', text: 'Another new sentence' },
+    ]);
+    await useVoiceStore.getState().flushTranslationBatch();
+    const cache = useVoiceStore.getState().translation.cache;
+    const entries = Object.keys(cache['en']!);
+    // 199 seeded + 2 new = 201; cap is 200; oldest 1 evicted.
+    expect(entries.length).toBe(200);
+    // The two newest source texts must still be present.
+    expect(cache['en']!['一句新的中文']).toBe('A new sentence');
+    expect(cache['en']!['另一句新的中文']).toBe('Another new sentence');
+    // The oldest seeded entry (insertion order) is gone.
+    expect(cache['en']!['src-0']).toBeUndefined();
+  });
 });

@@ -196,6 +196,40 @@ describe('useVoiceStore', () => {
     expect(MockWebSocket.instances[0].url).toBe('ws://127.0.0.1:3000/ws');
   });
 
+  it('audio_level WS frames update audioLevel', async () => {
+    useVoiceStore.getState().startRecording();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ kind: 'audio_level', rms: 0.123 }),
+    }));
+    expect(useVoiceStore.getState().audioLevel).toBeCloseTo(0.123, 5);
+    // A second frame replaces, doesn't accumulate.
+    ws.onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ kind: 'audio_level', rms: 0.045 }),
+    }));
+    expect(useVoiceStore.getState().audioLevel).toBeCloseTo(0.045, 5);
+  });
+
+  it('audio_level frames with non-numeric rms are ignored', async () => {
+    useVoiceStore.setState({ audioLevel: 0.5 });
+    useVoiceStore.getState().startRecording();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0]!;
+    ws.onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ kind: 'audio_level', rms: 'not a number' }),
+    }));
+    // No update — guard rejected the frame.
+    expect(useVoiceStore.getState().audioLevel).toBe(0.5);
+  });
+
+  it('stopRecording resets audioLevel to 0', () => {
+    useVoiceStore.setState({ audioLevel: 0.42 });
+    useVoiceStore.getState().startRecording();
+    useVoiceStore.getState().stopRecording();
+    expect(useVoiceStore.getState().audioLevel).toBe(0);
+  });
+
   it('appendLiveTranscript appends lines to currentSession', () => {
     useVoiceStore.getState().startRecording();
     useVoiceStore.getState().appendLiveTranscript('Hello world.');

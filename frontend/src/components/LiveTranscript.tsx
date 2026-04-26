@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
-import type { TranscriptLine } from '../store/use-voice-store';
+import type { TranscriptLine, TranslationEntry } from '../store/use-voice-store';
 import type { Speaker } from '../types/speaker';
 import { useT } from '../i18n';
 
@@ -107,7 +107,7 @@ type Chunk =
 
 function chunkBubbleLines(
   lines: TranscriptLine[],
-  byLineId: Record<string, { status: 'pending' | 'done' | 'error'; text?: string } | undefined>,
+  byLineId: Record<string, TranslationEntry | undefined>,
   enabled: boolean,
 ): Chunk[] {
   const chunks: Chunk[] = [];
