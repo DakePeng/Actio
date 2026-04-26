@@ -20,6 +20,7 @@ export default function App() {
   const reminders = useStore((s) => s.reminders);
   const loadBoard = useStore((s) => s.loadBoard);
   const loadListening = useStore((s) => s.loadListening);
+  const loadProfile = useStore((s) => s.loadProfile);
   const theme = useStore((s) => s.preferences.theme);
 
   // Quick-add-only mode: reminder bar is open but board isn't
@@ -28,7 +29,8 @@ export default function App() {
   useEffect(() => {
     void loadBoard();
     void loadListening();
-  }, [loadBoard, loadListening]);
+    void loadProfile();
+  }, [loadBoard, loadListening, loadProfile]);
 
   // Shift+Alt+Tab cycles the ActioWordmark through transcribing → processing
   // → success → standby → (clear). Useful for previewing the animations

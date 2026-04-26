@@ -150,7 +150,10 @@ export interface FilterState {
 }
 
 export interface Profile {
-  name: string;
+  display_name: string;
+  aliases: string[];
+  bio: string;
+  loaded: boolean;
 }
 
 export interface Preferences {

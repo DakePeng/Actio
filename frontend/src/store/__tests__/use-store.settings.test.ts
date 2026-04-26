@@ -24,10 +24,9 @@ describe('useStore settings actions', () => {
     expect(useStore.getState().ui.showNewReminderBar).toBe(false);
   });
 
-  it('setProfile merges patch and persists to localStorage', () => {
-    useStore.getState().setProfile({ name: 'Jane Doe' });
-    expect(useStore.getState().profile.name).toBe('Jane Doe');
-    expect(JSON.parse(localStorage.getItem('actio-profile') ?? '{}')).toMatchObject({ name: 'Jane Doe' });
+  it('setProfile merges patch into store state', () => {
+    useStore.getState().setProfile({ display_name: 'Jane Doe' });
+    expect(useStore.getState().profile.display_name).toBe('Jane Doe');
   });
 
   it('setPreferences merges patch and persists to localStorage', () => {

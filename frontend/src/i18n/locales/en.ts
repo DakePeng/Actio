@@ -397,9 +397,15 @@ export const en = {
   'newReminder.tooltip.close': 'Close (Esc)',
 
   // Settings – additional sections
-  'settings.profile.title': 'Profile',
+  'settings.profile.title': 'About me',
   'settings.profile.name': 'Name',
-  'settings.profile.namePlaceholder': 'Your name',
+  'settings.profile.namePlaceholder': 'e.g. Dake Peng',
+  'settings.profile.aliases': 'Also called',
+  'settings.profile.aliasesPlaceholder': 'Type and press Enter (e.g. DK, 彭大可)',
+  'settings.profile.removeAlias': 'Remove alias',
+  'settings.profile.bio': 'About you',
+  'settings.profile.bioPlaceholder': 'A few sentences about who you are and what you care about. The action-item extractor reads this to decide what counts as relevant.',
+  'settings.profile.save': 'Save',
   'settings.tray.title': 'Tray',
   'settings.tray.position': 'Tray position',
   'settings.tray.reset': 'Reset to default',

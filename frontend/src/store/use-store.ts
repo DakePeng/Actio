@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createActioApiClient } from '../api/actio-api';
 import { fetchSettings, patchSettings } from '../api/settings-client';
+import { fetchProfile, updateProfile } from '../api/profile';
 import type {
   FilterState,
   Label,
@@ -59,22 +60,16 @@ interface AppState {
   extractReminders: (text: string, imageDataUrls?: string[]) => Promise<void>;
   clearAiGenerated: (id: string) => void;
   setProfile: (patch: Partial<Profile>) => void;
+  loadProfile: () => Promise<void>;
+  saveProfile: () => Promise<void>;
   setPreferences: (patch: Partial<Preferences>) => void;
   reset: () => void;
 }
 
 const api = createActioApiClient();
 const initialFilter: FilterState = { priority: null, label: null, search: '' };
-const defaultProfile: Profile = { name: '' };
+const defaultProfile: Profile = { display_name: '', aliases: [], bio: '', loaded: false };
 const defaultPreferences: Preferences = { theme: 'system', launchAtLogin: false, notifications: true };
-
-function loadProfile(): Profile {
-  try {
-    return JSON.parse(localStorage.getItem('actio-profile') ?? 'null') ?? defaultProfile;
-  } catch {
-    return defaultProfile;
-  }
-}
 
 function loadPreferences(): Preferences {
   try {
@@ -177,7 +172,7 @@ export const useStore = create<AppState>((set) => ({
   labels: [],
   filter: initialFilter,
   ui: initialUI,
-  profile: loadProfile(),
+  profile: defaultProfile,
   preferences: loadPreferences(),
 
   loadBoard: async () => {
@@ -489,11 +484,34 @@ export const useStore = create<AppState>((set) => ({
       ),
     })),
 
-  setProfile: (patch) => {
-    set((state) => {
-      const next = { ...state.profile, ...patch };
-      localStorage.setItem('actio-profile', JSON.stringify(next));
-      return { profile: next };
+  setProfile: (patch) =>
+    set((s) => ({ profile: { ...s.profile, ...patch } })),
+
+  loadProfile: async () => {
+    try {
+      const remote = await fetchProfile();
+      if (remote) {
+        set({ profile: {
+          display_name: remote.display_name ?? '',
+          aliases: remote.aliases,
+          bio: remote.bio ?? '',
+          loaded: true,
+        }});
+      } else {
+        set((s) => ({ profile: { ...s.profile, loaded: true }}));
+      }
+    } catch (e) {
+      console.warn('loadProfile failed', e);
+      set((s) => ({ profile: { ...s.profile, loaded: true }}));
+    }
+  },
+
+  saveProfile: async () => {
+    const p = useStore.getState().profile;
+    await updateProfile({
+      display_name: p.display_name,
+      aliases: p.aliases,
+      bio: p.bio,
     });
   },
 
@@ -505,7 +523,7 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  reset: () => set({ reminders: [], labels: [], filter: initialFilter, ui: initialUI, profile: loadProfile(), preferences: loadPreferences() }),
+  reset: () => set({ reminders: [], labels: [], filter: initialFilter, ui: initialUI, profile: defaultProfile, preferences: loadPreferences() }),
 }));
 
 export function useFilteredReminders() {

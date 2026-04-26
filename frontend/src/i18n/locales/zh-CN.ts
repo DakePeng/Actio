@@ -394,9 +394,15 @@ export const zhCN: Translations = {
   'newReminder.tooltip.close': '关闭（Esc）',
 
   // Settings – additional sections
-  'settings.profile.title': '个人资料',
+  'settings.profile.title': '关于我',
   'settings.profile.name': '姓名',
-  'settings.profile.namePlaceholder': '你的名字',
+  'settings.profile.namePlaceholder': '例如：彭大可',
+  'settings.profile.aliases': '其他称呼',
+  'settings.profile.aliasesPlaceholder': '输入后按回车添加（例如 DK、Dake）',
+  'settings.profile.removeAlias': '移除',
+  'settings.profile.bio': '个人简介',
+  'settings.profile.bioPlaceholder': '简单介绍一下你是谁、关心什么。提取器会读取这段文字来判断哪些事项与你相关。',
+  'settings.profile.save': '保存',
   'settings.tray.title': '托盘',
   'settings.tray.position': '托盘位置',
   'settings.tray.reset': '恢复默认位置',

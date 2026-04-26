@@ -46,7 +46,7 @@ type ExitTarget = { x: number; y: number; scale: number } | null;
 export function BoardWindow() {
   const showBoardWindow = useStore((s) => s.ui.showBoardWindow);
   const activeTab = useStore((s) => s.ui.activeTab);
-  const profileName = useStore((s) => s.profile.name);
+  const profileName = useStore((s) => s.profile.display_name);
   const setBoardWindow = useStore((s) => s.setBoardWindow);
   const setNewReminderBar = useStore((s) => s.setNewReminderBar);
   const clearFeedback = useStore((s) => s.clearFeedback);
