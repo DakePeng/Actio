@@ -313,8 +313,12 @@ async fn process_window_with(
         })
         .collect();
 
+    let profile = crate::repository::tenant_profile::get_for_tenant(pool, session_started_at.tenant_id)
+        .await
+        .map_err(|e| ProcessError::Permanent(format!("profile lookup: {e}")))?;
+
     let items = match router
-        .generate_action_items_with_refs(&attributed, &label_names, &window_local_date)
+        .generate_action_items_with_refs(&attributed, &label_names, &window_local_date, profile.as_ref())
         .await
     {
         Ok(items) => items,
@@ -1368,6 +1372,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count.0, 0);
+    }
+
+    #[tokio::test]
+    async fn process_window_with_uses_profile_when_set() {
+        use crate::domain::types::TenantProfile;
+
+        let pool = fresh_pool().await;
+        let sid = mk_session(&pool).await;
+        let alice = mk_speaker(&pool, "Alice").await;
+        let seg = mk_segment(&pool, sid, alice, 1_000, 30_000).await;
+        mk_final_transcript_for_segment(
+            &pool, sid, seg,
+            "Please draft the design review summary by Thursday morning so the team can read it.",
+            1_000, 30_000,
+        ).await;
+
+        let tenant_row: (String,) = sqlx::query_as(
+            "SELECT tenant_id FROM audio_sessions WHERE id = ?1"
+        ).bind(sid.to_string()).fetch_one(&pool).await.unwrap();
+        let tenant_id = Uuid::parse_str(&tenant_row.0).unwrap();
+        crate::repository::tenant_profile::upsert(&pool, &TenantProfile {
+            tenant_id,
+            display_name: Some("Alice".into()),
+            aliases: vec!["A".into()],
+            bio: Some("Engineer.".into()),
+        }).await.unwrap();
+
+        let window = upsert_test_window(&pool, sid, 0, 300_000).await;
+        let router = LlmRouter::stub(vec![stub_item(
+            "Draft summary", "high",
+            "draft the design review summary by Thursday morning",
+            Some("Alice"),
+        )]);
+
+        let outcome = process_window_with(&pool, &router, &window).await.unwrap();
+        assert!(matches!(outcome, ProcessOutcome::Produced(1)));
     }
 
     #[tokio::test]
