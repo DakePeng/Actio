@@ -396,6 +396,54 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 49. CLAUDE.md mis-describes the translation pipeline as session-based
+
+`CLAUDE.md` lines 63 and 78 both claim:
+
+> Dictation, translation, and live voiceprint enrollment all still call `InferencePipeline::start_session` regardless of the flag — flipping those to `LiveStreamingService` is the last unfinished migration step.
+
+But `backend/actio-core/src/api/translate.rs` is a stateless `POST /llm/translate` handler that calls the LLM router directly — there is **no** session lifecycle for translation, and `start_session` is never invoked from that file (the `InferencePipeline` import on line 98 is in the `#[cfg(test)] mod tests` block only). Translation has nothing to "migrate to LiveStreamingService" because it's not a streaming-capture feature at all.
+
+The accurate statement is: **Dictation and live voiceprint enrollment** still call `InferencePipeline::start_session` (in `api/session.rs:68` and `:680`). Translation is decoupled from the audio pipeline and routes through `LlmRouter::translate_lines`.
+
+A new contributor reading CLAUDE.md will look for a translation start_session call that doesn't exist.
+
+**Severity:** Low · **Platform:** All · **Type:** docs · **Scope:** small (2-line edit in CLAUDE.md)
+
+**Acceptance:**
+1. Edit both occurrences (lines 63 and 78) to drop "translation" from the unfinished-migration list.
+2. Add one sentence near line 96 (LLM router section) clarifying that `/llm/translate` is per-line stateless and never enters the audio pipeline.
+3. `git diff` should be CLAUDE.md-only.
+
+---
+
+### 50. Cluster gate settings (`cluster_min_segments`, `cluster_min_duration_ms`) undocumented
+
+ISS-046 (resolved) added two new `AudioSettings` fields with non-trivial behavior:
+
+- `cluster_min_segments: u32` (default **3**)
+- `cluster_min_duration_ms: u32` (default **8000**)
+
+They AND-gate provisional speaker creation in both `process_clip_with_clustering` and `process_clip_production` via the shared `cluster_passes_gate` helper. Defaults were chosen to suppress noise/cross-talk/podcast-cameo blips from flooding the People → Candidate Speakers panel.
+
+Neither knob is mentioned in:
+- `CLAUDE.md` (Audio & inference pipeline section, or Non-obvious patterns)
+- `backend/actio-core/src/engine/AGENTS.md` (if it exists; otherwise the nearest engine-level AGENTS.md)
+- frontend Settings UI — there's no slider/numeric input to expose them
+
+The frontend gap is **explicitly out-of-scope** for #46 (called out as "Out of scope: Frontend Settings UI to expose the two knobs"), so file the UI surfacing as part of this issue too. Operators who want to tune the gate either edit `~/.config/Actio/settings.json` manually or hit `PATCH /settings` directly — that's acceptable for power users but means the loop never gets feedback from non-developer users.
+
+**Severity:** Low · **Platform:** All · **Type:** docs + ui · **Scope:** small (docs) + small (UI knob — two number inputs in Settings → Audio)
+
+**Acceptance:**
+1. Mention both fields in `CLAUDE.md` Non-obvious patterns (one bullet) so they're grep-able.
+2. Add a sub-section in Settings → Audio with two clamped number inputs bound to `audio.cluster_min_segments` (range 1–50) and `audio.cluster_min_duration_ms` (range 0–600000, displayed as seconds for ergonomics). Persist via `PATCH /settings`.
+3. New keys land in both `en.ts` and `zh-CN.ts` (parity test).
+
+The docs-only slice is trivially safe to ship first; the UI follow-up needs `superpowers:brainstorming` per loop rules (it's UI Type) before code.
+
+---
+
 ## Summary table (open items only)
 
 | # | File | Severity | Platform | Status |
@@ -414,3 +462,5 @@ No behaviour change; this is a comment-only fix.
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 49 | CLAUDE.md mis-describes translation pipeline | Low | All | Open |
+| 50 | Cluster gate settings undocumented + no UI | Low | All | Open |
