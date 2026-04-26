@@ -286,20 +286,26 @@ if ($promptStatus) {
 }
 
 # ---- Launch -------------------------------------------------------------------
-$promptBody = Get-Content -LiteralPath $PromptFile -Raw
-$loopInput  = "/loop $Interval $promptBody"
+# Keep the /loop payload short. Passing the whole prompt as one CLI argument is
+# fragile on Windows and can also hit slash-command input limits in Claude Code.
+# Each scheduled tick reads the full prompt from disk instead.
+$PromptPathForClaude = (Resolve-Path -LiteralPath $PromptFile).Path
+$loopInstruction = "Read the full recurring-loop instructions from `"$PromptPathForClaude`" and follow that file exactly for this tick. Treat that file as authoritative; do not continue from this short dispatch text alone."
+$loopInput  = "/loop $Interval $loopInstruction"
 $promptBytes = (Get-Item -LiteralPath $PromptFile).Length
+$dispatchChars = $loopInput.Length
 
 Write-Info ("branch:   " + (git rev-parse --abbrev-ref HEAD).Trim())
 Write-Info "interval: $Interval"
 Write-Info "prompt:   $PromptFile  ($promptBytes bytes)"
+Write-Info "dispatch: $dispatchChars chars"
 Write-Info "issues:   $IssuesFile"
 Write-Host ''
 
 if ($DryRun) {
     Write-Info '-DryRun set -- not launching. Command would be:'
     Write-Host ''
-    Write-Host "  claude --dangerously-skip-permissions `"<contents of $PromptFile, prefixed with '/loop $Interval '>`""
+    Write-Host "  claude --dangerously-skip-permissions `"$loopInput`""
     Write-Host ''
     Write-Info "To launch for real: .\scripts\start-auto-loop.ps1 -Interval $Interval"
     exit 0
