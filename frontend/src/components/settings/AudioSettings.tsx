@@ -30,6 +30,8 @@ interface AudioSettingsShape {
   // Batch clip processing knobs (Plan Task 2 of batch-clip-processing).
   clip_target_secs?: number;
   cluster_cosine_threshold?: number;
+  cluster_min_segments?: number;
+  cluster_min_duration_ms?: number;
   audio_retention_days?: number;
   provisional_voiceprint_gc_days?: number;
   use_batch_pipeline?: boolean;
@@ -72,6 +74,8 @@ export function AudioSettings() {
   // Batch clip processing knobs.
   const [clipTargetSecs, setClipTargetSecs] = useState(300);
   const [clusterCosThreshold, setClusterCosThreshold] = useState(0.4);
+  const [clusterMinSegments, setClusterMinSegments] = useState(3);
+  const [clusterMinDurationMs, setClusterMinDurationMs] = useState(8000);
   const [audioRetentionDays, setAudioRetentionDays] = useState(14);
   const [provisionalGcDays, setProvisionalGcDays] = useState(30);
   const [useBatchPipeline, setUseBatchPipeline] = useState(false);
@@ -132,6 +136,12 @@ export function AudioSettings() {
         }
         if (typeof settings.audio?.cluster_cosine_threshold === 'number') {
           setClusterCosThreshold(settings.audio.cluster_cosine_threshold);
+        }
+        if (typeof settings.audio?.cluster_min_segments === 'number') {
+          setClusterMinSegments(settings.audio.cluster_min_segments);
+        }
+        if (typeof settings.audio?.cluster_min_duration_ms === 'number') {
+          setClusterMinDurationMs(settings.audio.cluster_min_duration_ms);
         }
         if (typeof settings.audio?.audio_retention_days === 'number') {
           setAudioRetentionDays(settings.audio.audio_retention_days);
@@ -500,6 +510,54 @@ export function AudioSettings() {
           }
         />
       </label>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.clusterMinSegments')}{' '}
+          <code>{clusterMinSegments}</code>
+        </span>
+        <input
+          type="range"
+          min={1}
+          max={20}
+          step={1}
+          value={clusterMinSegments}
+          onChange={(e) => setClusterMinSegments(parseInt(e.target.value, 10))}
+          onMouseUp={() =>
+            void commit('cluster_min_segments', clusterMinSegments)
+          }
+        />
+      </label>
+      <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
+        {t('settings.audio.clusterMinSegmentsHint')}
+      </p>
+
+      <label className="settings-row">
+        <span className="settings-row__label">
+          {t('settings.audio.clusterMinDuration')}{' '}
+          <code>
+            {t('settings.audio.seconds', {
+              n: Math.round(clusterMinDurationMs / 1000),
+            })}
+          </code>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={60_000}
+          step={1_000}
+          value={clusterMinDurationMs}
+          onChange={(e) =>
+            setClusterMinDurationMs(parseInt(e.target.value, 10))
+          }
+          onMouseUp={() =>
+            void commit('cluster_min_duration_ms', clusterMinDurationMs)
+          }
+        />
+      </label>
+      <p className="settings-field__hint" style={{ margin: '0 0 10px' }}>
+        {t('settings.audio.clusterMinDurationHint')}
+      </p>
 
       <label className="settings-row">
         <span className="settings-row__label">

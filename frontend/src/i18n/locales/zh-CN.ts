@@ -236,6 +236,12 @@ export const zhCN: Translations = {
   'settings.audio.offlineTag': '离线',
   'settings.audio.clipTarget': '目标片段时长',
   'settings.audio.clusterThreshold': '声音聚类阈值',
+  'settings.audio.clusterMinSegments': '建议说话人 — 最少片段数',
+  'settings.audio.clusterMinSegmentsHint':
+    '低于此片段数的声音聚类不会被提升为建议的说话人 — 短促的交叉对话或麦克风噪声会保持未归属状态,避免在「建议添加的人」面板中产生大量噪声。',
+  'settings.audio.clusterMinDuration': '建议说话人 — 最短时长',
+  'settings.audio.clusterMinDurationHint':
+    '与片段数门槛同时生效(AND)。聚类还需累积至少这么长的有效语音才会创建建议的说话人。',
   'settings.audio.audioRetention': '音频保留',
   'settings.audio.provisionalGc': '未匹配的声音保留时长',
 

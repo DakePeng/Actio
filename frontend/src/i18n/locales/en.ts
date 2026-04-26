@@ -236,6 +236,12 @@ export const en = {
   'settings.audio.offlineTag': 'offline',
   'settings.audio.clipTarget': 'Clip target length',
   'settings.audio.clusterThreshold': 'Voice clustering threshold',
+  'settings.audio.clusterMinSegments': 'Provisional speaker — min segments',
+  'settings.audio.clusterMinSegmentsHint':
+    'Voice clusters below this many VAD segments will not promote to a provisional speaker — short bursts of cross-talk or mic blips stay unattributed instead of flooding the Candidate Speakers panel.',
+  'settings.audio.clusterMinDuration': 'Provisional speaker — min duration',
+  'settings.audio.clusterMinDurationHint':
+    'AND-gated with the segment-count floor. A cluster must also accumulate at least this much speech across its segments before a provisional speaker row is minted.',
   'settings.audio.audioRetention': 'Audio retention',
   'settings.audio.provisionalGc': 'Drop unmatched voices after',
 

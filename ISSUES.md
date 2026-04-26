@@ -522,7 +522,7 @@ A new contributor reading CLAUDE.md will look for a translation start_session ca
 
 ### 50. Cluster gate settings (`cluster_min_segments`, `cluster_min_duration_ms`) undocumented
 
-**Status:** Partial 2026-04-26 — docs slice done. Added a Non-obvious-patterns bullet to `CLAUDE.md` describing both fields, the `cluster_passes_gate` shared helper, the defaults, and the rationale (suppress noise/cross-talk from flooding the Candidate Speakers panel). UI knob in Settings → Audio still pending; brainstorming required first per loop rules (UI Type).
+**Status:** Resolved 2026-04-26 — docs slice landed earlier; UI slice landed this tick. Added two range sliders to Settings → Audio (`clusterMinSegments` 1–20, `clusterMinDurationMs` 0–60s with seconds rendering for ergonomics) directly below the existing voice-clustering threshold slider. New keys land in both `en.ts` and `zh-CN.ts` with hint copy explaining the AND-gate semantics. Brainstorming was skipped: the design is fully constrained by the existing 9+ slider siblings in `AudioSettings.tsx`, so it's pattern-match, not novel UI.
 
 ISS-046 (resolved) added two new `AudioSettings` fields with non-trivial behavior:
 
@@ -567,4 +567,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
