@@ -5,11 +5,36 @@ on:
     tags:
       - 'v*.*.*'
 
+# Build artifacts for all three platforms in parallel and attach them to the
+# same GitHub release. tauri-action handles per-platform packaging:
+#   Windows  → .msi + .exe + latest.json (with windows-x86_64 entry)
+#   macOS    → .app + .dmg (universal binary; signing/notarization gated on
+#              presence of APPLE_* secrets — without them, the artifacts are
+#              produced unsigned and Gatekeeper-blocked on first launch)
+#   Linux    → .deb + .rpm (AppImage skipped; see tauri.linux.conf.json)
+#
+# tauri-action merges per-platform `latest.json` updater payloads into a
+# single one when `includeUpdaterJson: true` and the same `tagName` is used
+# across jobs.
 jobs:
   release:
-    runs-on: windows-latest
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: '--target x86_64-pc-windows-msvc'
+          - os: macos-latest
+            target: universal-apple-darwin
+            args: '--target universal-apple-darwin'
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            # tauri.linux.conf.json already narrows targets to deb+rpm
+            args: ''
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,7 +42,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 9
+          version: 10
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -29,7 +54,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
@@ -37,6 +62,27 @@ jobs:
           workspaces: |
             backend
             backend/src-tauri
+
+      # Linux build deps. Mirrors docs/dev-setup.md; without these, the
+      # Tauri build fails on missing libwebkit2gtk / libgtk-3 symbols.
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libasound2-dev \
+            librsvg2-dev \
+            libssl-dev \
+            pkg-config \
+            cmake
+
+      - name: Install macOS deps
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew list cmake >/dev/null 2>&1 || brew install cmake
 
       - name: Install frontend deps
         working-directory: frontend
@@ -48,6 +94,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing + notarization (optional — empty values
+          # produce unsigned builds that ship but trip Gatekeeper).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: backend/src-tauri
           tagName: ${{ github.ref_name }}
@@ -55,4 +109,4 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          args: '--target x86_64-pc-windows-msvc'
+          args: ${{ matrix.args }}

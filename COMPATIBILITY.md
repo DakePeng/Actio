@@ -2,6 +2,14 @@
 
 Current state: **Windows-only**. The app builds and ships for Windows. macOS and Linux targets require the work listed here before they are viable.
 
+## Recent fixes (loop iteration 7)
+
+- **#1** — DLL bundle resources moved out of `tauri.conf.json` into a Windows-only overlay at `backend/src-tauri/tauri.windows.conf.json`. Tauri v2 auto-merges the overlay when targeting `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`. macOS and Linux builds no longer try to copy nonexistent `.dll` paths.
+- **#25** — Added `tauri.linux.conf.json` overlay narrowing `bundle.targets` to `["deb", "rpm"]` on Linux. AppImage is excluded by default (needs `appimagetool` in PATH and FUSE2 at runtime). CI / packagers can re-enable explicitly via `tauri build --bundles deb,rpm,appimage`.
+- **#33** — `release.yml` expanded to a `windows-latest` / `macos-latest` / `ubuntu-latest` matrix. Each runner uses platform-appropriate dep installs (apt for Linux, brew for macOS) and target args. Apple signing/notarization secrets (`APPLE_*`) are wired through but optional — without them, macOS artifacts ship unsigned (Gatekeeper-blocked, see #17).
+
+`cargo check -p actio-core --tests` ✓, `pnpm test` ✓ (151), `pnpm tsc --noEmit` ✓. JSON + YAML configs validated.
+
 ## Recent fixes (loop iteration 6)
 
 - **#7** — `launchAtLogin` now actually wires through to the OS. Added `tauri-plugin-autostart` to `backend/src-tauri/Cargo.toml`, registered it in `main.rs` setup with `MacosLauncher::LaunchAgent`, granted `autostart:default` in the capability manifest, and `frontend/src/utils/autostart.ts` exposes `setAutostart()` / `isAutostartEnabled()` invoking the plugin commands. `PreferencesSection.tsx` toggle handler is now optimistic-with-revert: flips the local pref, calls the plugin, reverts on failure. The plugin handles the per-OS plumbing — Windows registry Run key, macOS LaunchAgent .plist, Linux XDG `.desktop`.
@@ -1049,11 +1057,46 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 
 ---
 
+---
+
+# Seventh-pass additions (loop iteration 7)
+
+While verifying the Windows-overlay fix for #1, I checked the actual icon files in `backend/src-tauri/icons/` and found a real issue.
+
+---
+
+### 42. App icon is a 1×1 placeholder — bundles ship without a real icon
+
+`backend/src-tauri/icons/icon.png` is **1×1 pixels, 70 bytes** (visible from `file icon.png`). `icon.ico` is **92 bytes**. These are placeholder files generated when the project was scaffolded.
+
+Tauri bundles call out to platform-specific icon generators:
+- **Windows:** the `.ico` is consumed for the .exe icon, the taskbar entry, and the installer.
+- **macOS:** a `.icns` is generated from the largest PNG; without 128× / 256× / 512× / 1024× sources, the resulting `.icns` is 1× scale and looks blank in Finder, the Dock (when activation policy isn't Accessory), and Cmd+Tab.
+- **Linux:** `.deb` and `.rpm` packages embed PNG icons at 32× / 64× / 128× / 256×; with a 1× source, every launcher shows a generic placeholder.
+
+The current Windows `.exe` ships with a near-blank icon today; the issue isn't macOS-specific but is masked on Windows because users mostly interact with the standby tray, not the taskbar.
+
+**Severity:** Medium · **Platform:** All
+
+**Fix:** Generate a proper icon set. Tauri ships a CLI helper:
+
+```bash
+cd backend/src-tauri
+# Source: a square PNG at ≥1024×1024
+cargo tauri icon path/to/source-icon.png
+```
+
+This regenerates `icon.png` (multi-res), `icon.ico` (multi-res), `icon.icns` (macOS), and per-size PNGs in `icons/`. Add the resulting `icon.icns` to `bundle.icon` array (deferred in iteration 1 #2 because the file didn't exist). Commit all generated files.
+
+Without a designed icon yet, `cargo tauri icon` against a placeholder graphic still beats the 1×1 — at minimum, ship a recognizable color block until the real icon lands.
+
+---
+
 ## Combined summary table
 
 | # | File | Severity | Platform | Status |
 |---|------|----------|----------|--------|
-| 1 | `tauri.conf.json:41-44` | Critical | macOS + Linux | Open |
+| 1 | `tauri.conf.json:41-44` | Critical | macOS + Linux | **Fixed** (Windows overlay) |
 | 2 | `tauri.conf.json:36-39` | Critical | macOS | Open |
 | 3 | `main.rs:520` | Critical | macOS | **Fixed** |
 | 4 | `app_settings.rs:327-329` | Critical | macOS | **Fixed (backend)** — see #30 |
@@ -1077,7 +1120,7 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 22 | `gen/schemas/` missing macOS | Medium | macOS | Open |
 | 23 | `globals.css:95,113,4084` | Medium | Linux | **Fixed** (redundant rules removed; `.model-list` documented) |
 | 24 | (build doc) | Medium | Linux | **Fixed** (covered in `dev-setup.md` + `tauri.conf.json` deb deps) |
-| 25 | `tauri.conf.json:35` | Medium | Linux | Open |
+| 25 | `tauri.conf.json:35` | Medium | Linux | **Fixed** (Linux overlay) |
 | 26 | `actio-core/Cargo.toml:28,64` | Medium | All | Open |
 | 27 | `Card.tsx:293-296` | Low | All | **Fixed** |
 | 28 | `main.rs:375-391` | Low | Linux | **Fixed** |
@@ -1085,7 +1128,7 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 30 | `useGlobalShortcuts.ts:9-14,72` | Critical | macOS | **Fixed** |
 | 31 | `useKeyboardShortcuts.ts:16-30` | Critical | macOS | **Fixed** |
 | 32 | `tauri.conf.json` (no Windows signing) | Medium | Windows | Open |
-| 33 | `release.yml`, no `ci.yml` | High | All | **Partial** — `ci.yml` added; release expansion pending |
+| 33 | `release.yml`, no `ci.yml` | High | All | **Fixed** — `ci.yml` added (iter 5); `release.yml` matrix expanded (iter 7) |
 | 34 | `audio_capture.rs:124` | Critical | macOS + Linux | **Fixed** |
 | 35 | `lib.rs:99-104` | Medium | All | **Fixed** |
 | 36 | `useKeyboardShortcuts.ts` Space key | Low | All | **Fixed** |
@@ -1094,3 +1137,4 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 39 | `useGlobalShortcuts.ts:180` + `ChatComposer.tsx:76` hardcoded WS | Medium | All | **Fixed** |
 | 40 | `index.html:7-9` Google Fonts loaded externally | Medium | All | **Fixed** |
 | 41 | `globals.css:60` Plus Jakarta Sans unloaded | Low | All | **Fixed** |
+| 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
