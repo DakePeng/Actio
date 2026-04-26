@@ -277,6 +277,15 @@ export function AudioSettings() {
         {t('settings.audio.alwaysListeningHint')}
       </p>
 
+      {useBatchPipeline && (
+        <p
+          className="settings-field__hint"
+          style={{ margin: '0 0 10px', fontStyle: 'italic' }}
+        >
+          {t('settings.audio.legacyOnlyHint')}
+        </p>
+      )}
+
       <label className="settings-row">
         <span className="settings-row__label">
           {t('settings.audio.windowLength')}{' '}

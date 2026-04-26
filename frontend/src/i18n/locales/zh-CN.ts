@@ -246,6 +246,8 @@ export const zhCN: Translations = {
   'settings.audio.useBatchPipeline': '启用新的后台处理管线(实验性)',
   'settings.audio.useBatchPipelineHint':
     '将始终监听的实时识别管线切换为新的片段化管线。实时转写来源不变,但归档转写会在录音约 5 分钟后才出现,并附带全局声音聚类。修改后需重启应用。',
+  'settings.audio.legacyOnlyHint':
+    '下面的窗口长度 / 步长 / 调度周期仅在新管线关闭时生效(见下方"启用新的后台处理管线")。',
   'settings.audio.clipTarget': '目标片段时长',
   'settings.audio.clusterThreshold': '声音聚类阈值',
   'settings.audio.audioRetention': '音频保留',

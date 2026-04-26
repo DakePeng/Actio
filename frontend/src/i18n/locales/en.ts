@@ -248,6 +248,8 @@ export const en = {
   'settings.audio.useBatchPipeline': 'Use new batch pipeline (experimental)',
   'settings.audio.useBatchPipelineHint':
     'Switches the always-on path from the live recognizer to the new clip-based pipeline. Live transcripts come from the same source but archive transcripts now arrive ~5 min after the audio, with global speaker clustering. Restart the app after changing this.',
+  'settings.audio.legacyOnlyHint':
+    'The window-length / step / tick controls below only apply when the batch pipeline is off (see "Use new batch pipeline" further down).',
   'settings.audio.clipTarget': 'Clip target length',
   'settings.audio.clusterThreshold': 'Voice clustering threshold',
   'settings.audio.audioRetention': 'Audio retention',
