@@ -600,6 +600,16 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // launchAtLogin: writes the appropriate per-OS auto-start record
+        // (Windows registry Run key, macOS LaunchAgent .plist, Linux XDG
+        // autostart .desktop file). MacosLauncher::LaunchAgent is the
+        // user-mode option (no admin); Tauri's docs warn that AppleScript
+        // is the only path that survives certain Apple Silicon edge cases,
+        // but LaunchAgent is the safe default for sandboxed apps.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             sync_window_mode,
             save_tray_position,

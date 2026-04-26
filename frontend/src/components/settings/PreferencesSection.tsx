@@ -1,12 +1,26 @@
 import { useStore } from '../../store/use-store';
 import type { Preferences } from '../../types';
 import { useLanguage, useT } from '../../i18n';
+import { setAutostart } from '../../utils/autostart';
 
 export function PreferencesSection() {
   const preferences = useStore((s) => s.preferences);
   const setPreferences = useStore((s) => s.setPreferences);
   const { lang, setLang } = useLanguage();
   const t = useT();
+
+  const handleLaunchAtLoginChange = async (next: boolean) => {
+    // Optimistic: flip the toggle, then ask the OS plugin to register or
+    // remove the auto-start entry. On failure (e.g. permission denied,
+    // sandbox restriction), revert so the UI reflects reality.
+    setPreferences({ launchAtLogin: next });
+    try {
+      await setAutostart(next);
+    } catch (e) {
+      console.error('[Actio] Could not update launch-at-login:', e);
+      setPreferences({ launchAtLogin: !next });
+    }
+  };
 
   const themes: { id: Preferences['theme']; key: 'light' | 'system' | 'dark' }[] = [
     { id: 'light', key: 'light' },
@@ -80,7 +94,9 @@ export function PreferencesSection() {
           <input
             type="checkbox"
             checked={preferences.launchAtLogin}
-            onChange={(e) => setPreferences({ launchAtLogin: e.target.checked })}
+            onChange={(e) => {
+              void handleLaunchAtLoginChange(e.target.checked);
+            }}
           />
           <div className="toggle__track" />
           <div className="toggle__thumb" />

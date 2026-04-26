@@ -2,6 +2,14 @@
 
 Current state: **Windows-only**. The app builds and ships for Windows. macOS and Linux targets require the work listed here before they are viable.
 
+## Recent fixes (loop iteration 6)
+
+- **#7** — `launchAtLogin` now actually wires through to the OS. Added `tauri-plugin-autostart` to `backend/src-tauri/Cargo.toml`, registered it in `main.rs` setup with `MacosLauncher::LaunchAgent`, granted `autostart:default` in the capability manifest, and `frontend/src/utils/autostart.ts` exposes `setAutostart()` / `isAutostartEnabled()` invoking the plugin commands. `PreferencesSection.tsx` toggle handler is now optimistic-with-revert: flips the local pref, calls the plugin, reverts on failure. The plugin handles the per-OS plumbing — Windows registry Run key, macOS LaunchAgent .plist, Linux XDG `.desktop`.
+- **#24** — Confirmed `docs/dev-setup.md` already covers `libayatana-appindicator3-dev` and `libnotify-bin` for Debian/Ubuntu and the Fedora equivalents; the runtime-dep declaration in `tauri.conf.json:bundle.linux.deb.depends` (added in iteration 1) covers production installs.
+- **#40** — Removed the Google Fonts `<link>` tags from `index.html`. Updated the secondary font stacks in `globals.css:1754-1755` (Manrope → `system-ui` chain, Newsreader → `ui-serif, Georgia, …`). No external requests on launch, no CSP friction, no telemetry leak. Manrope/Newsreader can be re-added later by self-hosting woff2 alongside the existing `GrandHotel-Regular.woff2`.
+
+`cargo check -p actio-core --tests` ✓ (actio-desktop full build needs `actio-desktop.exe` not running — DLL lock unrelated to changes; Cargo.lock resolved the new autostart dep cleanly). `pnpm test` ✓ (151), `pnpm tsc --noEmit` ✓.
+
 ## Recent fixes (loop iteration 5)
 
 - **#8** — `paste_text` in `main.rs` now detects `WAYLAND_DISPLAY` / `XDG_SESSION_TYPE=wayland` on Linux and returns a clear actionable error ("text copied to clipboard, press Ctrl+V manually") instead of a cryptic enigo failure. Clipboard write happens unconditionally before the Wayland check so the user can still paste manually.
@@ -1051,7 +1059,7 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 4 | `app_settings.rs:327-329` | Critical | macOS | **Fixed (backend)** — see #30 |
 | 5 | `actio-core/Cargo.toml:28` | Critical | macOS + Linux | Unverified |
 | 6 | `actio-core/Cargo.toml:64` | Critical | macOS + Linux | Unverified |
-| 7 | `PreferencesSection.tsx:82-83` | High | All | Open |
+| 7 | `PreferencesSection.tsx:82-83` | High | All | **Fixed** (tauri-plugin-autostart wired) |
 | 8 | `src-tauri/Cargo.toml:19` | High | Linux | **Fixed** (clear error + clipboard fallback on Wayland) |
 | 9 | `tauri.conf.json:22` | High | Linux | Open |
 | 10 | `docs/dev-setup.md` | Medium | All | **Fixed** |
@@ -1068,7 +1076,7 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 21 | `tauri.conf.json:55-57` | High | macOS + Linux | **Partial** — config; CI work pending |
 | 22 | `gen/schemas/` missing macOS | Medium | macOS | Open |
 | 23 | `globals.css:95,113,4084` | Medium | Linux | **Fixed** (redundant rules removed; `.model-list` documented) |
-| 24 | (build doc) | Medium | Linux | Open |
+| 24 | (build doc) | Medium | Linux | **Fixed** (covered in `dev-setup.md` + `tauri.conf.json` deb deps) |
 | 25 | `tauri.conf.json:35` | Medium | Linux | Open |
 | 26 | `actio-core/Cargo.toml:28,64` | Medium | All | Open |
 | 27 | `Card.tsx:293-296` | Low | All | **Fixed** |
@@ -1084,5 +1092,5 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 37 | `lib.rs:336-342` CORS origins | High | macOS + Linux | **Fixed** |
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 39 | `useGlobalShortcuts.ts:180` + `ChatComposer.tsx:76` hardcoded WS | Medium | All | **Fixed** |
-| 40 | `index.html:7-9` Google Fonts loaded externally | Medium | All | Open |
+| 40 | `index.html:7-9` Google Fonts loaded externally | Medium | All | **Fixed** |
 | 41 | `globals.css:60` Plus Jakarta Sans unloaded | Low | All | **Fixed** |

@@ -1751,8 +1751,12 @@ body.body--native-board .desktop-window__body .board-shell {
   --shadow-card-sm: 0 1px 2px rgba(0,0,0,0.05);
   --shadow-card-md: 0 4px 6px rgba(0,0,0,0.05);
   --shadow-card-lg: 0 10px 15px rgba(0,0,0,0.05);
-  --font-sans: 'Manrope', 'Segoe UI', sans-serif;
-  --font-display: 'Newsreader', Georgia, serif;
+  /* No Google-Fonts dependency — see index.html. Primary entries fall through
+   * to whatever the OS provides as system sans/serif. To re-enable the
+   * Manrope/Newsreader look, drop a self-hosted woff2 in /fonts and add an
+   * @font-face declaration above. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: ui-serif, Georgia, 'Times New Roman', serif;
 }
 
 body {
