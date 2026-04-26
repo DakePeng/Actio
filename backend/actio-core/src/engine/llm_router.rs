@@ -244,12 +244,16 @@ impl LlmRouter {
                 // loop that burns the whole token budget before emitting
                 // the JSON.
                 //
-                // Output size is bounded by the input — a translated string
-                // rarely exceeds ~3× its source length even across scripts,
-                // and the JSON envelope adds a fixed overhead per line. Cap
-                // max_tokens accordingly to bound runaway responses.
+                // Output size is bounded by input length — Chinese→English
+                // is roughly 2–3× tokens out per char in (CJK ≈ 1 token/
+                // char, English ≈ 1.3 tokens/word), plus ~30 tokens of
+                // JSON envelope overhead per line. The frontend caps
+                // batches at 4 lines of typical-utterance length, so 1000
+                // tokens is plenty; the previous 2000-token ceiling was
+                // pure dead weight that just gave a runaway model more
+                // rope.
                 let total_chars: usize = lines.iter().map(|l| l.text.len()).sum();
-                let max_tokens = (200 + total_chars * 4).min(2000);
+                let max_tokens = (120 + total_chars * 3).min(1000);
                 let params = GenerationParams {
                     max_tokens,
                     temperature: 0.1,

@@ -164,6 +164,13 @@ function saveTranslateTarget(lang: string): void {
 // responses would race into the same byLineId.
 let flushInFlight = false;
 
+// Cap on lines per translation request. qwen3.5-2b on CPU is slow
+// (~50 tokens/sec); a 5-line batch ran 20s in production. With a 3s
+// flush tick, smaller batches mean translations trickle in instead of
+// landing all-at-once after a long blank period — better perceived
+// latency. Excess pending lines wait for the next tick.
+const MAX_LINES_PER_BATCH = 4;
+
 const { segments: initialSegments, clipInterval: initialClipInterval } = loadVoiceData();
 
 type StoreSet = (
@@ -501,7 +508,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     if (!translation.enabled || !currentSession) return;
     const pending = Object.entries(translation.byLineId)
       .filter(([, v]) => v.status === 'pending')
-      .map(([id]) => id);
+      .map(([id]) => id)
+      .slice(0, MAX_LINES_PER_BATCH);
     if (pending.length === 0) return;
     const idToText = new Map(currentSession.lines.map((l) => [l.id, l.text] as const));
     const lines = pending
@@ -525,7 +533,17 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       const returnedIds = new Set(out.map((t) => t.id));
       set((state) => {
         const next = { ...state.translation.byLineId };
-        for (const t of out) next[t.id] = { status: 'done', text: t.text };
+        for (const t of out) {
+          // Empty / whitespace-only text from the LLM means the model
+          // failed this id — show the retry UI rather than rendering an
+          // invisible done entry that the user can't tell apart from
+          // "no translation requested".
+          if (t.text && t.text.trim()) {
+            next[t.id] = { status: 'done', text: t.text };
+          } else {
+            next[t.id] = { status: 'error' };
+          }
+        }
         // Anything we asked about that the LLM didn't return stays as
         // 'error' so the UI shows a retry link instead of an indefinite
         // 'translating' placeholder.

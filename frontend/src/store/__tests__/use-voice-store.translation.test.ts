@@ -190,6 +190,64 @@ describe('translation slice', () => {
     expect(useVoiceStore.getState().translation.byLineId).toEqual({});
   });
 
+  it('caps each batch at 4 lines; remainder waits for next tick', async () => {
+    useVoiceStore.setState({
+      currentSession: {
+        id: 'live',
+        startedAt: '',
+        lines: [
+          mkLine('a', 'one'),
+          mkLine('b', 'two'),
+          mkLine('c', 'three'),
+          mkLine('d', 'four'),
+          mkLine('e', 'five'),
+          mkLine('f', 'six'),
+        ],
+        pendingPartial: null,
+        pipelineReady: true,
+      },
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: {
+          a: { status: 'pending' },
+          b: { status: 'pending' },
+          c: { status: 'pending' },
+          d: { status: 'pending' },
+          e: { status: 'pending' },
+          f: { status: 'pending' },
+        },
+      },
+    });
+    const spy = vi.spyOn(translateApi, 'translateLines').mockResolvedValue([]);
+    await useVoiceStore.getState().flushTranslationBatch();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[1]).toHaveLength(4);
+    expect(spy.mock.calls[0]?.[1].map((l) => l.id)).toEqual(['a', 'b', 'c', 'd']);
+    // 'e' and 'f' stay pending for the next tick.
+    const t = useVoiceStore.getState().translation;
+    expect(t.byLineId['e']?.status).toBe('pending');
+    expect(t.byLineId['f']?.status).toBe('pending');
+  });
+
+  it('marks empty/whitespace-only LLM responses as error, not silent done', async () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: { a: { status: 'pending' }, b: { status: 'pending' } },
+      },
+    });
+    vi.spyOn(translateApi, 'translateLines').mockResolvedValue([
+      { id: 'a', text: '' },
+      { id: 'b', text: '   ' },
+    ]);
+    await useVoiceStore.getState().flushTranslationBatch();
+    const t = useVoiceStore.getState().translation;
+    expect(t.byLineId['a']?.status).toBe('error');
+    expect(t.byLineId['b']?.status).toBe('error');
+  });
+
   it('drops the response if targetLang changes mid-flush', async () => {
     // Without the lang-snapshot guard, an in-flight English flush would
     // overwrite zh-CN's freshly-cleared byLineId with the EN translations,
