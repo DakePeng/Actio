@@ -359,3 +359,18 @@ pub struct ClipManifest {
     pub ended_at_ms: i64,
     pub segments: Vec<ClipManifestSegment>,
 }
+
+// ── Tenant Profile ───────────────────────────────────────────────────────────
+
+/// Per-tenant identity used to ground the action-item extraction prompt.
+/// Populated via `PUT /profile`. Stored in the `tenant_profile` table.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TenantProfile {
+    pub tenant_id: Uuid,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub bio: Option<String>,
+}
