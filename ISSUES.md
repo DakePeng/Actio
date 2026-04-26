@@ -318,6 +318,78 @@ Worth doing only after macOS testing reveals an actual mismatch.
 
 ---
 
+### 47. Dead i18n keys in `en.ts` / `zh-CN.ts` — orphaned strings from removed UI
+
+A grep pass over `frontend/src/` for each key declared in `frontend/src/i18n/locales/en.ts` finds **22 keys with zero usages** in code (excluding the locale files themselves and excluding dynamic patterns like `t(\`model.desc.${id}\`)`, `t(\`live.translate.lang.${lang}\`)`, `t(\`settings.preferences.theme.${key}\`)`). They've been carried in both `en.ts` and `zh-CN.ts` since at least the always-on listening refactor — likely orphans from feature renames (`tray.state.*` → `tray.aria.*`, `priority.*` → `board.priority.*` / `card.priority.*`).
+
+Confirmed dead (en + zh-CN parity preserved — both files have the same dead set):
+
+```
+feedback.modelSwitched
+live.aria.toggleListening
+live.translate.disabledTooltip
+live.translate.pausedToast
+priority.high
+priority.low
+priority.medium
+recording.aria.startTranscribing
+recording.aria.stopTranscribing
+recording.loadingModel
+recording.modelLoadFailed
+recording.tapToTranscribe
+tray.state.error
+tray.state.listening
+tray.state.processing
+tray.state.standby
+tray.state.success
+tray.state.transcribing
+tray.status.freshCapturesMany
+tray.status.freshCapturesOne
+tray.status.quiet
+```
+
+**Severity:** Low · **Platform:** All · **Type:** refactor / cleanup · **Scope:** small
+
+**Acceptance:**
+1. Remove all 22 keys from both `frontend/src/i18n/locales/en.ts` and `frontend/src/i18n/locales/zh-CN.ts` in a single commit.
+2. `pnpm test` (parity test stays green — both files lose the same set, parity holds).
+3. `pnpm tsc --noEmit` (no `TKey` widening introduces stranded type references).
+4. `pnpm build` (catches any prod-only mismatch).
+
+Verification command for "is it really dead?" before removing each key:
+
+```bash
+grep -rE "['\"\`]<key>['\"\`]" frontend/src --include='*.ts' --include='*.tsx' | grep -v 'i18n/locales'
+```
+
+Empty output → safe to drop.
+
+---
+
+### 48. Stale `TODO(Phase 3-4)` comment in `api/ws.rs:93` misrepresents pipeline state
+
+`backend/actio-core/src/api/ws.rs:93` carries the comment
+
+```rust
+// TODO(Phase 3-4): Wire cpal audio capture → VAD → ASR pipeline here.
+// For now, accept messages but don't process audio — the inference pipeline
+// doesn't exist yet. Transcript events will be pushed once ASR is integrated.
+```
+
+…immediately above code that already wires the pipeline through `state.aggregator.subscribe()`, `state.aggregator.subscribe_speaker()`, and `state.audio_levels.subscribe()` (lines 97–99). The pipeline integration the TODO predicts has been done for several iterations — the comment is misleading code archaeology and contradicts the code below it.
+
+The "Phase 3-4" label refers to a long-superseded plan; the current architecture (CaptureDaemon + ClipWriter + BatchProcessor / LiveStreamingService) is documented in `CLAUDE.md` and `engine/AGENTS.md`. A new contributor reading `ws.rs` will trust the comment over the code.
+
+**Severity:** Low · **Platform:** All · **Type:** docs · **Scope:** small (1-line/3-line comment delete)
+
+**Acceptance:**
+- Delete the stale TODO block at `ws.rs:93–95`. The audio handling at line 103 already has a clarifying comment ("Audio chunks received but inference pipeline not yet connected") that itself is outdated — replace it with one line noting the WS path is broadcast-out only; capture comes from `CaptureDaemon`.
+- `cargo check -p actio-core` clean.
+
+No behaviour change; this is a comment-only fix.
+
+---
+
 ## Summary table (open items only)
 
 | # | File | Severity | Platform | Status |
@@ -336,3 +408,5 @@ Worth doing only after macOS testing reveals an actual mismatch.
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 47 | 22 dead i18n keys in `en.ts` + `zh-CN.ts` | Low | All | Open |
+| 48 | Stale `TODO(Phase 3-4)` in `api/ws.rs:93` | Low | All | Open |
