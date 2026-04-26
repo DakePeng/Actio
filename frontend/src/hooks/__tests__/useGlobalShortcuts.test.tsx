@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Must be set before importing useGlobalShortcuts — its module-level
@@ -40,11 +40,12 @@ describe('useGlobalShortcuts — toggle_listening', () => {
     const setListeningMock = vi.fn().mockResolvedValue(undefined);
     useStore.setState({ setListening: setListeningMock });
     renderHook(() => useGlobalShortcuts());
-    // wait one microtask for listen() promise to resolve
-    await Promise.resolve();
+    // The listen() registration is now behind a dynamic import of
+    // @tauri-apps/api/event (ISSUES.md #51), so wait until the mock has
+    // captured the handler before firing.
+    await waitFor(() => expect(listeners['shortcut-triggered']).toBeDefined());
     listeners['shortcut-triggered']?.({ payload: 'toggle_listening' });
-    await Promise.resolve();
-    expect(setListeningMock).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(setListeningMock).toHaveBeenCalledWith(false));
   });
 
   it('toggles from false to true when fired while muted', async () => {

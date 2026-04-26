@@ -398,11 +398,11 @@ No behaviour change; this is a comment-only fix.
 
 ### 51. `@tauri-apps/api` mixed static + dynamic imports defeat code-splitting
 
-**Status:** Partial 2026-04-26 — three of four static-importers (`autostart.ts`, `KeyboardSettings.tsx`, `StandbyTray.tsx`) converted to dynamic imports. The `window.js` warning is gone, a new ~13.8 kB `window-*.js` chunk now code-splits, and the main bundle dropped from 555.36 → 542.31 kB (−13 kB). 177/177 frontend tests pass.
+**Status:** Resolved 2026-04-26 — all four static-importers converted. Both build warnings gone; three new chunks emerged (`core-*.js` 2.44 kB, `event-*.js` 1.36 kB, `window-*.js` 13.91 kB) and the main bundle dropped from **555.36 kB → 538.88 kB** (−16.5 kB total across two ticks). 177/177 frontend tests pass.
+
+**Vitest mock fix:** the second dynamic import of `@tauri-apps/api/event` was bypassing the `vi.mock` and hitting the real package (cause unclear, but reproducible). Workaround: cache each submodule's `import()` Promise at module scope inside the source file (`loadCore`, `loadEvent` helpers). Both useEffects await the same cached Promise, so vitest only resolves the module once and the mock applies consistently. Documented inline in `useGlobalShortcuts.ts`.
 
 **StandbyTray** required pre-loading `getCurrentWindow()` into a `useRef` at mount so `handleDragStart` can still call `startDragging()` synchronously during `mousedown` (Tauri's native OS drag won't fire if the import races against the event).
-
-**Remaining offender:** `useGlobalShortcuts.ts` still static-imports `invoke` and `listen`. Conversion was attempted this tick but reverted: the test file (`useGlobalShortcuts.test.tsx`) breaks under dynamic imports — `vi.mock('@tauri-apps/api/event', ...)` applies to the **first** dynamic import (the `shortcut-triggered` listener) but the **second** dynamic import (the `dictation-status` listener) somehow resolves to the real package, throwing `transformCallback is not a function` unhandled rejections. Tests pass on assertions but pollute output with 4 unhandled rejections per run. Root cause unclear after one debugging pass; needs a focused investigation tick.
 
 `pnpm build` emits two warnings — `core.js` and `window.js` are each dynamically imported in some files but statically imported in others, so Rollup can't move them into a separate chunk. Concretely:
 
@@ -505,4 +505,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
-| 51 | `@tauri-apps/api` mixed imports defeat code-splitting | Low | All | Partial — 3 of 4 files done; `useGlobalShortcuts` blocked on vitest-mock investigation |
