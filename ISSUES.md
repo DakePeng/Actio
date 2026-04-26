@@ -396,6 +396,38 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 55. Vite bundle warning persists — no `manualChunks` for vendor deps
+
+`pnpm build` continues to log:
+
+```
+(!) Some chunks are larger than 500 kB after minification.
+    Consider:
+    - Use build.rollupOptions.output.manualChunks to improve chunking
+```
+
+After the #51 work that split `@tauri-apps/api/{core,event,window}` into lazy chunks (-16.5 kB), the main chunk still sits at **542.11 kB** because the heavy SPA-time-zero deps land in it: `react` + `react-dom` (≈140 kB), `framer-motion` (≈100 kB), `zustand`, the additional `@tauri-apps/plugin-*` packages used by the keyboard/global-shortcut/autostart paths, plus the app code.
+
+`frontend/vite.config.ts` has no `build.rollupOptions.output.manualChunks` config — Rollup's automatic chunking puts everything reachable from the entry point into the main chunk. A small explicit split would give us:
+
+- `vendor-react` chunk: `react`, `react-dom`, `react/jsx-runtime` (~140 kB)
+- `vendor-motion` chunk: `framer-motion` (~100 kB)
+- everything else stays in the entry chunk
+
+That alone drops the main below the 500 kB warning threshold and lets the browser cache the vendor chunks across deploys (the entry chunk's hash flips on every app code change; vendor hashes change only when deps bump). Net cold-start TTI is roughly the same (the vendor chunks still have to load), but warm starts and HTTP/2 multiplexing both win.
+
+**Severity:** Low · **Platform:** All · **Type:** perf · **Scope:** small (one config block in `vite.config.ts`)
+
+**Acceptance:**
+1. `vite.config.ts` gains `build: { rollupOptions: { output: { manualChunks: { ... } } } }` with at minimum a `react` and `framer-motion` entry.
+2. `pnpm build` — main chunk drops below 500 kB and the `(!) Some chunks are larger than 500 kB` warning disappears.
+3. Three new `vendor-*.js` chunks emerge in `dist/assets/`; their gzipped sizes are reported in the commit message.
+4. `pnpm test` (185/185) and `pnpm tsc --noEmit` stay green — no source code touched.
+
+Verify by capturing before/after `pnpm build` output in the commit message. The change is config-only; the only risk is if `manualChunks` keys collide with already-emitted chunks (the existing `core-*.js`, `event-*.js`, `window-*.js` from #51 must keep their split — `manualChunks` runs after the dynamic-import logic, so this is safe but worth eyeballing).
+
+---
+
 ### 54. Needs-Review dismiss has no undo affordance — accidental clicks lose information
 
 **Status:** Resolved 2026-04-26 — extended the existing feedback-toast surface with an optional `action: { labelKey, onAction }` field. Actionable toasts get a 5 s lifetime (vs. 2.2 s for plain ones). `NeedsReviewView` now passes `{ labelKey: 'feedback.undo', onAction: () => restoreReminder(id) }` on Dismiss. New i18n key `feedback.undo` (en + zh-CN), CSS for the action button, and 2 vitest cases pin the flow (Dismiss → Undo restores; Confirm shows no Undo). 185/185 tests pass.
@@ -602,3 +634,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 55 | Vite bundle warning — no `manualChunks` for vendor deps | Low | All | Open |
