@@ -20,6 +20,43 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+/** Five-bar audio-level visualisation. We don't have backend RMS on
+ *  the WebSocket today, so the wave reflects PROXY activity: a fresh
+ *  transcript or partial flips it to high amplitude for ~600ms; in
+ *  between, a gentle baseline animation when listening, flat when
+ *  muted. Replace with real RMS once the backend broadcasts it. */
+function VoiceWave() {
+  const isListening = useStore((s) => s.ui.listeningEnabled);
+  const partialText = useVoiceStore((s) => s.currentSession?.pendingPartial?.text ?? '');
+  const linesLen = useVoiceStore((s) => s.currentSession?.lines.length ?? 0);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!isListening) return;
+    setActive(true);
+    const id = window.setTimeout(() => setActive(false), 600);
+    return () => window.clearTimeout(id);
+  }, [partialText, linesLen, isListening]);
+
+  const stateClass = !isListening
+    ? 'voice-wave--idle'
+    : active
+      ? 'voice-wave--active'
+      : 'voice-wave--quiet';
+
+  return (
+    <div className={`voice-wave ${stateClass}`} aria-hidden="true">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className="voice-wave__bar"
+          style={{ animationDelay: `${i * 80}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function LiveTab() {
   const listeningEnabled = useStore((s) => s.ui.listeningEnabled);
   const listeningStartedAt = useStore((s) => s.ui.listeningStartedAt);
@@ -49,8 +86,38 @@ export function LiveTab() {
 
   return (
     <div className="live-tab">
-      <div className="live-tab__header">
-        <span className={`live-tab__status${isOn ? ' is-on' : ''}`}>{headerLabel}</span>
+      <header className="live-tab__topbar">
+        <div className="live-tab__topbar-left">
+          <span className={`live-tab__status${isOn ? ' is-on' : ''}`}>
+            {headerLabel}
+          </span>
+          {isOn && listeningStartedAt && (
+            <p className="live-tab__since" aria-live="polite">
+              {t('live.listeningSince', {
+                time: formatTime(listeningStartedAt),
+                duration: formatDuration(now - listeningStartedAt),
+              })}
+            </p>
+          )}
+        </div>
+      </header>
+
+      <main className="live-tab__main" ref={transcriptRef} aria-live="polite">
+        {isOn && currentSession ? (
+          <LiveTranscript
+            lines={currentSession.lines}
+            pendingPartial={currentSession.pendingPartial}
+          />
+        ) : (
+          <div className="live-tab__empty">
+            <p className="live-tab__empty-body">
+              {!isOn ? t('live.pausedHint') : t('recording.startingUp')}
+            </p>
+          </div>
+        )}
+      </main>
+
+      <footer className="live-tab__footer">
         <div className="live-tab__translate-cluster">
           <button
             type="button"
@@ -74,30 +141,9 @@ export function LiveTab() {
             ))}
           </select>
         </div>
-        <ListeningToggle size={32} />
-      </div>
-
-      {isOn && listeningStartedAt && (
-        <p className="live-tab__since" aria-live="polite">
-          {t('live.listeningSince', {
-            time: formatTime(listeningStartedAt),
-            duration: formatDuration(now - listeningStartedAt),
-          })}
-        </p>
-      )}
-
-      {!isOn && (
-        <p className="live-tab__paused-hint">{t('live.pausedHint')}</p>
-      )}
-
-      {isOn && currentSession && (
-        <div className="live-tab__transcript" ref={transcriptRef} aria-live="polite">
-          <LiveTranscript
-            lines={currentSession.lines}
-            pendingPartial={currentSession.pendingPartial}
-          />
-        </div>
-      )}
+        <VoiceWave />
+        <ListeningToggle size={48} iconSize={22} />
+      </footer>
     </div>
   );
 }

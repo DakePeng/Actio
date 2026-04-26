@@ -3503,25 +3503,42 @@ body.body--native-board .desktop-window {
 
 /* ─── Live tab ───────────────────────────────────────────────────── */
 
+/* ─── Live tab — full-page layout ──────────────────────────────────
+ * Three rows: a slim topbar (status + duration), a transcript that
+ * fills the remaining viewport, and a footer that anchors the
+ * controls (translation + voice wave + mic toggle). The grid parent
+ * (.desktop-window__body) supplies the height; min-height: 0 on the
+ * column children is what lets the transcript actually scroll
+ * instead of pushing the footer off-screen. */
 .live-tab {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  height: 100%;
+  min-height: 0;
 }
 
-.live-tab__header {
+.live-tab__topbar {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  font-weight: 600;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.live-tab__topbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
 }
 
 .live-tab__status {
   color: var(--color-text-secondary);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .live-tab__status.is-on {
@@ -3532,28 +3549,97 @@ body.body--native-board .desktop-window {
   font-size: 13px;
   color: var(--color-text-secondary);
   margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.live-tab__paused-hint {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  border-radius: 8px;
-  padding: 12px;
-  margin: 0;
-}
-
-.live-tab__transcript {
-  background: var(--color-surface);
-  border-radius: 8px;
-  padding: 16px;
-  max-height: min(60vh, 560px);
+.live-tab__main {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  padding: 16px 24px;
+}
+
+.live-tab__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 32px;
+  color: var(--color-text-tertiary);
+}
+
+.live-tab__empty-body {
+  font-size: 0.95rem;
+  margin: 0;
+  max-width: 360px;
+  line-height: 1.55;
+}
+
+.live-tab__footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-surface);
 }
 
 .live-tab__transcript-placeholder {
   color: var(--color-text-tertiary);
   font-style: italic;
+}
+
+/* ─── Voice wave — animated audio-level visualisation ─────────────
+ * Five bars, staggered animation delays. Three states:
+ *   --idle     : muted; flat gray bars, no animation
+ *   --quiet    : listening, no recent activity; gentle low wave
+ *   --active   : recent transcript / partial; high-amplitude pulse */
+.voice-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 32px;
+  margin-left: auto;
+}
+
+.voice-wave__bar {
+  width: 4px;
+  background: var(--color-accent);
+  border-radius: 2px;
+  height: 6px;
+  transform-origin: center;
+}
+
+.voice-wave--idle .voice-wave__bar {
+  background: var(--color-text-tertiary);
+  opacity: 0.4;
+  height: 4px;
+  animation: none;
+}
+
+.voice-wave--quiet .voice-wave__bar {
+  animation: voice-wave-quiet 1.2s ease-in-out infinite alternate;
+}
+
+.voice-wave--active .voice-wave__bar {
+  animation: voice-wave-active 0.4s ease-in-out infinite alternate;
+}
+
+@keyframes voice-wave-quiet {
+  0% { height: 4px; }
+  100% { height: 12px; }
+}
+
+@keyframes voice-wave-active {
+  0% { height: 6px; }
+  100% { height: 26px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-wave__bar { animation: none !important; height: 8px; }
 }
 
 /* ─── People tab ─────────────────────────────────────────────────── */
@@ -5319,13 +5405,13 @@ button.voiceprint-recorder__chip.is-done.is-playing {
   outline-offset: 2px;
 }
 
-/* Live tab — translation cluster (sits in the header next to the listening toggle). */
+/* Live tab — translation cluster, sits left in the footer. The voice
+ * wave fills the middle (margin-left: auto on .voice-wave) and the
+ * mic toggle anchors the right edge. */
 .live-tab__translate-cluster {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
-  margin-right: 12px;
 }
 
 .live-tab__translate-toggle {
