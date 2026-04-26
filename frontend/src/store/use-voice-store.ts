@@ -72,7 +72,14 @@ interface VoiceState {
   translation: {
     enabled: boolean;
     targetLang: string;
-    byLineId: Record<string, { status: 'pending' | 'done' | 'error'; text?: string }>;
+    /** `attempts` counts how many times the LLM has been asked about
+     *  this line. Bumped on each batch failure / dropped id; once it
+     *  exceeds MAX_AUTO_RETRIES the entry stays 'error' until the user
+     *  clicks retry (which resets attempts to 0). */
+    byLineId: Record<
+      string,
+      { status: 'pending' | 'done' | 'error'; text?: string; attempts?: number }
+    >;
   };
 
   setTranslationEnabled: (enabled: boolean) => Promise<void>;
@@ -170,6 +177,29 @@ let flushInFlight = false;
 // landing all-at-once after a long blank period — better perceived
 // latency. Excess pending lines wait for the next tick.
 const MAX_LINES_PER_BATCH = 4;
+
+// How many times we silently re-queue a line after the LLM drops it
+// (whole batch parse error, network blip, id missing from response)
+// before showing the user-facing 'error' retry button. Local LLMs go
+// transient on degenerate responses (repetition loops, code-fence
+// hallucinations), so a couple of free retries clears most cases
+// without user intervention. The user's manual retry resets the
+// counter.
+const MAX_AUTO_RETRIES = 2;
+
+/** Increment the attempt counter on a previously-pending entry. While
+ *  attempts < MAX_AUTO_RETRIES the entry stays 'pending' so the next
+ *  flush tick re-sends it; once exceeded, it becomes 'error' and waits
+ *  for a manual retry. */
+function bumpRetry(
+  entry: { status: 'pending' | 'done' | 'error'; text?: string; attempts?: number } | undefined,
+): { status: 'pending' | 'error'; attempts: number } {
+  const attempts = (entry?.attempts ?? 0) + 1;
+  if (attempts > MAX_AUTO_RETRIES) {
+    return { status: 'error', attempts };
+  }
+  return { status: 'pending', attempts };
+}
 
 const { segments: initialSegments, clipInterval: initialClipInterval } = loadVoiceData();
 
@@ -535,22 +565,25 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         const next = { ...state.translation.byLineId };
         for (const t of out) {
           // Empty / whitespace-only text from the LLM means the model
-          // failed this id — show the retry UI rather than rendering an
-          // invisible done entry that the user can't tell apart from
-          // "no translation requested".
+          // intentionally returned nothing — not a transient failure.
+          // Skip auto-retry; surface the retry UI immediately so the
+          // user can intervene. (Empty translations almost always
+          // indicate the model gave up, not a parse blip.)
           if (t.text && t.text.trim()) {
             next[t.id] = { status: 'done', text: t.text };
           } else {
-            next[t.id] = { status: 'error' };
+            next[t.id] = { status: 'error', attempts: next[t.id]?.attempts };
           }
         }
-        // Anything we asked about that the LLM didn't return stays as
-        // 'error' so the UI shows a retry link instead of an indefinite
-        // 'translating' placeholder.
+        // Ids we asked about that the LLM didn't return are usually a
+        // model-side miss (truncated response, code-fence wrap, dropped
+        // entries) — the kind of transient failure that often clears
+        // on a fresh batch. Auto-retry up to MAX_AUTO_RETRIES, then
+        // give up.
         for (const id of lines.map((l) => l.id)) {
-          if (!returnedIds.has(id) && next[id]?.status === 'pending') {
-            next[id] = { status: 'error' };
-          }
+          if (returnedIds.has(id)) continue;
+          if (next[id]?.status !== 'pending') continue;
+          next[id] = bumpRetry(next[id]);
         }
         return { translation: { ...state.translation, byLineId: next } };
       });
@@ -569,7 +602,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       set((state) => {
         const next = { ...state.translation.byLineId };
         for (const id of askedIds) {
-          if (next[id]?.status === 'pending') next[id] = { status: 'error' };
+          if (next[id]?.status === 'pending') next[id] = bumpRetry(next[id]);
         }
         return { translation: { ...state.translation, byLineId: next } };
       });
@@ -582,7 +615,12 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set((state) => ({
       translation: {
         ...state.translation,
-        byLineId: { ...state.translation.byLineId, [lineId]: { status: 'pending' } },
+        byLineId: {
+          ...state.translation.byLineId,
+          // Reset attempts: the user is taking over from auto-retry,
+          // so they get a fresh budget if it fails again.
+          [lineId]: { status: 'pending', attempts: 0 },
+        },
       },
     }));
     void get().flushTranslationBatch();

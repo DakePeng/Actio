@@ -109,7 +109,7 @@ describe('translation slice', () => {
     expect(t.byLineId['c']).toEqual({ status: 'done', text: 'cached' });
   });
 
-  it('flushTranslationBatch marks pending as error on rejection', async () => {
+  it('auto-retries after a rejected batch; only marks error after exceeding the retry budget', async () => {
     useVoiceStore.setState({
       translation: {
         enabled: true,
@@ -118,8 +118,47 @@ describe('translation slice', () => {
       },
     });
     vi.spyOn(translateApi, 'translateLines').mockRejectedValue(new Error('boom'));
+
+    // 1st attempt: bumps to pending+attempts=1.
     await useVoiceStore.getState().flushTranslationBatch();
-    expect(useVoiceStore.getState().translation.byLineId['a']?.status).toBe('error');
+    expect(useVoiceStore.getState().translation.byLineId['a']).toEqual({
+      status: 'pending',
+      attempts: 1,
+    });
+
+    // 2nd attempt: pending+attempts=2 (still inside budget).
+    await useVoiceStore.getState().flushTranslationBatch();
+    expect(useVoiceStore.getState().translation.byLineId['a']).toEqual({
+      status: 'pending',
+      attempts: 2,
+    });
+
+    // 3rd attempt: exceeds MAX_AUTO_RETRIES, becomes user-facing error.
+    await useVoiceStore.getState().flushTranslationBatch();
+    expect(useVoiceStore.getState().translation.byLineId['a']).toEqual({
+      status: 'error',
+      attempts: 3,
+    });
+  });
+
+  it('manual retry resets the attempts counter', async () => {
+    useVoiceStore.setState({
+      translation: {
+        enabled: true,
+        targetLang: 'en',
+        byLineId: { a: { status: 'error', attempts: 3 } },
+      },
+    });
+    vi.spyOn(translateApi, 'translateLines').mockRejectedValue(new Error('boom'));
+    useVoiceStore.getState().retryTranslationLine('a');
+    // retryTranslationLine kicks off a flush; await microtask for it.
+    await new Promise((r) => setTimeout(r, 0));
+    // After the manual retry's flush failed once, attempts should be 1
+    // (reset from 3, then bumped) — not 4.
+    expect(useVoiceStore.getState().translation.byLineId['a']).toEqual({
+      status: 'pending',
+      attempts: 1,
+    });
   });
 
   it('LlmDisabledError flips enabled off and clears pending', async () => {
@@ -152,7 +191,7 @@ describe('translation slice', () => {
     expect(t.targetLang).toBe('ja');
   });
 
-  it('marks ids missing from the LLM response as error instead of leaving them pending', async () => {
+  it('auto-retries ids missing from the LLM response; marks error only after the budget is spent', async () => {
     useVoiceStore.setState({
       translation: {
         enabled: true,
@@ -164,7 +203,8 @@ describe('translation slice', () => {
     await useVoiceStore.getState().flushTranslationBatch();
     const t = useVoiceStore.getState().translation;
     expect(t.byLineId['a']).toEqual({ status: 'done', text: 'A!' });
-    expect(t.byLineId['b']?.status).toBe('error');
+    // 'b' was dropped by the LLM — re-pended for next tick (attempt 1).
+    expect(t.byLineId['b']).toEqual({ status: 'pending', attempts: 1 });
   });
 
   it('drops the response if the user mutes mid-flush', async () => {
