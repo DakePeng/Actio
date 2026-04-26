@@ -345,13 +345,14 @@ impl RemoteLlmClient {
         attributed_transcript: &str,
         label_names: &[String],
         window_local_date: &str,
+        profile: Option<&crate::domain::types::TenantProfile>,
     ) -> Result<Vec<LlmActionItem>, RemoteLlmError> {
         info!(
             transcript_len = attributed_transcript.len(),
             "Calling remote LLM for windowed action extraction"
         );
 
-        let messages = build_window_messages(attributed_transcript, label_names, window_local_date);
+        let messages = build_window_messages(attributed_transcript, label_names, window_local_date, profile);
         let openai_messages: Vec<serde_json::Value> = messages
             .iter()
             .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
