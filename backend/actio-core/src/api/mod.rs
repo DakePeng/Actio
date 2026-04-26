@@ -2,6 +2,7 @@ pub mod candidate_speaker;
 pub mod clip;
 pub mod label;
 pub mod llm;
+pub mod profile;
 pub mod reminder;
 pub mod segment;
 pub mod session;
@@ -54,6 +55,8 @@ use std::sync::atomic::Ordering;
         candidate_speaker::list_candidates,
         candidate_speaker::promote,
         candidate_speaker::dismiss,
+        profile::get_profile,
+        profile::put_profile,
     ),
     components(schemas(
         CreateSessionRequest,
@@ -87,6 +90,8 @@ use std::sync::atomic::Ordering;
         PatchLabelRequest,
         PatchReminderRequest,
         AppApiError,
+        profile::ProfileResponse,
+        profile::UpdateProfileRequest,
     ))
 )]
 struct ApiDoc;
@@ -115,6 +120,8 @@ pub fn router(state: AppState) -> Router {
         .route("/labels", post(label::create_label))
         .route("/labels/:id", patch(label::patch_label))
         .route("/labels/:id", delete(label::delete_label))
+        // profile
+        .route("/profile", get(profile::get_profile).put(profile::put_profile))
         // speakers
         .route("/speakers", post(session::create_speaker))
         .route("/speakers", get(session::list_speakers))
