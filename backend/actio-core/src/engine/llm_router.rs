@@ -110,6 +110,7 @@ impl LlmRouter {
                     temperature: 0.1,
                     json_mode: true,
                     thinking_budget: Some((transcript.len() / 10).clamp(100, 500)),
+                    suppress_thinking: false,
                 };
 
                 let mut last_raw = String::new();
@@ -186,6 +187,7 @@ impl LlmRouter {
                     temperature: 0.1,
                     json_mode: true,
                     thinking_budget: Some((attributed_transcript.len() / 10).clamp(100, 500)),
+                    suppress_thinking: false,
                 };
                 let messages =
                     build_window_messages(attributed_transcript, label_names, window_local_date);
@@ -253,6 +255,7 @@ impl LlmRouter {
                     temperature: 0.1,
                     json_mode: true,
                     thinking_budget: None,
+                    suppress_thinking: true,
                 };
                 let messages =
                     crate::engine::llm_translate::build_translate_messages(target_lang, &lines);

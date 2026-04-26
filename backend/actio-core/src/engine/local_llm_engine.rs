@@ -36,6 +36,15 @@ pub struct GenerationParams {
     /// Qwen3-style chain-of-thought. The model's thinking tokens count
     /// against max_tokens, so we add this budget on top automatically.
     pub thinking_budget: Option<usize>,
+    /// Force-close the thinking block immediately so the model produces
+    /// the final answer without any reasoning tokens. Needed for models
+    /// (e.g. qwen3.5) whose chat template auto-opens `<think>` on every
+    /// assistant turn — leaving thinking_budget = None is not enough,
+    /// because the template's `<think>` is already there. Setting this
+    /// flag pushes `</think>\n\n` immediately after the assistant prompt
+    /// so the model emits the JSON directly. Mutually exclusive with
+    /// thinking_budget = Some(_).
+    pub suppress_thinking: bool,
 }
 
 impl Default for GenerationParams {
@@ -45,6 +54,7 @@ impl Default for GenerationParams {
             temperature: 0.1,
             json_mode: false,
             thinking_budget: None,
+            suppress_thinking: false,
         }
     }
 }
@@ -261,6 +271,13 @@ fn run_inference(
     // block and closes it before emitting the final answer.
     if params.thinking_budget.is_some() {
         prompt.push_str("<think>\n");
+    } else if params.suppress_thinking {
+        // Qwen3.5's chat template auto-opens `<think>` on every assistant
+        // turn. Closing it here forces the model out of thinking mode and
+        // straight into the final answer — without this, models emit
+        // unbounded reasoning that occasionally hits max_tokens before
+        // any usable output appears.
+        prompt.push_str("</think>\n\n");
     }
 
     // 3. Tokenize
