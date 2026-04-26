@@ -514,16 +514,21 @@ fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
     // Small delay to let the clipboard settle
     thread::sleep(Duration::from_millis(50));
 
-    // Simulate Ctrl+V to paste into the focused input
+    // Simulate the platform paste shortcut: Cmd+V on macOS, Ctrl+V elsewhere.
+    #[cfg(target_os = "macos")]
+    let modifier = Key::Meta;
+    #[cfg(not(target_os = "macos"))]
+    let modifier = Key::Control;
+
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
     enigo
-        .key(Key::Control, Direction::Press)
+        .key(modifier, Direction::Press)
         .map_err(|e| e.to_string())?;
     enigo
         .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| e.to_string())?;
     enigo
-        .key(Key::Control, Direction::Release)
+        .key(modifier, Direction::Release)
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -585,6 +590,15 @@ fn main() {
         ])
         .setup(|app| {
             app.manage(Arc::new(DictationService::new()));
+
+            // macOS: hide the Dock icon — Actio is a tray-only app.
+            // Without this, the .app shows up in the Dock and Cmd+Tab list
+            // even though all UI lives in the standby tray window.
+            #[cfg(target_os = "macos")]
+            {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             // Resolve app data directory for database and models
             let data_dir = app
                 .path()

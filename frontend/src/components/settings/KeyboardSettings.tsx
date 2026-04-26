@@ -1,24 +1,27 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useT, type TKey } from '../../i18n';
+import { primaryMod } from '../../utils/platform';
 
 const API_BASE = 'http://127.0.0.1:3000';
 
 type ShortcutMap = Record<string, string>;
 
+// Fallback values shown briefly while GET /settings is in flight. The backend
+// is the source of truth — these only matter for the first paint.
 const DEFAULT_SHORTCUTS: ShortcutMap = {
   // Global
-  toggle_board_tray: 'Ctrl+\\',
-  start_dictation: 'Ctrl+Shift+Space',
-  new_todo: 'Ctrl+N',
-  toggle_listening: 'Ctrl+Shift+M',
+  toggle_board_tray: `${primaryMod}+\\`,
+  start_dictation: `${primaryMod}+Shift+Space`,
+  new_todo: `${primaryMod}+N`,
+  toggle_listening: `${primaryMod}+Shift+M`,
   // Tab navigation
-  tab_board: 'Ctrl+1',
-  tab_people: 'Ctrl+2',
-  tab_live: 'Ctrl+3',
-  tab_needs_review: 'Ctrl+6',
-  tab_archive: 'Ctrl+4',
-  tab_settings: 'Ctrl+5',
+  tab_board: `${primaryMod}+1`,
+  tab_people: `${primaryMod}+2`,
+  tab_live: `${primaryMod}+3`,
+  tab_needs_review: `${primaryMod}+6`,
+  tab_archive: `${primaryMod}+4`,
+  tab_settings: `${primaryMod}+5`,
   // Card navigation
   card_up: 'ArrowUp',
   card_down: 'ArrowDown',
@@ -132,7 +135,11 @@ export function KeyboardSettings() {
     const key = e.key;
     const isModifierOnly = ['Control', 'Shift', 'Alt', 'Meta'].includes(key);
     if (!isModifierOnly) {
-      parts.push(key.length === 1 ? key.toUpperCase() : key);
+      // Spacebar reports `key === " "`, which renders as an invisible token
+      // in the saved combo. Substitute "Space" so the persisted string and
+      // the in-process matcher agree.
+      const named = key === ' ' ? 'Space' : key;
+      parts.push(named.length === 1 ? named.toUpperCase() : named);
     }
 
     if (parts.length > 0) {

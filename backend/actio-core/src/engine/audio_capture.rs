@@ -1,4 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::SampleFormat;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -70,6 +71,37 @@ fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
         .collect()
 }
 
+/// Common pipeline for an f32-converted buffer: downmix → resample → forward.
+/// Pulled out of the capture closure so the per-format dispatch stays minimal.
+fn process_chunk(
+    data: &[f32],
+    device_channels: usize,
+    device_rate: u32,
+    cb_tx: &Sender<Vec<f32>>,
+    metrics: &AudioCaptureMetrics,
+) {
+    let mono: Vec<f32> = if device_channels > 1 {
+        data.chunks(device_channels)
+            .map(|frame| frame.iter().sum::<f32>() / device_channels as f32)
+            .collect()
+    } else {
+        data.to_vec()
+    };
+
+    let resampled = if device_rate != 16000 {
+        resample_linear(&mono, device_rate, 16000)
+    } else {
+        mono
+    };
+
+    metrics
+        .frames_captured
+        .fetch_add(resampled.len() as u64, Ordering::Relaxed);
+    if cb_tx.try_send(resampled).is_err() {
+        metrics.frames_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 /// Start capturing audio from the specified (or default) input device.
 /// Returns a handle (drop to stop) and a tokio mpsc::Receiver<Vec<f32>> of 16kHz mono f32 audio chunks.
 ///
@@ -105,6 +137,7 @@ pub fn start_capture(
         "Device native config"
     );
 
+    let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
 
     // Crossbeam channel: sync, bounded. Sized to hold several minutes of
@@ -117,45 +150,73 @@ pub fn start_capture(
         frames_captured: AtomicU64::new(0),
         frames_dropped: AtomicU64::new(0),
     });
-    let metrics_cb = metrics.clone();
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let stop_cb = stop_flag.clone();
 
-    let stream = device.build_input_stream(
-        &config,
-        move |data: &[f32], _info: &cpal::InputCallbackInfo| {
-            if stop_cb.load(Ordering::Relaxed) {
-                return;
-            }
-
-            // 1. Downmix to mono
-            let mono: Vec<f32> = if device_channels > 1 {
-                data.chunks(device_channels)
-                    .map(|frame| frame.iter().sum::<f32>() / device_channels as f32)
-                    .collect()
-            } else {
-                data.to_vec()
-            };
-
-            // 2. Resample to 16kHz
-            let resampled = if device_rate != 16000 {
-                resample_linear(&mono, device_rate, 16000)
-            } else {
-                mono
-            };
-
-            metrics_cb
-                .frames_captured
-                .fetch_add(resampled.len() as u64, Ordering::Relaxed);
-            if cb_tx.try_send(resampled).is_err() {
-                metrics_cb.frames_dropped.fetch_add(1, Ordering::Relaxed);
-            }
-        },
-        move |err| {
-            warn!(error = %err, "Audio capture error");
-        },
-        None,
-    )?;
+    // Dispatch on the device's native sample format. Hardcoding f32 fails on
+    // most macOS built-in mics and many Linux ALSA devices, which deliver i16
+    // PCM by default — `build_input_stream::<f32>` would return
+    // SampleFormatNotSupported and the pipeline would never start.
+    let err_cb = |err: cpal::StreamError| warn!(error = %err, "Audio capture error");
+    let stream = match sample_format {
+        SampleFormat::F32 => {
+            let stop_cb = stop_flag.clone();
+            let metrics_cb = metrics.clone();
+            let cb_tx = cb_tx.clone();
+            device.build_input_stream::<f32, _, _>(
+                &config,
+                move |data, _info| {
+                    if stop_cb.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    process_chunk(data, device_channels, device_rate, &cb_tx, &metrics_cb);
+                },
+                err_cb,
+                None,
+            )?
+        }
+        SampleFormat::I16 => {
+            let stop_cb = stop_flag.clone();
+            let metrics_cb = metrics.clone();
+            let cb_tx = cb_tx.clone();
+            device.build_input_stream::<i16, _, _>(
+                &config,
+                move |data: &[i16], _info| {
+                    if stop_cb.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let f: Vec<f32> = data.iter().map(|s| (*s as f32) / 32768.0).collect();
+                    process_chunk(&f, device_channels, device_rate, &cb_tx, &metrics_cb);
+                },
+                err_cb,
+                None,
+            )?
+        }
+        SampleFormat::U16 => {
+            let stop_cb = stop_flag.clone();
+            let metrics_cb = metrics.clone();
+            let cb_tx = cb_tx.clone();
+            device.build_input_stream::<u16, _, _>(
+                &config,
+                move |data: &[u16], _info| {
+                    if stop_cb.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let f: Vec<f32> = data
+                        .iter()
+                        .map(|s| (*s as f32 - 32768.0) / 32768.0)
+                        .collect();
+                    process_chunk(&f, device_channels, device_rate, &cb_tx, &metrics_cb);
+                },
+                err_cb,
+                None,
+            )?
+        }
+        fmt => {
+            return Err(anyhow::anyhow!(
+                "Unsupported audio sample format: {fmt:?}. Expected F32, I16, or U16."
+            ));
+        }
+    };
 
     stream.play()?;
     info!(

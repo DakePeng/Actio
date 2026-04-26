@@ -10,6 +10,7 @@
     "frontendDist": "../../frontend/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Actio",
@@ -43,7 +44,23 @@
       "../target/release/sherpa-onnx-c-api.dll": "sherpa-onnx-c-api.dll",
       "../target/release/sherpa-onnx-cxx-api.dll": "sherpa-onnx-cxx-api.dll"
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist",
+      "exceptionDomain": null,
+      "signingIdentity": null,
+      "providerShortName": null
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1"
+        ]
+      }
+    }
   },
   "plugins": {
     "updater": {

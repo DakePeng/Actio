@@ -322,17 +322,24 @@ impl Default for KeyboardSettings {
 }
 
 fn default_shortcuts() -> HashMap<String, String> {
+    // macOS conventionally uses Cmd (Super in Tauri's parser) for app-level shortcuts;
+    // Ctrl is reserved for system functions and Emacs-style cursor movement.
+    #[cfg(target_os = "macos")]
+    const PRIMARY: &str = "Super";
+    #[cfg(not(target_os = "macos"))]
+    const PRIMARY: &str = "Ctrl";
+
     let mut m = HashMap::new();
     // Global
-    m.insert("toggle_board_tray".into(), "Ctrl+\\".into());
-    m.insert("start_dictation".into(), "Ctrl+Shift+Space".into());
-    m.insert("new_todo".into(), "Ctrl+N".into());
+    m.insert("toggle_board_tray".into(), format!("{PRIMARY}+\\"));
+    m.insert("start_dictation".into(), format!("{PRIMARY}+Shift+Space"));
+    m.insert("new_todo".into(), format!("{PRIMARY}+N"));
     // Tab navigation
-    m.insert("tab_board".into(), "Ctrl+1".into());
-    m.insert("tab_people".into(), "Ctrl+2".into());
-    m.insert("tab_live".into(), "Ctrl+3".into());
-    m.insert("tab_archive".into(), "Ctrl+4".into());
-    m.insert("tab_settings".into(), "Ctrl+5".into());
+    m.insert("tab_board".into(), format!("{PRIMARY}+1"));
+    m.insert("tab_people".into(), format!("{PRIMARY}+2"));
+    m.insert("tab_live".into(), format!("{PRIMARY}+3"));
+    m.insert("tab_archive".into(), format!("{PRIMARY}+4"));
+    m.insert("tab_settings".into(), format!("{PRIMARY}+5"));
     // Card navigation
     m.insert("card_up".into(), "ArrowUp".into());
     m.insert("card_down".into(), "ArrowDown".into());

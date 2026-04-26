@@ -2,15 +2,19 @@ import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/use-store';
+import { primaryMod } from '../utils/platform';
 import { flashWordmark } from './useWordmarkFlash';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+// Defaults applied on first launch only when the backend has no persisted
+// shortcut for an action. `primaryMod` resolves to "Super" on macOS (which
+// tauri-plugin-global-shortcut binds to the Cmd key) and "Ctrl" elsewhere.
 const DEFAULT_GLOBAL_SHORTCUTS: Record<string, string> = {
-  toggle_board_tray: 'Ctrl+\\',
-  start_dictation: 'Ctrl+Shift+Space',
-  new_todo: 'Ctrl+N',
-  toggle_listening: 'Ctrl+Shift+M',
+  toggle_board_tray: `${primaryMod}+\\`,
+  start_dictation: `${primaryMod}+Shift+Space`,
+  new_todo: `${primaryMod}+N`,
+  toggle_listening: `${primaryMod}+Shift+M`,
 };
 
 /** How long to wait for a final transcript after stopping dictation (ms).
@@ -65,13 +69,48 @@ export function useGlobalShortcuts() {
     }));
   }
 
-  // Register default global shortcuts on mount
+  // Register global shortcuts on mount, preferring whatever the backend has
+  // persisted (the user's customizations) over JS defaults. Earlier versions
+  // of this effect blindly re-registered DEFAULT_GLOBAL_SHORTCUTS on every
+  // mount, which on macOS clobbered platform-aware defaults from the backend.
   useEffect(() => {
     if (!isTauri) return;
-    console.log('[Actio] Registering global shortcuts...');
-    invoke('reregister_shortcuts', { shortcuts: DEFAULT_GLOBAL_SHORTCUTS })
-      .then(() => console.log('[Actio] Global shortcuts registered'))
-      .catch((e) => console.error('[Actio] Failed to register global shortcuts:', e));
+    let cancelled = false;
+
+    (async () => {
+      let shortcuts: Record<string, string> = { ...DEFAULT_GLOBAL_SHORTCUTS };
+      try {
+        const res = await fetch('http://127.0.0.1:3000/settings');
+        if (res.ok) {
+          const data = await res.json();
+          const persisted: Record<string, string> | undefined =
+            data?.keyboard?.shortcuts;
+          if (persisted) {
+            // Only merge keys we know about as global actions; ignore
+            // anything else the backend may have stored.
+            for (const action of Object.keys(DEFAULT_GLOBAL_SHORTCUTS)) {
+              if (typeof persisted[action] === 'string' && persisted[action]) {
+                shortcuts[action] = persisted[action];
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Actio] Could not fetch persisted shortcuts, using defaults:', e);
+      }
+
+      if (cancelled) return;
+      try {
+        await invoke('reregister_shortcuts', { shortcuts });
+        console.log('[Actio] Global shortcuts registered:', shortcuts);
+      } catch (e) {
+        console.error('[Actio] Failed to register global shortcuts:', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Listen for shortcut-triggered events

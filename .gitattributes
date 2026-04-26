@@ -1,3 +1,28 @@
-# Normalize line endings: SQL migration files must be LF so SQLx checksum
-# is consistent across Windows / macOS / Linux dev machines.
+# Default: text files are normalized to LF on commit.
+# Cross-platform contributors get consistent diffs and tooling
+# (cargo fmt, prettier, SQLx checksums) regardless of OS.
+* text=auto eol=lf
+
+# SQL migrations: hard-pin LF so SQLx checksums match across platforms.
 *.sql text eol=lf
+
+# Windows-only files keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files: never touch them.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.gguf binary
+*.onnx binary
+*.dll binary
+*.dylib binary
+*.so binary

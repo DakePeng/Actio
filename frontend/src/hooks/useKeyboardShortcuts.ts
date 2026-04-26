@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useState } from 'react';
 import { useStore } from '../store/use-store';
+import { primaryMod } from '../utils/platform';
 import type { Tab } from '../types';
 
 interface ShortcutMap {
@@ -13,30 +14,44 @@ function isInputFocused(): boolean {
   return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable;
 }
 
+/** Normalize a `KeyboardEvent.key` value to the lowercased token used in
+ *  shortcut combo strings. The spacebar's `key` is a literal " ", which
+ *  would never match a "Space" combo without explicit translation. */
+function normalizeKey(k: string): string {
+  if (k === ' ') return 'space';
+  return k.toLowerCase();
+}
+
 function matchesShortcut(e: KeyboardEvent, combo: string): boolean {
   const parts = combo.split('+').map((p) => p.trim().toLowerCase());
   const key = parts[parts.length - 1];
-  const needCtrl = parts.includes('ctrl');
+  // Tauri-plugin-global-shortcut and DOM events both use a single "primary"
+  // modifier slot for Cmd-on-Mac / Win-on-Windows (KeyboardEvent.metaKey).
+  // Treat all four aliases the user / recorder may have produced — meta, cmd,
+  // command, super — as a single condition on metaKey.
+  const needMeta = parts.some(
+    (p) => p === 'meta' || p === 'cmd' || p === 'command' || p === 'super',
+  );
+  const needCtrl = parts.includes('ctrl') || parts.includes('control');
   const needShift = parts.includes('shift');
-  const needAlt = parts.includes('alt');
-
-  const eventKey = e.key.toLowerCase();
+  const needAlt = parts.includes('alt') || parts.includes('option');
 
   return (
-    eventKey === key &&
+    normalizeKey(e.key) === key &&
     e.ctrlKey === needCtrl &&
+    e.metaKey === needMeta &&
     e.shiftKey === needShift &&
     e.altKey === needAlt
   );
 }
 
 const DEFAULT_SHORTCUTS: ShortcutMap = {
-  tab_board: 'Ctrl+1',
-  tab_people: 'Ctrl+2',
-  tab_live: 'Ctrl+3',
-  tab_needs_review: 'Ctrl+6',
-  tab_archive: 'Ctrl+4',
-  tab_settings: 'Ctrl+5',
+  tab_board: `${primaryMod}+1`,
+  tab_people: `${primaryMod}+2`,
+  tab_live: `${primaryMod}+3`,
+  tab_needs_review: `${primaryMod}+6`,
+  tab_archive: `${primaryMod}+4`,
+  tab_settings: `${primaryMod}+5`,
   card_up: 'ArrowUp',
   card_down: 'ArrowDown',
   card_expand: 'Enter',

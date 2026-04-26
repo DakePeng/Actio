@@ -293,6 +293,7 @@ export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: 
                 display: '-webkit-box',
                 WebkitLineClamp: 2,
                 WebkitBoxOrient: 'vertical',
+                lineClamp: 2,
                 overflow: 'hidden',
               }}
             >
