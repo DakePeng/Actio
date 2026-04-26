@@ -84,6 +84,8 @@ Even after #16 (Info.plist with `NSMicrophoneUsageDescription`) was fixed, users
 
 ### 46. Candidate Speakers panel floods with low-quality "Unknown" provisionals
 
+**Status:** IN-PROGRESS — plan at `.omc/plans/ISS-046.md` (2026-04-26)
+
 The People → Candidate Speakers panel ("建议添加的人") shows a long list of `Unknown YYYY-MM-DD HH:MM` rows after even a short session. Most of them are clusters of one or two short segments (background noise, mic blips, momentary cross-talk, podcast cameos) that should never have been promoted to a speaker row in the first place.
 
 Root cause: `backend/actio-core/src/engine/batch_processor.rs:500` (the production path `process_clip_production`) inserts a provisional speaker for **every** AHC cluster, with no minimum-segment-count gate and no minimum-duration gate. The sister function `process_clip_with_clustering` at `batch_processor.rs:222` does honor `cfg.min_segments_per_cluster` — but `min_segments_per_cluster` was never plumbed into the production path or `AudioSettings`, so the only filter that runs in the field is the cosine threshold itself.
