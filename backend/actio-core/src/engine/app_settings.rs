@@ -171,6 +171,51 @@ pub struct AudioSettings {
     /// How often the scheduler wakes to check for new windows to process.
     #[serde(default = "default_extraction_tick_secs")]
     pub extraction_tick_secs: u32,
+
+    /// Per-mode ASR model selection. `live_asr_model` drives dictation/
+    /// translation; `archive_asr_model` drives the batch processor. Both
+    /// fall back to the legacy `asr_model` if unset (read-time migration).
+    #[serde(default)]
+    pub live_asr_model: Option<String>,
+    #[serde(default)]
+    pub archive_asr_model: Option<String>,
+
+    /// Target clip duration in seconds before the boundary watcher starts
+    /// looking for a silence to close on. Default 300 (5 min).
+    #[serde(default = "default_clip_target_secs")]
+    pub clip_target_secs: u32,
+    /// Hard cap — clip force-closes at this duration even mid-utterance.
+    #[serde(default = "default_clip_max_secs")]
+    pub clip_max_secs: u32,
+    /// Minimum VAD silence duration to count as a clip boundary, once past
+    /// `clip_target_secs`. Default 1500 ms.
+    #[serde(default = "default_clip_close_silence_ms")]
+    pub clip_close_silence_ms: u32,
+
+    /// AHC cosine threshold inside `cluster::ahc`. Smaller = more clusters.
+    #[serde(default = "default_cluster_cosine_threshold")]
+    pub cluster_cosine_threshold: f32,
+
+    /// Per-clip WAV files older than this many days are swept by the
+    /// background cleanup task. Replaces the per-failed-segment retention
+    /// path that used `clip_retention_days`.
+    #[serde(default = "default_audio_retention_days")]
+    pub audio_retention_days: u32,
+    /// Provisional speakers (kind='provisional') with no match in this many
+    /// days are GC'd (DELETE cascades their attached segments' speaker_id).
+    #[serde(default = "default_provisional_voiceprint_gc_days")]
+    pub provisional_voiceprint_gc_days: u32,
+
+    /// The always-on path. true (default) boots the CaptureDaemon +
+    /// ClipWriter + BatchProcessor pipeline. false uses the legacy
+    /// InferencePipeline supervisor. The two are mutually exclusive
+    /// because both would try to grab the microphone.
+    #[serde(default = "default_use_batch_pipeline")]
+    pub use_batch_pipeline: bool,
+}
+
+fn default_use_batch_pipeline() -> bool {
+    true
 }
 
 fn default_clip_retention_days() -> u32 {
@@ -209,6 +254,30 @@ fn default_extraction_tick_secs() -> u32 {
     60
 }
 
+fn default_clip_target_secs() -> u32 {
+    300
+}
+
+fn default_clip_max_secs() -> u32 {
+    360
+}
+
+fn default_clip_close_silence_ms() -> u32 {
+    1500
+}
+
+fn default_cluster_cosine_threshold() -> f32 {
+    0.4
+}
+
+fn default_audio_retention_days() -> u32 {
+    14
+}
+
+fn default_provisional_voiceprint_gc_days() -> u32 {
+    30
+}
+
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
@@ -225,6 +294,15 @@ impl Default for AudioSettings {
             window_length_ms: default_window_length_ms(),
             window_step_ms: default_window_step_ms(),
             extraction_tick_secs: default_extraction_tick_secs(),
+            live_asr_model: None,
+            archive_asr_model: None,
+            clip_target_secs: default_clip_target_secs(),
+            clip_max_secs: default_clip_max_secs(),
+            clip_close_silence_ms: default_clip_close_silence_ms(),
+            cluster_cosine_threshold: default_cluster_cosine_threshold(),
+            audio_retention_days: default_audio_retention_days(),
+            provisional_voiceprint_gc_days: default_provisional_voiceprint_gc_days(),
+            use_batch_pipeline: default_use_batch_pipeline(),
         }
     }
 }
@@ -335,6 +413,23 @@ pub fn recommend_models_for_language(
     // transcribe English but we don't force-swap — that's a user choice.
 
     recs
+}
+
+pub struct ResolvedAsrModels {
+    pub live: Option<String>,
+    pub archive: Option<String>,
+}
+
+impl AudioSettings {
+    /// Resolve the live and archive ASR model selections, falling back to
+    /// the legacy `asr_model` when either is unset. Single source of truth
+    /// for callers that need to know which model to load.
+    pub fn resolved_asr_models(&self) -> ResolvedAsrModels {
+        ResolvedAsrModels {
+            live: self.live_asr_model.clone().or_else(|| self.asr_model.clone()),
+            archive: self.archive_asr_model.clone().or_else(|| self.asr_model.clone()),
+        }
+    }
 }
 
 pub struct SettingsManager {
@@ -463,6 +558,33 @@ impl SettingsManager {
                 // 10s – 5min.
                 settings.audio.extraction_tick_secs = v.clamp(10, 300);
             }
+            if let Some(v) = audio.live_asr_model {
+                settings.audio.live_asr_model = v;
+            }
+            if let Some(v) = audio.archive_asr_model {
+                settings.audio.archive_asr_model = v;
+            }
+            if let Some(v) = audio.clip_target_secs {
+                settings.audio.clip_target_secs = v;
+            }
+            if let Some(v) = audio.clip_max_secs {
+                settings.audio.clip_max_secs = v;
+            }
+            if let Some(v) = audio.clip_close_silence_ms {
+                settings.audio.clip_close_silence_ms = v;
+            }
+            if let Some(v) = audio.cluster_cosine_threshold {
+                settings.audio.cluster_cosine_threshold = v.clamp(0.0, 1.0);
+            }
+            if let Some(v) = audio.audio_retention_days {
+                settings.audio.audio_retention_days = v;
+            }
+            if let Some(v) = audio.provisional_voiceprint_gc_days {
+                settings.audio.provisional_voiceprint_gc_days = v;
+            }
+            if let Some(v) = audio.use_batch_pipeline {
+                settings.audio.use_batch_pipeline = v;
+            }
         }
         if let Some(keyboard) = patch.keyboard {
             if let Some(shortcuts) = keyboard.shortcuts {
@@ -545,6 +667,15 @@ pub struct AudioSettingsPatch {
     pub window_length_ms: Option<u32>,
     pub window_step_ms: Option<u32>,
     pub extraction_tick_secs: Option<u32>,
+    pub live_asr_model: Option<Option<String>>,
+    pub archive_asr_model: Option<Option<String>>,
+    pub clip_target_secs: Option<u32>,
+    pub clip_max_secs: Option<u32>,
+    pub clip_close_silence_ms: Option<u32>,
+    pub cluster_cosine_threshold: Option<f32>,
+    pub audio_retention_days: Option<u32>,
+    pub provisional_voiceprint_gc_days: Option<u32>,
+    pub use_batch_pipeline: Option<bool>,
 }
 
 #[cfg(test)]
@@ -673,5 +804,30 @@ mod tests {
         // tab_live keeps its existing value; tab_recording is removed
         assert_eq!(keyboard.shortcuts.get("tab_live"), Some(&"Ctrl+3".to_string()));
         assert!(!keyboard.shortcuts.contains_key("tab_recording"));
+    }
+
+    #[test]
+    fn audio_settings_defaults_have_clip_processing_fields() {
+        let s = AudioSettings::default();
+        assert_eq!(s.clip_target_secs, 300);
+        assert_eq!(s.clip_max_secs, 360);
+        assert_eq!(s.clip_close_silence_ms, 1500);
+        assert!((s.cluster_cosine_threshold - 0.4).abs() < 1e-6);
+        assert_eq!(s.audio_retention_days, 14);
+        assert_eq!(s.provisional_voiceprint_gc_days, 30);
+        assert_eq!(s.live_asr_model, None);
+        assert_eq!(s.archive_asr_model, None);
+    }
+
+    #[test]
+    fn live_and_archive_asr_default_to_legacy_asr_model_when_unset() {
+        use crate::engine::app_settings::AudioSettings;
+        let mut s = AudioSettings::default();
+        s.asr_model = Some("zipformer-en".to_string());
+        s.live_asr_model = None;
+        s.archive_asr_model = None;
+        let resolved = s.resolved_asr_models();
+        assert_eq!(resolved.live.as_deref(), Some("zipformer-en"));
+        assert_eq!(resolved.archive.as_deref(), Some("zipformer-en"));
     }
 }

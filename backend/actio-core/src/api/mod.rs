@@ -1,3 +1,5 @@
+pub mod candidate_speaker;
+pub mod clip;
 pub mod label;
 pub mod llm;
 pub mod reminder;
@@ -49,6 +51,9 @@ use std::sync::atomic::Ordering;
         segment::dismiss_candidate,
         segment::assign_segment,
         segment::unassign_segment,
+        candidate_speaker::list_candidates,
+        candidate_speaker::promote,
+        candidate_speaker::dismiss,
     ),
     components(schemas(
         CreateSessionRequest,
@@ -62,6 +67,8 @@ use std::sync::atomic::Ordering;
         crate::engine::live_enrollment::Status,
         UnknownSegmentResponse,
         VoiceprintCandidateResponse,
+        candidate_speaker::CandidateSpeaker,
+        candidate_speaker::PromoteBody,
         ConfirmCandidateRequest,
         DismissCandidateRequest,
         AssignSegmentRequest,
@@ -125,6 +132,24 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/enroll-live/status",
             get(session::get_live_enrollment_status),
+        )
+        // candidate speakers (provisional rows from batch clip processing)
+        .route(
+            "/candidate-speakers",
+            get(candidate_speaker::list_candidates),
+        )
+        .route(
+            "/candidate-speakers/:id/promote",
+            post(candidate_speaker::promote),
+        )
+        .route(
+            "/candidate-speakers/:id",
+            delete(candidate_speaker::dismiss),
+        )
+        // clip audio playback (per-segment WAVs from the batch pipeline)
+        .route(
+            "/clips/:clip_id/segments/:segment_id/audio",
+            get(clip::get_clip_segment_audio),
         )
         // segment routes (unknown speakers + retroactive tagging)
         .route(

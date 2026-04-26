@@ -50,14 +50,32 @@ Tests live in `src/**/__tests__/` next to their subjects. The `i18n/__tests__/pa
 
 ### Audio & inference pipeline (`backend/actio-core/src/engine/`)
 
-`InferencePipeline` is the runtime heart. `AppState::pipeline_supervisor` spawns it at boot and keeps it alive:
+Two implementations live side by side, gated by `audio.use_batch_pipeline` (default **true**). They are mutually exclusive — both would grab the microphone.
 
-- **With `always_listening = true` (default):** the pipeline stays up as long as the process is running. This is required for the background action extractor to have transcripts to read.
-- **With `always_listening = false`:** legacy hibernation — the supervisor stops the pipeline after `IDLE_GRACE_PERIOD` of no WebSocket subscribers, and wakes it again on the next connect.
+**`sherpa-onnx` is `!Send`** for both pipelines. Wrap each extractor/recognizer's entire lifecycle in a single `tokio::task::spawn_blocking` (or a plain `std::thread` for long-lived workers) and bridge with `mpsc`/`oneshot`/`crossbeam_channel`. See `diarization.rs::EMBEDDING_WORKERS` — per-model worker threads cached in an LRU-capped registry (size 2) so model swaps don't leak ONNX speaker-embedding models (~30–70MB each).
 
-The pipeline reads 16 kHz mono via cpal → Silero VAD → ASR (Zipformer / Whisper / SenseVoice / FunASR / Moonshine, selected per-session) → speaker embedding → `ContinuityState` → broadcasts `transcript` and `speaker_resolved` frames on `/ws`. Persistence (transcripts, segments, speakers) is synchronous against SQLite.
+#### Legacy InferencePipeline (`use_batch_pipeline = false`)
 
-**`sherpa-onnx` is `!Send`.** Wrap each extractor/recognizer's entire lifecycle in a single `tokio::task::spawn_blocking` (or a plain `std::thread` for long-lived workers) and bridge with `mpsc`/`oneshot`/`crossbeam_channel`. See `diarization.rs::EMBEDDING_WORKERS` — per-model worker threads cached in an LRU-capped registry (size 2) so model swaps don't leak ONNX speaker-embedding models (~30–70MB each).
+`InferencePipeline` reads 16 kHz mono via cpal → Silero VAD → ASR (Zipformer / Whisper / SenseVoice / FunASR / Moonshine, selected per-session) → speaker embedding → `ContinuityState` → broadcasts `transcript` and `speaker_resolved` frames on `/ws`. Persistence (transcripts, segments, speakers) is synchronous against SQLite.
+
+`AppState::pipeline_supervisor` spawns it at boot. With `always_listening = true` it stays up; with `always_listening = false` the supervisor hibernates after `IDLE_GRACE_PERIOD` of no WS subscribers and wakes on next connect.
+
+Dictation, translation, and live voiceprint enrollment all still call `InferencePipeline::start_session` regardless of the flag — flipping those to `LiveStreamingService` is the last unfinished migration step.
+
+### Batch clip processing pipeline (default, `audio.use_batch_pipeline = true`)
+
+Components in `engine/`:
+
+- **`capture_daemon.rs`** — long-lived cpal + Silero VAD producer; broadcasts `CaptureEvent::{Speech | Muted | Unmuted}` on a tokio broadcast channel. `archive_enabled` flag (driven from `always_listening` by the supervisor) gates whether the clip writer persists; live subscribers receive events regardless.
+- **`clip_writer.rs`** — subscribes to the daemon, runs `clip_boundary` state machine (close on first ≥1.5 s silence after the 5-min target, hard-cap 6 min, immediate-close on mute), writes per-VAD-segment WAVs under `<clips_dir>/<session_id>/<clip_id>/seg_NNNN.wav` plus a `manifest.json`, and inserts the matching `audio_clips` row.
+- **`batch_processor.rs`** — single-worker claim loop. `process_clip_production` runs offline ASR over every segment in a manifest, embeds each segment via `diarization::extract_embedding`, AHC-clusters the embeddings, matches centroids against `speakers` (enrolled rows from `speaker_embeddings`, provisional rows aggregated from `audio_segments.embedding`), reuses an existing speaker or inserts a fresh provisional one, and assigns `speaker_id` + `clip_local_speaker_idx` to every segment. Then calls `window_extractor::extract_for_clip` for action items.
+- **`live_streaming.rs`** — on-demand service for dictation/translation that subscribes to the same daemon, runs offline ASR per segment, broadcasts on `/ws` via `TranscriptAggregator::broadcast_*` without DB writes. Streaming Zipformer is intentionally not supported (consumes raw chunks, not VAD segments).
+
+`speakers.kind` (`'enrolled' | 'provisional'`) and `speakers.provisional_last_matched_at` were added in migration 005. Provisional rows surface in the **Candidate Speakers panel** (`/candidate-speakers` API + People-tab UI section); promote renames + flips kind, dismiss hard-deletes (segments lose `speaker_id` via existing FK).
+
+`reminders.source_window_id` no longer FKs to `extraction_windows` (migration 006 dropped the constraint). The `/reminders/:id/trace` endpoint resolves the source ID against `audio_clips` first, falling back to `extraction_windows` for legacy rows.
+
+The flag is mutually exclusive with the legacy `InferencePipeline` because both grab the microphone. Toggling it requires a restart. Live enrollment + dictation/translation handlers in `api/session.rs` and `api/translate.rs` still call `InferencePipeline::start_session` — flipping those over is the last unfinished migration step.
 
 ### Speaker continuity (`engine/continuity.rs`)
 

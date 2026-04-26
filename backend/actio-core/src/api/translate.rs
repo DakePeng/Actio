@@ -135,6 +135,28 @@ mod tests {
             metrics: Arc::new(Metrics::new()),
             model_manager: Arc::new(ModelManager::new(model_dir.clone())),
             inference_pipeline: Arc::new(tokio::sync::Mutex::new(InferencePipeline::new())),
+            batch_processor: Arc::new(
+                crate::engine::batch_processor::BatchProcessorHandle::new(),
+            ),
+            capture_daemon: Arc::new(crate::engine::capture_daemon::CaptureDaemon::new(
+                None,
+                model_dir.join("silero_vad.onnx"),
+            )),
+            live_streaming: {
+                let cd = Arc::new(crate::engine::capture_daemon::CaptureDaemon::new(
+                    None,
+                    model_dir.join("silero_vad.onnx"),
+                ));
+                let agg = Arc::new(TranscriptAggregator::new(
+                    SqlitePoolOptions::new()
+                        .connect("sqlite::memory:")
+                        .await
+                        .unwrap(),
+                ));
+                Arc::new(crate::engine::live_streaming::LiveStreamingService::new(
+                    cd, agg,
+                ))
+            },
             settings_manager: Arc::new(SettingsManager::new(&data_dir)),
             clips_dir,
             live_enrollment: live_enrollment::new_state(),

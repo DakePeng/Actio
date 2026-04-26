@@ -239,6 +239,29 @@ export const zhCN: Translations = {
   'settings.audio.extractionTick': '调度周期',
   'settings.audio.minutes': '{n} 分钟',
   'settings.audio.seconds': '{n} 秒',
+  'settings.audio.days': '{n} 天',
+  'settings.audio.batchTitle': '后台片段处理',
+  'settings.audio.batchHint':
+    '录制的音频会在后台分片段处理,生成转写并归并相同声音。可调整每个片段时长、声音聚类强度,以及原始音频的保留期。',
+  'settings.audio.useBatchPipeline': '启用片段化处理管线',
+  'settings.audio.useBatchPipelineHint':
+    '默认启用。将转写拆分为实时路径(听写 / 翻译)与后台路径(每 5 分钟重新转写片段,生成归档转写并进行全局声音聚类)。除非需要旧版单管线行为,否则保持开启。修改后需重启应用。',
+  'settings.audio.legacyOnlyHint':
+    '下面的窗口长度 / 步长 / 调度周期仅在新管线关闭时生效(见下方"启用片段化处理管线")。',
+  'settings.audio.liveAsrModel': '实时识别模型',
+  'settings.audio.liveAsrModelHint':
+    '用于听写与实时翻译。流式模型延迟最低;非流式(离线)模型多约 1-2 秒延迟,但准确度和语言覆盖更高。',
+  'settings.audio.liveAsrFallback': '回退到下方模型选择器',
+  'settings.audio.archiveAsrModel': '归档识别模型',
+  'settings.audio.archiveAsrModelHint':
+    '后台管线用其重新转写 5 分钟片段并归档。仅列出非流式模型 — 它们能看到完整音频上下文,转写质量优于实时路径。',
+  'settings.audio.archiveAsrFallback': '回退到下方模型选择器',
+  'settings.audio.streamingTag': '流式',
+  'settings.audio.offlineTag': '离线',
+  'settings.audio.clipTarget': '目标片段时长',
+  'settings.audio.clusterThreshold': '声音聚类阈值',
+  'settings.audio.audioRetention': '音频保留',
+  'settings.audio.provisionalGc': '未匹配的声音保留时长',
 
   // Board page filter bar
   'board.filter.priority': '优先级',
@@ -331,6 +354,22 @@ export const zhCN: Translations = {
   'people.aria.edit': '编辑 {name}',
   'people.aria.delete': '删除 {name}',
   'people.tooltip.record': '录制声纹',
+
+  // Candidate speakers (provisional rows from batch clip processing)
+  'candidates.heading': '建议添加的人',
+  'candidates.subtitle':
+    '应用听到过但尚未登记的声音。确认后将其加入，或忽略以丢弃。',
+  'candidates.empty': '暂无建议。',
+  'candidates.lastHeard': '上次出现:{when}',
+  'candidates.lastHeardUnknown': '未匹配过',
+  'candidates.promote': '确认添加',
+  'candidates.dismiss': '忽略',
+  'candidates.namePlaceholder': '他们的名字',
+  'candidates.save': '保存',
+  'candidates.cancel': '取消',
+  'candidates.confirmDismiss': '确定忽略该建议吗?',
+  'candidates.aria.promote': '确认添加 {name}',
+  'candidates.aria.dismiss': '忽略 {name}',
 
   // New reminder bar
   'newReminder.quickCapture': '快速记录',

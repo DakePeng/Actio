@@ -80,6 +80,241 @@ pub async fn delete_speaker_with_segment_cleanup(
     Ok(result.rows_affected() > 0)
 }
 
+// ── Provisional speakers (batch clip processing) ─────────────────────────
+
+/// Insert a new provisional speaker. The batch processor calls this when a
+/// per-clip cluster centroid does not match any existing speaker (enrolled
+/// or provisional). The display_name is auto-generated and meant to be
+/// renamed by the user via the Candidate Speakers panel.
+pub async fn insert_provisional(
+    pool: &SqlitePool,
+    id: Uuid,
+    tenant_id: Uuid,
+    display_name: &str,
+    color: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO speakers \
+           (id, tenant_id, display_name, color, status, kind, provisional_last_matched_at) \
+         VALUES (?1, ?2, ?3, ?4, 'active', 'provisional', \
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+    )
+    .bind(id.to_string())
+    .bind(tenant_id.to_string())
+    .bind(display_name)
+    .bind(color)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Promote a provisional speaker to enrolled, optionally renaming. After
+/// promotion the row is just like any other enrolled speaker — it shows
+/// up in `list_speakers`, `find_match_by_centroid`'s enrolled pool, etc.
+/// `provisional_last_matched_at` is cleared so the GC sweep no longer
+/// touches it. Returns true if the row existed and was promoted.
+pub async fn promote_provisional(
+    pool: &SqlitePool,
+    id: Uuid,
+    new_display_name: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE speakers \
+         SET kind = 'enrolled', \
+             display_name = COALESCE(?2, display_name), \
+             provisional_last_matched_at = NULL \
+         WHERE id = ?1 AND kind = 'provisional'",
+    )
+    .bind(id.to_string())
+    .bind(new_display_name)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// Hard-delete a provisional speaker. The user explicitly told us this
+/// row isn't a real person worth tracking. Attached audio_segments rows
+/// have their speaker_id set to NULL via the existing FK. Returns true if
+/// a row was actually removed.
+pub async fn dismiss_provisional(pool: &SqlitePool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query("DELETE FROM speakers WHERE id = ?1 AND kind = 'provisional'")
+        .bind(id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// Hard-delete provisional speakers whose last match is older than
+/// `older_than_days`. Their attached audio_segments rows have their
+/// `speaker_id` set to NULL via the existing ON DELETE SET NULL FK.
+/// Returns the number of rows deleted. NULL `provisional_last_matched_at`
+/// (shouldn't happen for any row inserted by `insert_provisional`, but
+/// allowed by the schema) is treated as eligible for GC.
+pub async fn gc_stale_provisionals(
+    pool: &SqlitePool,
+    older_than_days: i64,
+) -> Result<u64, sqlx::Error> {
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(older_than_days);
+    let cutoff_str = cutoff.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let res = sqlx::query(
+        "DELETE FROM speakers \
+         WHERE kind = 'provisional' \
+           AND (provisional_last_matched_at IS NULL \
+                OR provisional_last_matched_at < ?1)",
+    )
+    .bind(cutoff_str)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+/// Bump `provisional_last_matched_at` to now. Called when a later clip's
+/// cluster centroid matches an existing provisional row, so the GC sweep
+/// in Plan Task 14 doesn't reap an actively-used provisional speaker.
+pub async fn touch_provisional_match(pool: &SqlitePool, id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE speakers \
+         SET provisional_last_matched_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+         WHERE id = ?1 AND kind = 'provisional'",
+    )
+    .bind(id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ProvisionalSpeakerRow {
+    pub id: String,
+    pub tenant_id: String,
+    pub display_name: String,
+    pub color: String,
+    pub provisional_last_matched_at: Option<String>,
+}
+
+/// List all currently-active provisional speakers, newest match first.
+/// Backs the Candidate Speakers panel (Plan Task 15).
+pub async fn list_provisional(
+    pool: &SqlitePool,
+) -> Result<Vec<ProvisionalSpeakerRow>, sqlx::Error> {
+    sqlx::query_as::<_, ProvisionalSpeakerRow>(
+        "SELECT id, tenant_id, display_name, color, provisional_last_matched_at \
+         FROM speakers \
+         WHERE kind = 'provisional' AND status = 'active' \
+         ORDER BY provisional_last_matched_at DESC",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Match a cluster centroid against all known speakers in `tenant_id`,
+/// returning the best-matching speaker_id whose mean embedding clears
+/// `confirm_threshold` cosine similarity. Returns None if nothing matches.
+///
+/// Two pools are joined:
+///   * enrolled speakers — averaged across their `speaker_embeddings` rows
+///   * provisional speakers — averaged across their attached
+///     `audio_segments.embedding` BLOBs (set by the batch processor when
+///     it created/extended the cluster).
+///
+/// Candidates with a different `embedding_dimension` than the query
+/// centroid are silently skipped — see CLAUDE.md on per-model dimensions.
+pub async fn find_match_by_centroid(
+    pool: &SqlitePool,
+    centroid: &[f32],
+    dim: i64,
+    tenant_id: Uuid,
+    confirm_threshold: f32,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    if centroid.is_empty() {
+        return Ok(None);
+    }
+
+    // Enrolled — speaker_embeddings table.
+    let enrolled: Vec<(String, Vec<u8>)> = sqlx::query_as(
+        "SELECT e.speaker_id, e.embedding \
+         FROM speaker_embeddings e \
+         JOIN speakers s ON s.id = e.speaker_id \
+         WHERE s.tenant_id = ?1 \
+           AND s.status = 'active' \
+           AND s.kind = 'enrolled' \
+           AND e.embedding_dimension = ?2",
+    )
+    .bind(tenant_id.to_string())
+    .bind(dim)
+    .fetch_all(pool)
+    .await?;
+
+    // Provisional — audio_segments embeddings tied to provisional speakers.
+    let provisional: Vec<(String, Vec<u8>)> = sqlx::query_as(
+        "SELECT seg.speaker_id, seg.embedding \
+         FROM audio_segments seg \
+         JOIN speakers s ON s.id = seg.speaker_id \
+         WHERE s.tenant_id = ?1 \
+           AND s.status = 'active' \
+           AND s.kind = 'provisional' \
+           AND seg.embedding IS NOT NULL \
+           AND seg.embedding_dim = ?2",
+    )
+    .bind(tenant_id.to_string())
+    .bind(dim)
+    .fetch_all(pool)
+    .await?;
+
+    let candidates: Vec<(String, Vec<u8>)> =
+        enrolled.into_iter().chain(provisional.into_iter()).collect();
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    // Group by speaker, mean-pool, normalize, score against centroid.
+    let dim_us = dim as usize;
+    let mut sums: std::collections::BTreeMap<String, (Vec<f32>, usize)> = Default::default();
+    for (speaker_id, blob) in candidates {
+        let v: &[f32] = bytemuck::cast_slice(&blob);
+        if v.len() != dim_us {
+            continue;
+        }
+        let entry = sums
+            .entry(speaker_id)
+            .or_insert_with(|| (vec![0.0_f32; dim_us], 0));
+        for (i, x) in v.iter().enumerate() {
+            entry.0[i] += x;
+        }
+        entry.1 += 1;
+    }
+
+    let q = unit_normalize(centroid);
+    let mut best: Option<(String, f32)> = None;
+    for (speaker_id, (sum, n)) in sums {
+        if n == 0 {
+            continue;
+        }
+        let mean: Vec<f32> = sum.iter().map(|x| x / n as f32).collect();
+        let unit = unit_normalize(&mean);
+        let sim = cosine_similarity(&q, &unit);
+        if best.as_ref().map_or(true, |(_, b)| sim > *b) {
+            best = Some((speaker_id, sim));
+        }
+    }
+    Ok(best.and_then(|(id, sim)| {
+        if sim >= confirm_threshold {
+            Uuid::parse_str(&id).ok()
+        } else {
+            None
+        }
+    }))
+}
+
+fn unit_normalize(v: &[f32]) -> Vec<f32> {
+    let n = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
+    v.iter().map(|x| x / n).collect()
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

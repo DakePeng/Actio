@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStore } from '../store/use-voice-store';
+import { CandidateSpeakersPanel } from './CandidateSpeakersPanel';
 import { PendingVoicesPanel } from './PendingVoicesPanel';
 import { VoiceprintRecorder } from './VoiceprintRecorder';
 import type { Speaker } from '../types/speaker';
@@ -369,6 +370,7 @@ export function PeopleTab() {
         </AnimatePresence>
       </div>
 
+      <CandidateSpeakersPanel />
       <PendingVoicesPanel />
     </div>
   );
