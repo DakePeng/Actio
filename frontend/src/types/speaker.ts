@@ -5,6 +5,7 @@ export interface Speaker {
   color: string;
   status: 'active' | 'inactive';
   created_at: string;
+  is_self: boolean;
 }
 
 export interface EnrolledEmbedding {

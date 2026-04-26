@@ -357,6 +357,7 @@ export const en = {
   'people.aria.edit': 'Edit {name}',
   'people.aria.delete': 'Delete {name}',
   'people.tooltip.record': 'Record voiceprint',
+  'people.thisIsMe': 'This is me',
 
   // Candidate speakers (provisional rows from batch clip processing)
   'candidates.heading': 'Suggested people',

@@ -354,6 +354,7 @@ export const zhCN: Translations = {
   'people.aria.edit': '编辑 {name}',
   'people.aria.delete': '删除 {name}',
   'people.tooltip.record': '录制声纹',
+  'people.thisIsMe': '这是我',
 
   // Candidate speakers (provisional rows from batch clip processing)
   'candidates.heading': '建议添加的人',

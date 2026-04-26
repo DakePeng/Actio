@@ -5,6 +5,7 @@ import { CandidateSpeakersPanel } from './CandidateSpeakersPanel';
 import { PendingVoicesPanel } from './PendingVoicesPanel';
 import { VoiceprintRecorder } from './VoiceprintRecorder';
 import type { Speaker } from '../types/speaker';
+import { markSpeakerAsSelf } from '../api/speakers';
 import { useT } from '../i18n';
 
 const PRESET_COLORS = [
@@ -330,6 +331,20 @@ export function PeopleTab() {
               ) : (
                 <>
                   <span className="person-row__name">{speaker.display_name}</span>
+                  <label className="person-row__self-toggle">
+                    <input
+                      type="checkbox"
+                      className="settings-check"
+                      role="switch"
+                      aria-checked={speaker.is_self}
+                      checked={speaker.is_self}
+                      onChange={async () => {
+                        await markSpeakerAsSelf(speaker.id);
+                        await fetchSpeakers();
+                      }}
+                    />
+                    <span>{t('people.thisIsMe')}</span>
+                  </label>
                   <div className="person-row__actions">
                     <motion.button
                       type="button"
