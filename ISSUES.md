@@ -396,6 +396,38 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 51. `@tauri-apps/api` mixed static + dynamic imports defeat code-splitting
+
+`pnpm build` emits two warnings — `core.js` and `window.js` are each dynamically imported in some files but statically imported in others, so Rollup can't move them into a separate chunk. Concretely:
+
+```
+core.js
+  dynamic: App.tsx (×3), BoardWindow.tsx (×2), TraySection.tsx (×1)
+  static : StandbyTray.tsx, KeyboardSettings.tsx, useGlobalShortcuts.ts,
+           utils/autostart.ts (and re-exported by api/dpi.js, event.js,
+           image.js, window.js inside the package)
+
+window.js
+  dynamic: BoardWindow.tsx
+  static : StandbyTray.tsx
+```
+
+Net effect: the entire `@tauri-apps/api` surface lands in the main bundle, which is currently `555.36 kB` (`index-*.js`) — Vite is already flagging it as over its 500 kB warning threshold. The dynamic imports were *intended* to defer Tauri to browser-fallback or feature-gated paths, but the static chain (re-exports inside the package + 4 files in our code) keeps it eagerly loaded.
+
+The four static-importers are all Tauri-only features (autostart, global shortcuts, standby tray invoke calls, keyboard settings keybinder), so they can be re-shaped to dynamic-import the API inside their handlers — same pattern the file's sibling components already use.
+
+**Severity:** Low · **Platform:** All · **Type:** perf · **Scope:** small (4 file edits, all the same shape)
+
+**Acceptance:**
+1. Convert the four static imports to dynamic (`const { invoke } = await import('@tauri-apps/api/core')`) inside their handlers. Use a single shared helper if the call sites end up with copy-paste boilerplate.
+2. `pnpm build` no longer emits the two `(!)` warnings about `core.js` / `window.js` static-vs-dynamic mixing.
+3. Main chunk drops by ~30 kB (rough estimate for the `@tauri-apps/api` surface — actual win confirmed at acceptance time).
+4. `pnpm test` (177/177) and `pnpm tsc --noEmit` stay green.
+
+Worth doing as a single tick once the sibling-component pattern is applied uniformly. Verify by running `pnpm build` before/after and capturing the chunk-size delta in the commit message.
+
+---
+
 ### 49. CLAUDE.md mis-describes the translation pipeline as session-based
 
 **Status:** Resolved 2026-04-26 — both occurrences (Audio & inference pipeline section) corrected to drop "translation" from the unfinished-migration list. Added a paragraph in the LLM router section clarifying that `POST /llm/translate` shares the router but never enters the audio pipeline.
@@ -467,3 +499,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
+| 51 | `@tauri-apps/api` mixed imports defeat code-splitting | Low | All | Open |
