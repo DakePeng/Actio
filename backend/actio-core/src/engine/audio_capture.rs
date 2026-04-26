@@ -156,48 +156,53 @@ pub fn start_capture(
     // most macOS built-in mics and many Linux ALSA devices, which deliver i16
     // PCM by default — `build_input_stream::<f32>` would return
     // SampleFormatNotSupported and the pipeline would never start.
-    let err_cb = |err: cpal::StreamError| warn!(error = %err, "Audio capture error");
     let stream = match sample_format {
         SampleFormat::F32 => {
+            // F32 path: match the pre-refactor closure signature exactly so
+            // the proven Windows / WASAPI behaviour is unchanged.
             let stop_cb = stop_flag.clone();
             let metrics_cb = metrics.clone();
-            let cb_tx = cb_tx.clone();
-            device.build_input_stream::<f32, _, _>(
+            let cb_tx_f32 = cb_tx.clone();
+            device.build_input_stream(
                 &config,
-                move |data, _info| {
+                move |data: &[f32], _info: &cpal::InputCallbackInfo| {
                     if stop_cb.load(Ordering::Relaxed) {
                         return;
                     }
-                    process_chunk(data, device_channels, device_rate, &cb_tx, &metrics_cb);
+                    process_chunk(data, device_channels, device_rate, &cb_tx_f32, &metrics_cb);
                 },
-                err_cb,
+                move |err| {
+                    warn!(error = %err, "Audio capture error");
+                },
                 None,
             )?
         }
         SampleFormat::I16 => {
             let stop_cb = stop_flag.clone();
             let metrics_cb = metrics.clone();
-            let cb_tx = cb_tx.clone();
+            let cb_tx_i16 = cb_tx.clone();
             device.build_input_stream::<i16, _, _>(
                 &config,
-                move |data: &[i16], _info| {
+                move |data: &[i16], _info: &cpal::InputCallbackInfo| {
                     if stop_cb.load(Ordering::Relaxed) {
                         return;
                     }
                     let f: Vec<f32> = data.iter().map(|s| (*s as f32) / 32768.0).collect();
-                    process_chunk(&f, device_channels, device_rate, &cb_tx, &metrics_cb);
+                    process_chunk(&f, device_channels, device_rate, &cb_tx_i16, &metrics_cb);
                 },
-                err_cb,
+                move |err| {
+                    warn!(error = %err, "Audio capture error");
+                },
                 None,
             )?
         }
         SampleFormat::U16 => {
             let stop_cb = stop_flag.clone();
             let metrics_cb = metrics.clone();
-            let cb_tx = cb_tx.clone();
+            let cb_tx_u16 = cb_tx.clone();
             device.build_input_stream::<u16, _, _>(
                 &config,
-                move |data: &[u16], _info| {
+                move |data: &[u16], _info: &cpal::InputCallbackInfo| {
                     if stop_cb.load(Ordering::Relaxed) {
                         return;
                     }
@@ -205,9 +210,11 @@ pub fn start_capture(
                         .iter()
                         .map(|s| (*s as f32 - 32768.0) / 32768.0)
                         .collect();
-                    process_chunk(&f, device_channels, device_rate, &cb_tx, &metrics_cb);
+                    process_chunk(&f, device_channels, device_rate, &cb_tx_u16, &metrics_cb);
                 },
-                err_cb,
+                move |err| {
+                    warn!(error = %err, "Audio capture error");
+                },
                 None,
             )?
         }
