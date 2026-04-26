@@ -60,7 +60,7 @@ Two implementations live side by side, gated by `audio.use_batch_pipeline` (defa
 
 `AppState::pipeline_supervisor` spawns it at boot. With `always_listening = true` it stays up; with `always_listening = false` the supervisor hibernates after `IDLE_GRACE_PERIOD` of no WS subscribers and wakes on next connect.
 
-Dictation, translation, and live voiceprint enrollment all still call `InferencePipeline::start_session` regardless of the flag — flipping those to `LiveStreamingService` is the last unfinished migration step.
+Dictation and live voiceprint enrollment still call `InferencePipeline::start_session` regardless of the flag — flipping those to `LiveStreamingService` is the last unfinished migration step. Translation is a separate path (see LLM router section below) and never enters the audio pipeline.
 
 ### Batch clip processing pipeline (default, `audio.use_batch_pipeline = true`)
 
@@ -75,7 +75,7 @@ Components in `engine/`:
 
 `reminders.source_window_id` no longer FKs to `extraction_windows` (migration 006 dropped the constraint). The `/reminders/:id/trace` endpoint resolves the source ID against `audio_clips` first, falling back to `extraction_windows` for legacy rows.
 
-The flag is mutually exclusive with the legacy `InferencePipeline` because both grab the microphone. Toggling it requires a restart. Live enrollment + dictation/translation handlers in `api/session.rs` and `api/translate.rs` still call `InferencePipeline::start_session` — flipping those over is the last unfinished migration step.
+The flag is mutually exclusive with the legacy `InferencePipeline` because both grab the microphone. Toggling it requires a restart. Live enrollment + dictation handlers in `api/session.rs` still call `InferencePipeline::start_session` (`api/session.rs:68` and `:680`) — flipping those over is the last unfinished migration step. `api/translate.rs` is unrelated to this migration: it's a stateless `POST /llm/translate` handler that calls `LlmRouter::translate_lines` directly, with no audio capture or session lifecycle.
 
 ### Speaker continuity (`engine/continuity.rs`)
 
@@ -94,6 +94,8 @@ Every saved reminder carries `source_window_id` so `GET /reminders/:id/trace` ca
 ### LLM router (`engine/llm_router.rs`)
 
 Three-way fan-out: `Disabled`, `Local { slot, model_id }` (llama-cpp-2, gated by default `local-llm` Cargo feature), `Remote(RemoteLlmClient)` (OpenAI-compatible HTTP). `LlmRouterError::Disabled` is **not** a failure — the window extractor catches it and reverts the claimed window to `pending` without counting an attempt, so the user can enable an LLM later without leaving orphan `failed` rows.
+
+Translation (`POST /llm/translate`, `api/translate.rs`) shares this router via `LlmRouter::translate_lines`. It serializes against window-extractor calls through `state.llm_inflight` so a long extraction doesn't block translation indefinitely (and vice versa). When the router is in `Disabled` mode, the endpoint returns `503 {"error":"llm_disabled"}` so the frontend can surface a precise toast.
 
 ### Live voiceprint enrollment (`engine/live_enrollment.rs`, `api/session.rs`)
 
@@ -132,6 +134,7 @@ The mock-API and local-LLM ports collide by default — pick one when doing UI-o
 - **`NewReminder` derives `Default`.** Any new caller should still spell out every field for grep-ability; only reach for `..Default::default()` when the struct has grown > ~10 fields.
 - **Hooks lie sometimes.** `PostToolUse:Edit` may say "Edit operation failed" when the body reports success. Trust the body.
 - **`settings-check` is an opt-in class.** `input[type="checkbox"]` globally is unstyled; add `className="settings-check"` (and `role="switch" aria-checked={v}`) for the iOS-pill toggle.
+- **Provisional speakers are gated, not created per AHC cluster.** `audio.cluster_min_segments` (default 3) and `audio.cluster_min_duration_ms` (default 8000) AND-gate cluster → speaker creation in `batch_processor::cluster_passes_gate`. Both `process_clip_with_clustering` (test path) and `process_clip_production` (sherpa path) honour them, so semantics stay aligned. Defaults exist to suppress noise / mic blips / podcast cameos from flooding the People → Candidate Speakers panel; lowering them is fine for synthetic-cluster tests but will reintroduce the flood in production.
 
 ## OpenAPI
 

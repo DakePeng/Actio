@@ -398,6 +398,8 @@ No behaviour change; this is a comment-only fix.
 
 ### 49. CLAUDE.md mis-describes the translation pipeline as session-based
 
+**Status:** Resolved 2026-04-26 — both occurrences (Audio & inference pipeline section) corrected to drop "translation" from the unfinished-migration list. Added a paragraph in the LLM router section clarifying that `POST /llm/translate` shares the router but never enters the audio pipeline.
+
 `CLAUDE.md` lines 63 and 78 both claim:
 
 > Dictation, translation, and live voiceprint enrollment all still call `InferencePipeline::start_session` regardless of the flag — flipping those to `LiveStreamingService` is the last unfinished migration step.
@@ -418,6 +420,8 @@ A new contributor reading CLAUDE.md will look for a translation start_session ca
 ---
 
 ### 50. Cluster gate settings (`cluster_min_segments`, `cluster_min_duration_ms`) undocumented
+
+**Status:** Partial 2026-04-26 — docs slice done. Added a Non-obvious-patterns bullet to `CLAUDE.md` describing both fields, the `cluster_passes_gate` shared helper, the defaults, and the rationale (suppress noise/cross-talk from flooding the Candidate Speakers panel). UI knob in Settings → Audio still pending; brainstorming required first per loop rules (UI Type).
 
 ISS-046 (resolved) added two new `AudioSettings` fields with non-trivial behavior:
 
@@ -462,5 +466,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 49 | CLAUDE.md mis-describes translation pipeline | Low | All | Open |
-| 50 | Cluster gate settings undocumented + no UI | Low | All | Open |
+| 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
