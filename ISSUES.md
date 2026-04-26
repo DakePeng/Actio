@@ -398,6 +398,9 @@ No behaviour change; this is a comment-only fix.
 
 ### 55. Vite bundle warning persists — no `manualChunks` for vendor deps
 
+**Status:** Resolved 2026-04-26 — added `build.rollupOptions.output.manualChunks` to `vite.config.ts` with `vendor-react` and `vendor-motion` entries. Main bundle dropped from **542.11 kB → 399.88 kB (−26 %)**, the chunk-size warning is gone, and the new lazy chunks complement the `core-*.js`/`event-*.js`/`window-*.js` splits from #51. 185/185 tests pass; tsc clean.
+
+
 `pnpm build` continues to log:
 
 ```
@@ -634,4 +637,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 55 | Vite bundle warning — no `manualChunks` for vendor deps | Low | All | Open |
