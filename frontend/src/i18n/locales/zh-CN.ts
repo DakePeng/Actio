@@ -194,6 +194,7 @@ export const zhCN: Translations = {
   'needsReview.sourceSpeaker': '来自 {name}',
   'feedback.reminderConfirmed': '已移至看板',
   'feedback.reminderDismissed': '已忽略',
+  'feedback.undo': '撤销',
 
   // Trace inspector (provenance for auto-extracted cards)
   'card.trace.show': '查看上下文',

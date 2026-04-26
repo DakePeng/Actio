@@ -43,7 +43,15 @@ export function NeedsReviewView() {
   };
   const onDismiss = async (id: string) => {
     await archiveReminder(id);
-    setFeedback('feedback.reminderDismissed', 'neutral');
+    // Undo affordance — Needs-Review items are uncertain auto-extracted
+    // candidates; an accidental Dismiss is easy and the user is unlikely
+    // to find their way to the Archive tab to recover (see ISSUES.md #54).
+    setFeedback('feedback.reminderDismissed', 'neutral', undefined, {
+      labelKey: 'feedback.undo',
+      onAction: () => {
+        void restoreReminder(id);
+      },
+    });
   };
 
   return (

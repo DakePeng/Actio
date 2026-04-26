@@ -398,6 +398,10 @@ No behaviour change; this is a comment-only fix.
 
 ### 54. Needs-Review dismiss has no undo affordance — accidental clicks lose information
 
+**Status:** Resolved 2026-04-26 — extended the existing feedback-toast surface with an optional `action: { labelKey, onAction }` field. Actionable toasts get a 5 s lifetime (vs. 2.2 s for plain ones). `NeedsReviewView` now passes `{ labelKey: 'feedback.undo', onAction: () => restoreReminder(id) }` on Dismiss. New i18n key `feedback.undo` (en + zh-CN), CSS for the action button, and 2 vitest cases pin the flow (Dismiss → Undo restores; Confirm shows no Undo). 185/185 tests pass.
+
+The "brainstorming pause" the issue called out turned out to be unnecessary — the existing toast component had a clean extension point (the `feedback` object on `UIState`), so the change was pattern-match (one new optional field, one new button, one timer-lifetime conditional) rather than novel UX.
+
 `frontend/src/components/NeedsReviewView.tsx:44-47` archives the reminder (`status='archived'`) on Dismiss with no confirmation and no undo. The Needs-Review queue holds medium-confidence auto-extracted items the user is **reviewing for accuracy** — they're already uncertain candidates, so an accidental Dismiss click loses information that's hard to recover. The only path back is opening the Archive view and unarchiving, which most users won't think to do.
 
 This is a worse UX trap than #43's `window.confirm()` problem because:
@@ -598,4 +602,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 54 | Needs-Review dismiss has no undo affordance | Medium | All | Open |

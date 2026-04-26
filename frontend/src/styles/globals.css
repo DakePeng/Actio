@@ -1586,6 +1586,27 @@ body.body--native-board .desktop-window__body .board-shell {
   opacity: 0.8;
 }
 
+.feedback-toast__action {
+  margin-left: auto;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.feedback-toast__action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+.feedback-toast__action:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 2px;
+}
+
 @media (max-width: 1024px) {
   .quick-add__grid {
     grid-template-columns: 1fr;

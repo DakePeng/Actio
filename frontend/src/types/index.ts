@@ -181,6 +181,14 @@ export interface UIState {
     /** Optional interpolation vars for the translation. */
     vars?: Record<string, string | number>;
     tone: 'neutral' | 'success';
+    /** Optional inline action ("Undo", "Retry", …). Toast extends its
+     *  default lifetime to 5 s when present so the user has time to react.
+     *  Function reference lives in the store: that's fine at runtime; the
+     *  feedback object is never serialized. */
+    action?: {
+      labelKey: string;
+      onAction: () => void;
+    };
   } | null;
   /**
    * User-facing toggle for the always-on background pipeline. Mirrors

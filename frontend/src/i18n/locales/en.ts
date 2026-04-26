@@ -194,6 +194,7 @@ export const en = {
   'needsReview.sourceSpeaker': 'From {name}',
   'feedback.reminderConfirmed': 'Moved to Board',
   'feedback.reminderDismissed': 'Dismissed',
+  'feedback.undo': 'Undo',
 
   // Trace inspector (provenance for auto-extracted cards)
   'card.trace.show': 'Show context',
