@@ -396,6 +396,33 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 53. `ConfirmDialog` lacks focus trap + autoFocuses the destructive action
+
+`frontend/src/components/ConfirmDialog.tsx` (added in #43) implements a promise-based modal that's now used for three destructive flows (dismiss candidate speaker, switch embedding model, delete model). Two a11y gaps surfaced on review:
+
+**1. No focus trap.** When the dialog opens, focus moves to the confirm button (via `autoFocus`), but Tab/Shift-Tab can leave the modal and focus elements behind the backdrop — even though the rest of the page is meant to be inert (`aria-modal="true"`). Keyboard-only users can land on a button, link, or input that's visually obscured by the backdrop and click "blind." Standard pattern is to either:
+
+- Set `inert` on the rest of `document.body` while open (or a sibling root); or
+- Implement roving Tab — on `Tab` inside the modal, cycle to first focusable; on `Shift-Tab` from first, cycle to last.
+
+The component already manages a global `keydown` listener for `Escape`/`Enter`; adding Tab handling there is mechanical.
+
+**2. `autoFocus` on the confirm button defaults to "destructive" for the destructive tone.** The component sets `autoFocus` on the confirm button regardless of `tone`. Combined with the existing `Enter`-handler that calls `onConfirm`, a user who hits Enter immediately after the dialog opens (e.g., from muscle memory after pressing the Dismiss/Delete row button) confirms the destructive action without ever seeing the prompt. This is the same UX trap `window.confirm()` had — the very thing #43 was supposed to fix.
+
+GitHub's pattern (and most native OS dialogs): autoFocus **cancel** for destructive tones, autoFocus **confirm** only for non-destructive prompts. Concrete change: gate `autoFocus` on `tone !== 'destructive'`, and move `autoFocus` to the cancel button when destructive.
+
+Bonus gap: when the modal closes, focus is not restored to the element that opened it (the row's Dismiss/Delete button). Standard a11y pattern is to capture `document.activeElement` on open and `.focus()` it back on close. Without that, keyboard users get dropped on `<body>` and have to retrace.
+
+**Severity:** Low · **Platform:** All · **Type:** a11y · **Scope:** small (two clear changes plus the focus-restoration polish)
+
+**Acceptance:**
+1. Tabbing inside the open modal cycles between the two buttons; Shift-Tab from the first cycles to the last; focus never leaves the dialog.
+2. When `tone === 'destructive'`, the cancel button receives initial focus (Enter on a freshly-opened destructive dialog calls `onCancel`, not `onConfirm`).
+3. When the dialog closes, focus returns to the element that was focused before it opened (read from `document.activeElement` at open time).
+4. Existing `CandidateSpeakersPanel.test.tsx` modal-flow test stays green; ideally extend it to assert the focus-trap + restoration behaviour.
+
+---
+
 ### 52. Frontend hardcodes `http://127.0.0.1:3000` in 7 places, bypassing port-fallback
 
 **Status:** Resolved 2026-04-26 — all 7 sites now go through `getApiUrl()` (or `getApiBaseUrl()` for the parallel-fetch refresh in `ModelSetup.tsx`). 177/177 tests pass; `pnpm build` clean of static/dynamic mixing warnings. Bundle size effectively unchanged (`backend-url.ts` was already universally imported elsewhere).
@@ -538,3 +565,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
+| 53 | `ConfirmDialog` — no focus trap; destructive autoFocus | Low | All | Open |
