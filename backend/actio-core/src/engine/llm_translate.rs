@@ -36,16 +36,18 @@ You are a translation assistant. You will receive a JSON array of \
 transcript lines, each with an `id` and `text`. Translate each `text` \
 into the requested target language. If a line is already in the \
 target language, return it verbatim. Preserve speaker tone and \
-punctuation.\n\
+punctuation. Do not add commentary or notes.\n\
 \n\
-Output ONLY a single JSON object — no markdown, no fences, no \
-explanation, no reasoning, no thinking, no <think> tags, no \
-commentary or notes of any kind:\n\
+Reply with the JSON object and nothing else. Do NOT include reasoning, \
+analysis, verification steps, or process notes. Do NOT use <think> \
+tags. Do NOT prefix the output with prose like \"Here is the \
+translation:\". Output starts with `{` and ends with `}`.\n\
+\n\
+Schema:\n\
 {\"translations\": [{\"id\": \"...\", \"text\": \"...\"}, ...]}\n\
 \n\
 The `translations` array MUST contain one entry per input id, in the \
-same order. Do not omit, merge, or split lines. Begin your reply \
-with `{` and end with `}`.";
+same order. Do not omit, merge, or split lines.";
 
 pub fn build_translate_messages(
     target_lang: &str,

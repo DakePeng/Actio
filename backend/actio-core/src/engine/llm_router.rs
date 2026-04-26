@@ -235,13 +235,21 @@ impl LlmRouter {
                     .get_or_load(model_id)
                     .await
                     .map_err(LlmRouterError::Local)?;
-                // Translation is a transduction task, not a reasoning task —
-                // disable the <think> preamble. Caps the cost of qwen-style
-                // models that otherwise emit long thinking blocks (and
-                // sometimes degenerate into infinite repetition that eats
-                // the whole token budget).
+                // Translation is mechanical — no reasoning needed. Disabling
+                // the thinking budget skips the <think>\n injection that
+                // otherwise pushes models like qwen3.5 into a long
+                // chain-of-thought, occasionally a degenerate repetition
+                // loop that burns the whole token budget before emitting
+                // the JSON.
+                //
+                // Output size is bounded by the input — a translated string
+                // rarely exceeds ~3× its source length even across scripts,
+                // and the JSON envelope adds a fixed overhead per line. Cap
+                // max_tokens accordingly to bound runaway responses.
+                let total_chars: usize = lines.iter().map(|l| l.text.len()).sum();
+                let max_tokens = (200 + total_chars * 4).min(2000);
                 let params = GenerationParams {
-                    max_tokens: 2000,
+                    max_tokens,
                     temperature: 0.1,
                     json_mode: true,
                     thinking_budget: None,
