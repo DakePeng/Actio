@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { useT, type TKey } from '../../i18n';
 import { primaryMod } from '../../utils/platform';
 
@@ -98,6 +97,7 @@ export function KeyboardSettings() {
       setShortcuts(newShortcuts);
       setEditing(null);
       if (isTauri()) {
+        const { invoke } = await import('@tauri-apps/api/core');
         invoke('reregister_shortcuts', { shortcuts: newShortcuts }).catch(console.error);
       }
     } catch (e) {
@@ -112,6 +112,7 @@ export function KeyboardSettings() {
       setShortcuts(DEFAULT_SHORTCUTS);
       setEditing(null);
       if (isTauri()) {
+        const { invoke } = await import('@tauri-apps/api/core');
         invoke('reregister_shortcuts', { shortcuts: DEFAULT_SHORTCUTS }).catch(console.error);
       }
     } catch (e) {
