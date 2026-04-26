@@ -97,9 +97,6 @@ function CandidateRow({ candidate, onPromoted, onDismissed }: RowProps) {
             type="button"
             onClick={() => void handlePromote()}
             disabled={busy}
-            aria-label={t('candidates.aria.promote', {
-              name: name.trim() || candidate.display_name,
-            })}
           >
             {t('candidates.save')}
           </button>
