@@ -2,6 +2,15 @@
 
 Current state: **Windows-only**. The app builds and ships for Windows. macOS and Linux targets require the work listed here before they are viable.
 
+## Recent fixes (loop iteration 4)
+
+- **#23** — Removed two redundant `html:has(body.body--…)` rules (`globals.css:95-97, 113-115`); the `html, body { background: transparent !important }` rule above already covers them. Added a doc comment on the remaining `.model-list__item:has(input:checked)` rule explaining it degrades to no-accent on WebKitGTK < 2.40 — acceptable progressive enhancement since the radio still indicates selection.
+- **#28** — `save_tray_position()` in `main.rs` now `.round()`s logical-pixel coordinates before persisting. Eliminates ±1px drift across launches on Linux Wayland fractional scaling.
+- **#37** — `lib.rs` CORS replaced static origin list with an `AllowOrigin::predicate` that admits `tauri://localhost`, `https://tauri.localhost`, plus any `http://localhost*` / `http://127.0.0.1*`. Production WebKit-family WebViews now pass CORS.
+- **#39** — `useGlobalShortcuts.ts:219` and `ChatComposer.tsx:76` now resolve via `getWsUrl('/ws')` (already used by `use-voice-store.ts:568`) instead of hardcoding `ws://127.0.0.1:3000/ws`. Port-fallback (3000-3009) and production WebView origins both work.
+
+`cargo check -p actio-core --tests` ✓, `pnpm test` ✓ (151 tests), `pnpm tsc --noEmit` ✓.
+
 ## Recent fixes (loop iteration 3)
 
 - **#34** — `audio_capture.rs` now dispatches on `SampleFormat::F32 | I16 | U16`, converting i16/u16 to f32 in the callback before processing. macOS built-in mics (i16) and most Linux ALSA defaults (i16) now work; an explicit error message surfaces unknown formats instead of silent `SampleFormatNotSupported`. Hot path extracted into `process_chunk()` helper.
@@ -938,6 +947,91 @@ const ws = new WebSocket(await getWsUrl('/ws'));
 
 ---
 
+---
+
+# Sixth-pass additions (loop iteration 4)
+
+After landing the iteration-4 fixes, a follow-up scan of the asset-loading and HTML head turned up two more cross-platform concerns.
+
+---
+
+### 40. Google Fonts loaded from the internet on every launch — privacy + offline + CSP friction
+
+`frontend/index.html:7-9`:
+
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,..." rel="stylesheet" />
+```
+
+Three problems for a desktop app:
+
+1. **Privacy** — Google Fonts logs IP + UA + Referer per page load. Every Actio launch sends a request to `fonts.googleapis.com`, which makes a "local" desktop app a passive telemetry source. No EU GDPR notice covers it, and EU jurisdictions have ruled this is a data-protection violation in some contexts.
+2. **Offline UX** — Users on slow or offline networks see a flash-of-fallback-font on launch, then re-flow when the request resolves (or never). For an always-available tray app, this is jarring.
+3. **CSP friction** — `tauri.conf.json` has `csp: null` today. The moment a real CSP is added (recommended for any production Tauri app), `https://fonts.googleapis.com` and `https://fonts.gstatic.com` would both need to be allowlisted.
+
+**Severity:** Medium · **Platform:** All
+
+**Fix:** Self-host the woff2 files alongside the existing `GrandHotel-Regular.woff2`:
+
+```bash
+mkdir -p frontend/public/fonts
+cd frontend/public/fonts
+# Use google-webfonts-helper or manually fetch each weight's .woff2:
+curl -O https://fonts.gstatic.com/s/manrope/v15/xn7gYHE41ni1AdIRggexSg.woff2  # 400
+# ... etc for 500, 600, 700, 800 + Newsreader weights
+```
+
+Then in `globals.css`:
+
+```css
+@font-face {
+  font-family: 'Manrope';
+  src: url('/fonts/Manrope-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+/* repeat for each weight + Newsreader */
+```
+
+Remove the `<link>` tags from `index.html`. Net result: zero outbound requests on launch, instant first paint, CSP-clean.
+
+---
+
+### 41. `Plus Jakarta Sans` declared in font stack but never loaded
+
+`frontend/src/styles/globals.css:60`:
+
+```css
+--font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+```
+
+There is **no `@font-face` declaration for Plus Jakarta Sans** anywhere in the codebase, and `frontend/public/fonts/` only contains `GrandHotel-Regular.woff2`. So `Plus Jakarta Sans` always falls through to the next entry in the stack — `system-ui` (after the iteration-1 #13 fix).
+
+This isn't a bug per se — the stack works as intended via the fallback chain — but the leading entry is dead code. Either remove it (if the design intent is "system font") or actually load Plus Jakarta Sans from Google Fonts / a self-hosted woff2.
+
+**Severity:** Low · **Platform:** All
+
+**Fix:** Pick one:
+
+```css
+/* Option A: drop the unloaded reference */
+--font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+
+/* Option B: load it locally */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('/fonts/PlusJakartaSans-Variable.woff2') format('woff2-variations');
+  font-weight: 200 800;
+  font-display: swap;
+}
+```
+
+Coordinate with #40 — both fixes share the same self-hosting infrastructure.
+
+---
+
 ## Combined summary table
 
 | # | File | Severity | Platform | Status |
@@ -964,12 +1058,12 @@ const ws = new WebSocket(await getWsUrl('/ws'));
 | 20 | (no permission check anywhere) | High | macOS + Windows | Open |
 | 21 | `tauri.conf.json:55-57` | High | macOS + Linux | **Partial** — config; CI work pending |
 | 22 | `gen/schemas/` missing macOS | Medium | macOS | Open |
-| 23 | `globals.css:95,113,4084` | Medium | Linux | Open |
+| 23 | `globals.css:95,113,4084` | Medium | Linux | **Fixed** (redundant rules removed; `.model-list` documented) |
 | 24 | (build doc) | Medium | Linux | Open |
 | 25 | `tauri.conf.json:35` | Medium | Linux | Open |
 | 26 | `actio-core/Cargo.toml:28,64` | Medium | All | Open |
 | 27 | `Card.tsx:293-296` | Low | All | **Fixed** |
-| 28 | `main.rs:375-391` | Low | Linux | Open |
+| 28 | `main.rs:375-391` | Low | Linux | **Fixed** |
 | 29 | `app_settings.rs:327` | Low | All | Open |
 | 30 | `useGlobalShortcuts.ts:9-14,72` | Critical | macOS | **Fixed** |
 | 31 | `useKeyboardShortcuts.ts:16-30` | Critical | macOS | **Fixed** |
@@ -978,6 +1072,8 @@ const ws = new WebSocket(await getWsUrl('/ws'));
 | 34 | `audio_capture.rs:124` | Critical | macOS + Linux | **Fixed** |
 | 35 | `lib.rs:99-104` | Medium | All | Open |
 | 36 | `useKeyboardShortcuts.ts` Space key | Low | All | **Fixed** |
-| 37 | `lib.rs:336-342` CORS origins | High | macOS + Linux | Open |
+| 37 | `lib.rs:336-342` CORS origins | High | macOS + Linux | **Fixed** |
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
-| 39 | `useGlobalShortcuts.ts:180` hardcoded WS port | Medium | All | Open |
+| 39 | `useGlobalShortcuts.ts:180` + `ChatComposer.tsx:76` hardcoded WS | Medium | All | **Fixed** |
+| 40 | `index.html:7-9` Google Fonts loaded externally | Medium | All | Open |
+| 41 | `globals.css:60` Plus Jakarta Sans unloaded | Low | All | Open |

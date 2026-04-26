@@ -372,10 +372,13 @@ fn save_tray_position(window: WebviewWindow, app_handle: AppHandle) -> Result<()
     let outer_pos = window.outer_position().map_err(|e| e.to_string())?;
     let inner_size = window.inner_size().map_err(|e| e.to_string())?;
 
-    let win_x = outer_pos.x as f64 / scale_factor;
-    let win_y = outer_pos.y as f64 / scale_factor;
-    let win_w = inner_size.width as f64 / scale_factor;
-    let win_h = inner_size.height as f64 / scale_factor;
+    // Round to integer logical pixels before persisting. On Linux Wayland with
+    // fractional scaling (1.25, 1.5, 1.75), repeated round-trips between
+    // physical and logical coordinates accumulate ±1px drift across launches.
+    let win_x = (outer_pos.x as f64 / scale_factor).round();
+    let win_y = (outer_pos.y as f64 / scale_factor).round();
+    let win_w = (inner_size.width as f64 / scale_factor).round();
+    let win_h = (inner_size.height as f64 / scale_factor).round();
 
     let monitor = window
         .current_monitor()

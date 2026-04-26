@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use axum::http::{HeaderName, Method};
 use sqlx::SqlitePool;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{info, warn};
 
 use crate::config::LlmConfig;
@@ -333,13 +333,27 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
         });
     }
 
+    // Admit:
+    //   - dev-server origins (vite on 5173, Tauri-dev wrapper on 1420)
+    //   - production Tauri WebView schemes:
+    //       Windows WebView2 → "https://tauri.localhost"
+    //       macOS WKWebView / Linux WebKitGTK → "tauri://localhost"
+    //   - any localhost-bound HTTP origin (covers port-conflict fallback to
+    //     3001-3009 and other dev-time tooling on the loopback)
+    // A predicate is preferred over a static list because Tauri's macOS/Linux
+    // builds use a custom URL scheme that tower-http's HeaderValue parser
+    // can otherwise reject as invalid.
     let cors = CorsLayer::new()
-        .allow_origin([
-            "http://localhost:1420".parse().unwrap(),
-            "http://127.0.0.1:1420".parse().unwrap(),
-            "http://localhost:5173".parse().unwrap(),
-            "http://127.0.0.1:5173".parse().unwrap(),
-        ])
+        .allow_origin(AllowOrigin::predicate(|origin, _req| {
+            let s = match origin.to_str() {
+                Ok(s) => s,
+                Err(_) => return false,
+            };
+            s == "tauri://localhost"
+                || s == "https://tauri.localhost"
+                || s.starts_with("http://localhost")
+                || s.starts_with("http://127.0.0.1")
+        }))
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([
             HeaderName::from_static("content-type"),

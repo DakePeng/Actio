@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/use-store';
-
-const WS_BASE = 'ws://127.0.0.1:3000';
+import { getWsUrl } from '../api/backend-url';
 
 interface ChatComposerProps {
   onClose: () => void;
@@ -68,12 +67,14 @@ export function ChatComposer({ onClose }: ChatComposerProps) {
     setRecording(false);
   }
 
-  function startRecording() {
+  async function startRecording() {
     setError(null);
     // The backend runs an always-on inference pipeline. We only subscribe to
     // final transcript frames and append them into the note field.
     try {
-      const ws = new WebSocket(`${WS_BASE}/ws`);
+      // Resolve via getWsUrl so port-fallback (3000-3009) works.
+      const wsUrl = await getWsUrl('/ws');
+      const ws = new WebSocket(wsUrl);
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);

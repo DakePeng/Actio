@@ -92,9 +92,10 @@ body.body--standby .app-shell--standby {
   background: transparent;
 }
 
-html:has(body.body--standby) {
-  background: transparent;
-}
+/* Note: `html` is already transparent unconditionally via the `html, body`
+ * rule near the top of this file. We previously had `html:has(body.body--…)`
+ * rules here, but they were redundant — and `:has()` is unsupported on
+ * WebKitGTK < 2.40 (Ubuntu 22.04 LTS), where the rules silently no-op. */
 
 body.body--quickadd {
   background: transparent;
@@ -107,10 +108,6 @@ body.body--quickadd .app-shell--quickadd {
   width: 100vw;
   height: 100vh;
   min-height: 100vh;
-  background: transparent;
-}
-
-html:has(body.body--quickadd) {
   background: transparent;
 }
 
@@ -4080,7 +4077,11 @@ body.body--native-board .desktop-window {
 }
 
 /* Selected card gets a subtle accent lift — matches the tone of the active
-   radio indicator so the card and the radio read as one state. */
+   radio indicator so the card and the radio read as one state.
+   Uses :has() which requires WebKitGTK ≥ 2.40 (Ubuntu 22.04 LTS ships 2.38);
+   on older Linux this rule silently no-ops and the card lacks the accent
+   border, but the radio itself still indicates the selection. Acceptable
+   progressive enhancement. */
 .model-list__item:has(input[type="radio"]:checked) {
   border-color: color-mix(in srgb, var(--color-accent, #3b82f6) 45%, var(--color-border));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent, #3b82f6) 25%, transparent),

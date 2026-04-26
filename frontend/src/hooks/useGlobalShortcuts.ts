@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/use-store';
+import { getWsUrl } from '../api/backend-url';
 import { primaryMod } from '../utils/platform';
 import { flashWordmark } from './useWordmarkFlash';
 
@@ -200,7 +201,7 @@ export function useGlobalShortcuts() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<string>('dictation-status', (e) => {
+    listen<string>('dictation-status', async (e) => {
       if (cancelled) return;
       const isListening = e.payload === 'listening';
       console.log('[Actio] dictation-status:', e.payload);
@@ -216,7 +217,18 @@ export function useGlobalShortcuts() {
         fullTranscriptRef.current = '';
         receivedAnyTranscriptRef.current = false;
 
-        const ws = new WebSocket('ws://127.0.0.1:3000/ws');
+        // Resolve via getWsUrl so port-fallback (3000-3009) and the eventual
+        // production WebView origin both work — hardcoding ws://127.0.0.1:3000
+        // breaks dictation when another process holds 3000.
+        let wsUrl: string;
+        try {
+          wsUrl = await getWsUrl('/ws');
+        } catch (err) {
+          console.error('[Actio] Could not resolve WS URL, dictation aborted:', err);
+          return;
+        }
+        if (cancelled) return;
+        const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         const finalizedIds = new Set<string>();
