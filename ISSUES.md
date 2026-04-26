@@ -396,6 +396,36 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 52. Frontend hardcodes `http://127.0.0.1:3000` in 7 places, bypassing port-fallback
+
+`frontend/src/api/backend-url.ts` exposes `getApiUrl(path)` and `getApiBaseUrl()` which probe ports 3000–3009 (`/health`) and respect the `VITE_ACTIO_API_BASE_URL` env var. Several files still hardcode `http://127.0.0.1:3000` directly, which silently fails when the backend lands on a fallback port (e.g. when 3000 is held by another process — exactly the scenario the comment at `useGlobalShortcuts.ts:245` calls out for the WS path).
+
+Concrete sites (production code, not tests):
+
+```
+src/components/settings/AudioSettings.tsx:4    const API_BASE = 'http://127.0.0.1:3000';
+src/components/settings/KeyboardSettings.tsx:5 const API_BASE = 'http://127.0.0.1:3000';
+src/components/settings/LlmSettings.tsx:4      const API_BASE = 'http://127.0.0.1:3000';
+src/components/settings/ModelSetup.tsx:53      const API_BASE = 'http://127.0.0.1:3000';
+src/hooks/useGlobalShortcuts.ts:97             fetch('http://127.0.0.1:3000/settings')
+src/i18n/index.ts:67                            fetch('http://127.0.0.1:3000/settings')
+src/i18n/index.ts:101                           fetch('http://127.0.0.1:3000/settings', { method: 'PATCH', … })
+```
+
+The two files that already get this right (`api/actio-api.ts:13`, `components/NewReminderBar.tsx:9`) still hardcode `127.0.0.1:3000` as a fallback for `VITE_ACTIO_API_BASE_URL`, but they **don't** participate in port discovery — the env var path is acceptable for production-build hosts and the fallback only matters when the backend is on the default port (which is the common case). Those two are out of scope; the issue is the seven sites above that ignore both the env var and the discovery probe.
+
+**Severity:** Low · **Platform:** All · **Type:** refactor · **Scope:** small (7 sites, mechanical conversion to `await getApiUrl(...)`)
+
+**Acceptance:**
+1. Each of the seven sites switches to `getApiUrl(path)` (or `getApiBaseUrl()` followed by manual concat where the call shape needs it).
+2. `pnpm tsc --noEmit` clean; `pnpm test` passes (177/177 currently).
+3. Existing tests that mock `fetch` to recognize URLs by suffix (`path.endsWith('/settings')`, `path.includes('/candidate-speakers')`) keep passing — they don't pin the host.
+4. No new dependency.
+
+Note: the `i18n/index.ts:101` site is a `PATCH` inside a non-async setter; the conversion would need either an IIFE or a top-level async wrapper. That's the only one with mild structural cost; the others are already inside async functions.
+
+---
+
 ### 51. `@tauri-apps/api` mixed static + dynamic imports defeat code-splitting
 
 **Status:** Resolved 2026-04-26 — all four static-importers converted. Both build warnings gone; three new chunks emerged (`core-*.js` 2.44 kB, `event-*.js` 1.36 kB, `window-*.js` 13.91 kB) and the main bundle dropped from **555.36 kB → 538.88 kB** (−16.5 kB total across two ticks). 177/177 frontend tests pass.
@@ -505,3 +535,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
+| 52 | 7 frontend sites hardcode `http://127.0.0.1:3000` | Low | All | Open |
