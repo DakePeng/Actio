@@ -2,6 +2,15 @@
 
 Current state: **Windows-only**. The app builds and ships for Windows. macOS and Linux targets require the work listed here before they are viable.
 
+## Recent fixes (loop iteration 5)
+
+- **#8** — `paste_text` in `main.rs` now detects `WAYLAND_DISPLAY` / `XDG_SESSION_TYPE=wayland` on Linux and returns a clear actionable error ("text copied to clipboard, press Ctrl+V manually") instead of a cryptic enigo failure. Clipboard write happens unconditionally before the Wayland check so the user can still paste manually.
+- **#33 (partial)** — Created `.github/workflows/ci.yml` running `cargo check + test + clippy` plus `pnpm test + tsc --noEmit` on `ubuntu-latest`, `macos-latest`, and `windows-latest` for every PR and push to `main`. Includes platform-specific dependency installs (apt for Linux, brew for macOS). Release workflow expansion still pending.
+- **#35** — Backend `init_tracing()` writes to a rolling daily log file at `<data_dir>/logs/actio.log` alongside stderr. Bundled `.exe` / `.app` / AppImage launches now leave a debuggable log trail. Box-leaked `WorkerGuard` keeps the flush thread alive for the program's lifetime.
+- **#41** — Dropped `'Plus Jakarta Sans'` from the leading slot of `--font-sans` since no `@font-face` loaded it. Stack now starts with `system-ui`.
+
+`cargo check -p actio-core --tests` ✓, `cargo test -p actio-core --lib` ✓ (185 tests), `pnpm test` ✓ (151 tests), `pnpm tsc --noEmit` ✓.
+
 ## Recent fixes (loop iteration 4)
 
 - **#23** — Removed two redundant `html:has(body.body--…)` rules (`globals.css:95-97, 113-115`); the `html, body { background: transparent !important }` rule above already covers them. Added a doc comment on the remaining `.model-list__item:has(input:checked)` rule explaining it degrades to no-accent on WebKitGTK < 2.40 — acceptable progressive enhancement since the radio still indicates selection.
@@ -1043,7 +1052,7 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 5 | `actio-core/Cargo.toml:28` | Critical | macOS + Linux | Unverified |
 | 6 | `actio-core/Cargo.toml:64` | Critical | macOS + Linux | Unverified |
 | 7 | `PreferencesSection.tsx:82-83` | High | All | Open |
-| 8 | `src-tauri/Cargo.toml:19` | High | Linux | Open |
+| 8 | `src-tauri/Cargo.toml:19` | High | Linux | **Fixed** (clear error + clipboard fallback on Wayland) |
 | 9 | `tauri.conf.json:22` | High | Linux | Open |
 | 10 | `docs/dev-setup.md` | Medium | All | **Fixed** |
 | 11 | `release.yml` Windows-only | Medium | All | See #33 |
@@ -1068,12 +1077,12 @@ Coordinate with #40 — both fixes share the same self-hosting infrastructure.
 | 30 | `useGlobalShortcuts.ts:9-14,72` | Critical | macOS | **Fixed** |
 | 31 | `useKeyboardShortcuts.ts:16-30` | Critical | macOS | **Fixed** |
 | 32 | `tauri.conf.json` (no Windows signing) | Medium | Windows | Open |
-| 33 | `release.yml`, no `ci.yml` | High | All | Open |
+| 33 | `release.yml`, no `ci.yml` | High | All | **Partial** — `ci.yml` added; release expansion pending |
 | 34 | `audio_capture.rs:124` | Critical | macOS + Linux | **Fixed** |
-| 35 | `lib.rs:99-104` | Medium | All | Open |
+| 35 | `lib.rs:99-104` | Medium | All | **Fixed** |
 | 36 | `useKeyboardShortcuts.ts` Space key | Low | All | **Fixed** |
 | 37 | `lib.rs:336-342` CORS origins | High | macOS + Linux | **Fixed** |
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 39 | `useGlobalShortcuts.ts:180` + `ChatComposer.tsx:76` hardcoded WS | Medium | All | **Fixed** |
 | 40 | `index.html:7-9` Google Fonts loaded externally | Medium | All | Open |
-| 41 | `globals.css:60` Plus Jakarta Sans unloaded | Low | All | Open |
+| 41 | `globals.css:60` Plus Jakarta Sans unloaded | Low | All | **Fixed** |

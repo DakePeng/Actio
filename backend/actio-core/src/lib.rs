@@ -94,14 +94,39 @@ pub struct AppState {
     pub llm_endpoint: Arc<tokio::sync::Mutex<LocalLlmEndpoint>>,
 }
 
+/// Initialize tracing with two writers: stderr (visible in dev) and a
+/// rolling daily log file under `<data_dir>/logs/actio.log`. The file writer
+/// is what keeps logs alive for bundled `.exe` / `.app` / AppImage launches —
+/// stderr is silently discarded when the OS attaches no console.
+fn init_tracing(data_dir: &std::path::Path) {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+    let log_dir = data_dir.join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "actio.log");
+    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+    // Leak the guard so the background flush thread keeps draining writes
+    // for the program's lifetime. Dropping the guard joins on the worker,
+    // which would lose the last few log lines on shutdown.
+    Box::leak(Box::new(guard));
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "actio_core=info".parse().unwrap());
+
+    // ANSI off globally — escape codes are unreadable in the file. The minor
+    // loss of color in the dev terminal is an acceptable trade for grep-able
+    // production logs the user can attach to a bug report.
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(file_writer.and(std::io::stderr))
+        .with_ansi(false)
+        .init();
+}
+
 /// Start the Axum HTTP server. Called from Tauri's setup hook.
 pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "actio_core=info".parse().unwrap()),
-        )
-        .init();
+    init_tracing(&config.data_dir);
 
     let db_url = format!("sqlite:{}?mode=rwc", config.db_path.display());
     let pool = repository::db::create_pool(&db_url).await?;

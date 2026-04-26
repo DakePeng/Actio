@@ -509,10 +509,30 @@ fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
-    // Write transcript to system clipboard
+    // Write transcript to system clipboard so the user can paste manually
+    // even if the simulated keystroke fails below (e.g. on Wayland).
     app.clipboard()
         .write_text(&text)
         .map_err(|e| e.to_string())?;
+
+    // Linux Wayland sessions don't accept synthetic keystrokes from enigo's
+    // X11 backend. The clipboard write above already succeeded, so surface a
+    // clear, actionable error rather than a cryptic enigo failure.
+    #[cfg(target_os = "linux")]
+    {
+        let on_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE")
+                .map(|v| v.eq_ignore_ascii_case("wayland"))
+                .unwrap_or(false);
+        if on_wayland {
+            return Err(
+                "Synthetic paste is not supported on Wayland. \
+                 The dictated text has been copied to the clipboard — \
+                 press Ctrl+V manually to paste it."
+                    .to_string(),
+            );
+        }
+    }
 
     // Small delay to let the clipboard settle
     thread::sleep(Duration::from_millis(50));
