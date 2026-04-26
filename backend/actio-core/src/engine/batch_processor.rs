@@ -369,22 +369,33 @@ pub async fn process_clip_production(
         }
     };
 
-    // Push every segment WAV into the ASR. We read each WAV synchronously
-    // (cheap) but await the send so backpressure works.
+    // Read every WAV ONCE and stash the samples — both ASR (here) and
+    // embedding (below) use them. Without this we'd re-decode the same
+    // file twice per segment.
+    let mut decoded: Vec<(Uuid, Vec<f32>, usize, usize)> =
+        Vec::with_capacity(manifest.segments.len());
     for seg in &manifest.segments {
         let wav_path = audio_dir.join(&seg.file);
-        let audio = match read_wav_f32_mono_16k(&wav_path) {
-            Ok(a) => a,
+        match read_wav_f32_mono_16k(&wav_path) {
+            Ok(audio) => {
+                let start_sample = ((seg.start_ms as i64 * 16_000) / 1_000) as usize;
+                let end_sample = ((seg.end_ms as i64 * 16_000) / 1_000) as usize;
+                decoded.push((seg.id, audio, start_sample, end_sample));
+            }
             Err(e) => {
                 tracing::warn!(?wav_path, error=%e, "skipping segment with unreadable WAV");
-                continue;
             }
-        };
+        }
+    }
+
+    // Push the decoded segments into the ASR. await on send so backpressure
+    // works through the bounded channel.
+    for (seg_id, audio, start_sample, end_sample) in &decoded {
         let speech = crate::engine::vad::SpeechSegment {
-            segment_id: seg.id,
-            start_sample: ((seg.start_ms as i64 * 16_000) / 1_000) as usize,
-            end_sample: ((seg.end_ms as i64 * 16_000) / 1_000) as usize,
-            audio,
+            segment_id: *seg_id,
+            start_sample: *start_sample,
+            end_sample: *end_sample,
+            audio: audio.clone(),
         };
         if seg_tx.send(speech).await.is_err() {
             tracing::warn!("archive ASR consumer closed early — bailing");
@@ -449,16 +460,13 @@ pub async fn process_clip_production(
     }
 
     // 3) Run embeddings — only if a speaker-embedding model is configured.
+    //    Reuses the `decoded` buffer from the ASR pass so each WAV is read
+    //    exactly once.
     if let Some(emb_path) = embedding_model_path.as_ref() {
-        let mut embeddings: Vec<(Uuid, Vec<f32>)> = Vec::with_capacity(manifest.segments.len());
+        let mut embeddings: Vec<(Uuid, Vec<f32>)> = Vec::with_capacity(decoded.len());
         let mut dim: i64 = 0;
-        for seg in &manifest.segments {
-            let wav_path = audio_dir.join(&seg.file);
-            let audio = match read_wav_f32_mono_16k(&wav_path) {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-            match crate::engine::diarization::extract_embedding(emb_path, &audio).await {
+        for (seg_id, audio, _, _) in &decoded {
+            match crate::engine::diarization::extract_embedding(emb_path, audio).await {
                 Ok(e) => {
                     if dim == 0 {
                         dim = e.values.len() as i64;
@@ -467,11 +475,11 @@ pub async fn process_clip_production(
                         // Mid-clip dimension mismatch — skip this segment.
                         continue;
                     }
-                    segment::set_embedding(pool, seg.id, &e.values, dim).await?;
-                    embeddings.push((seg.id, e.values));
+                    segment::set_embedding(pool, *seg_id, &e.values, dim).await?;
+                    embeddings.push((*seg_id, e.values));
                 }
                 Err(err) => {
-                    tracing::warn!(seg_id=%seg.id, error=%err, "embedding extraction failed");
+                    tracing::warn!(seg_id=%seg_id, error=%err, "embedding extraction failed");
                 }
             }
         }

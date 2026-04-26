@@ -393,10 +393,34 @@ async fn start_always_on_capture(state: &AppState) -> anyhow::Result<()> {
     // the legacy start_always_on_pipeline.
     let tenant_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")
         .expect("hardcoded uuid must parse");
-    let session =
-        repository::session::create_session(&state.pool, tenant_id, "microphone", "always_on")
+
+    // Reuse the latest still-open always_on session if one exists, so a
+    // crash + restart doesn't accumulate orphan rows in audio_sessions.
+    // Fall through to create_session only when no open row exists.
+    let session_id = match sqlx::query_as::<_, (String,)>(
+        "SELECT id FROM audio_sessions \
+         WHERE tenant_id = ?1 \
+           AND mode = 'always_on' \
+           AND ended_at IS NULL \
+         ORDER BY started_at DESC \
+         LIMIT 1",
+    )
+    .bind(tenant_id.to_string())
+    .fetch_optional(&state.pool)
+    .await?
+    {
+        Some((id_str,)) => uuid::Uuid::parse_str(&id_str)?,
+        None => {
+            let session = repository::session::create_session(
+                &state.pool,
+                tenant_id,
+                "microphone",
+                "always_on",
+            )
             .await?;
-    let session_id = session.id.parse::<uuid::Uuid>()?;
+            session.id.parse::<uuid::Uuid>()?
+        }
+    };
 
     state.capture_daemon.start().await?;
 
