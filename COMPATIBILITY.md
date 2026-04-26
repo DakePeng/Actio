@@ -1156,6 +1156,54 @@ Option 2 is more code but matches the app's existing visual language.
 
 ---
 
+---
+
+# Ninth-pass additions (loop iteration 10 — runtime debugging)
+
+While diagnosing a user report of broken transcription, two real architectural items surfaced. The first is now fixed; the second is a feature request that requires a substantive refactor.
+
+---
+
+### 44. `use_batch_pipeline` makes streaming and batch mutually exclusive — both should run
+
+`backend/actio-core/src/lib.rs:275-302` and `app_settings.rs:208-219`. The `audio.use_batch_pipeline` setting (default `true`) selects exactly one always-on pipeline:
+
+- **`true`** → batch clip writer only. Audio recorded into ~5-min clips on disk, transcribed offline by `BatchProcessor`, results land in `audio_clips` / Archive Clips. Live tab gets **no** transcripts.
+- **`false`** → legacy `InferencePipeline` only. Live transcripts stream to the WS aggregator → Live tab. **No** clip recording → Archive Clips empty.
+
+The comment at `lib.rs:276` justifies the exclusion: *"both would try to grab the microphone"*. But users want both — live transcription **and** background clip archival in a single session. The fix is to share a single cpal capture and tee its output:
+
+```
+cpal::start_capture() -> mpsc<Vec<f32>>
+            │
+            ├─► InferencePipeline (streaming ASR + speaker id) → aggregator → WS
+            │
+            └─► CaptureDaemon → ClipWriter → audio_clips → BatchProcessor → DB
+```
+
+The `tee_audio()` helper in `inference_pipeline.rs:489-498` already exists for exactly this kind of fan-out. The work is:
+
+1. Restructure `start_always_on_pipeline` (`lib.rs:608`) to always start a single capture, then tee into both consumers regardless of `use_batch_pipeline`.
+2. Repurpose `use_batch_pipeline` as `enable_clip_archive: bool` — the user-facing knob is now "save clips to disk" rather than "swap pipelines".
+3. Make sure `install_level_observer` (which feeds the audio_level WS broadcast) only runs once on the streaming branch — the batch branch shouldn't re-tee for that.
+4. Migrate existing `settings.json` files: `use_batch_pipeline: true` → `enable_clip_archive: true`, `false → false` (legacy users keep their no-archive behavior).
+
+**Severity:** High · **Platform:** All
+
+**Workaround today:** users pick one or the other in Settings → Audio → "Use batch pipeline" toggle.
+
+---
+
+### 45. Streaming-mode transcripts dropped from DB on segment-id FK race ✓ Fixed
+
+`backend/actio-core/src/engine/transcript_aggregator.rs:add_final` was called by the streaming pipeline with a `segment_id` that wasn't yet persisted (the segment hook runs later, after the speaker embedding worker confirms the dim). The FK to `audio_segments(id)` fails with SQLite code 787, the transcript was broadcast to the WS but never landed in `transcripts`, so streaming-mode transcripts disappeared after the session ended.
+
+Fix: on FK violation, retry the insert with `segment_id = NULL`. Text + timestamps are preserved; segment association can be backfilled later if needed.
+
+**Severity:** Medium · **Platform:** All · **Status:** Fixed in `add_final` retry path.
+
+---
+
 ## Combined summary table
 
 | # | File | Severity | Platform | Status |
@@ -1203,3 +1251,5 @@ Option 2 is more code but matches the app's existing visual language.
 | 41 | `globals.css:60` Plus Jakarta Sans unloaded | Low | All | **Fixed** |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 43 | `window.confirm()` in 3 places | Medium | All (worst Linux) | Open |
+| 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 45 | Streaming-mode transcripts not persisted (FK race) | Medium | All | **Fixed** |

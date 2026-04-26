@@ -8,6 +8,11 @@ pub(crate) fn is_false(b: &bool) -> bool {
     !*b
 }
 
+/// SQLite FK-violation code. `SQLITE_CONSTRAINT_FOREIGNKEY` reports as the
+/// extended result code 787 ((SQLITE_CONSTRAINT | (3 << 8))). sqlx exposes
+/// this via `db_err.code()` as a `Cow<str>`.
+const SQLITE_FK_VIOLATION: &str = "787";
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AggregatedTranscript {
     pub id: String,
@@ -154,10 +159,34 @@ impl TranscriptAggregator {
         end_ms: i64,
         segment_id: Option<Uuid>,
     ) -> Result<AggregatedTranscript, sqlx::Error> {
-        let t = transcript::create_transcript(
+        // Streaming ASR can produce a transcript referencing a segment_id
+        // before the segment row has been persisted (the segment hook runs
+        // later, after the speaker embedding worker confirms the dim).
+        // First try with the segment_id; on FK failure, fall back to NULL
+        // so the transcript text + timestamps still land in the DB. Segment
+        // association can be backfilled later when needed.
+        let t = match transcript::create_transcript(
             &self.pool, session_id, text, start_ms, end_ms, true, segment_id,
         )
-        .await?;
+        .await
+        {
+            Ok(row) => row,
+            Err(sqlx::Error::Database(db_err))
+                if db_err.code().as_deref() == Some(SQLITE_FK_VIOLATION)
+                    && segment_id.is_some() =>
+            {
+                tracing::debug!(
+                    %session_id,
+                    ?segment_id,
+                    "transcript segment_id FK not yet persisted; retrying with NULL"
+                );
+                transcript::create_transcript(
+                    &self.pool, session_id, text, start_ms, end_ms, true, None,
+                )
+                .await?
+            }
+            Err(e) => return Err(e),
+        };
 
         let result = AggregatedTranscript {
             id: t.id,
