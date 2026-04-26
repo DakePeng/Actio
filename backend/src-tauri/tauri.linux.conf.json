@@ -1,6 +1,5 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "_comment_": "Linux-only overrides. Default to .deb + .rpm bundles; AppImage is excluded because it requires appimagetool in PATH at build time and FUSE2 at runtime (Ubuntu 22.04+ ships only FUSE3 by default). CI / packagers can re-enable AppImage explicitly via `tauri build --bundles deb,rpm,appimage`.",
   "bundle": {
     "targets": ["deb", "rpm"]
   }

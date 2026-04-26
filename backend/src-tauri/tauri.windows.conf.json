@@ -1,6 +1,5 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "_comment_": "Windows-only overrides for tauri.conf.json. Tauri v2 auto-merges this on top of the base config when building for x86_64-pc-windows-msvc / aarch64-pc-windows-msvc. Keeps the DLL bundling out of the macOS/Linux build paths, which would fail with 'file not found' for these Windows-specific binaries.",
   "bundle": {
     "resources": {
       "../target/release/onnxruntime.dll": "onnxruntime.dll",
