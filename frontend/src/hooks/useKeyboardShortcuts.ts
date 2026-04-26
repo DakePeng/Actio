@@ -16,13 +16,15 @@ function isInputFocused(): boolean {
 
 /** Normalize a `KeyboardEvent.key` value to the lowercased token used in
  *  shortcut combo strings. The spacebar's `key` is a literal " ", which
- *  would never match a "Space" combo without explicit translation. */
-function normalizeKey(k: string): string {
+ *  would never match a "Space" combo without explicit translation.
+ *  Exported for unit tests; not meant for callers outside this hook. */
+export function normalizeKey(k: string): string {
   if (k === ' ') return 'space';
   return k.toLowerCase();
 }
 
-function matchesShortcut(e: KeyboardEvent, combo: string): boolean {
+/** Exported for unit tests. */
+export function matchesShortcut(e: KeyboardEvent, combo: string): boolean {
   const parts = combo.split('+').map((p) => p.trim().toLowerCase());
   const key = parts[parts.length - 1];
   // Tauri-plugin-global-shortcut and DOM events both use a single "primary"

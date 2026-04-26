@@ -2,6 +2,18 @@
 
 Current state: **Windows-only**. The app builds and ships for Windows. macOS and Linux targets require the work listed here before they are viable.
 
+## Recent fixes (loop iteration 8)
+
+Regression test coverage for the cross-platform shortcut + audio fixes — locks platform-aware behavior into the test suite so future refactors don't quietly regress.
+
+- New `frontend/src/hooks/__tests__/useKeyboardShortcuts.test.ts` (19 tests). Covers Ctrl combos, Meta/Cmd/Super/Command alias resolution (#31), Space normalization (#36), modifier precedence, and Control/Option aliasing. `matchesShortcut` and `normalizeKey` exported from the hook for unit access.
+- New `frontend/src/utils/__tests__/platform.test.ts` (3 tests). Asserts the `isMac → primaryMod` contract (Super on Mac, Ctrl elsewhere).
+- New Rust test `default_shortcuts_use_platform_aware_primary_modifier` in `app_settings.rs` (1 test). Locks in platform-aware shortcut prefix and validates bare-key card-nav defaults.
+
+`pnpm test` now 173 tests across 28 files (was 151/26). `cargo test -p actio-core --lib` 186 tests (was 185).
+
+**Schema observation (informational, not actionable):** `gen/schemas/linux-schema.json` is stale — it doesn't include the autostart permission added in iter 6 because it was generated before that change and no Linux build has run since. Tauri regenerates this per-target on `tauri build`; the file is for IDE autocomplete in `capabilities/*.json`, not capability validation, so build behavior is unaffected.
+
 ## Recent fixes (loop iteration 7)
 
 - **#1** — DLL bundle resources moved out of `tauri.conf.json` into a Windows-only overlay at `backend/src-tauri/tauri.windows.conf.json`. Tauri v2 auto-merges the overlay when targeting `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`. macOS and Linux builds no longer try to copy nonexistent `.dll` paths.

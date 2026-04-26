@@ -690,6 +690,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_shortcuts_use_platform_aware_primary_modifier() {
+        let m = default_shortcuts();
+
+        // Determine the expected primary modifier for the host platform.
+        // On macOS we emit "Super+..." (which tauri-plugin-global-shortcut
+        // maps to Cmd); everywhere else we emit "Ctrl+...".
+        #[cfg(target_os = "macos")]
+        let expected_prefix = "Super+";
+        #[cfg(not(target_os = "macos"))]
+        let expected_prefix = "Ctrl+";
+
+        for action in [
+            "toggle_board_tray",
+            "start_dictation",
+            "new_todo",
+            "tab_board",
+            "tab_people",
+            "tab_live",
+            "tab_archive",
+            "tab_settings",
+        ] {
+            let combo = m
+                .get(action)
+                .unwrap_or_else(|| panic!("missing default shortcut for {action}"));
+            assert!(
+                combo.starts_with(expected_prefix),
+                "shortcut for {action} = {combo:?} should start with {expected_prefix:?}",
+            );
+        }
+
+        // Card navigation uses bare keys (no modifier) — same on every OS.
+        assert_eq!(m.get("card_up").map(String::as_str), Some("ArrowUp"));
+        assert_eq!(m.get("card_down").map(String::as_str), Some("ArrowDown"));
+        assert_eq!(m.get("card_expand").map(String::as_str), Some("Enter"));
+        assert_eq!(m.get("card_archive").map(String::as_str), Some("Delete"));
+    }
+
+    #[test]
     fn deserializes_legacy_flat_llm_shape() {
         let json = r#"{
             "llm": {
