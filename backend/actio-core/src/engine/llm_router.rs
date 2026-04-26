@@ -171,6 +171,7 @@ impl LlmRouter {
         attributed_transcript: &str,
         label_names: &[String],
         window_local_date: &str,
+        profile: Option<&crate::domain::types::TenantProfile>,
     ) -> Result<Vec<LlmActionItem>, LlmRouterError> {
         match self {
             LlmRouter::Disabled => Err(LlmRouterError::Disabled),
@@ -181,6 +182,7 @@ impl LlmRouter {
                     attributed_transcript,
                     label_names,
                     window_local_date,
+                    profile,
                 )
                 .await
                 .map_err(LlmRouterError::Remote),
@@ -202,7 +204,7 @@ impl LlmRouter {
                     suppress_thinking: true,
                 };
                 let messages =
-                    build_window_messages(attributed_transcript, label_names, window_local_date);
+                    build_window_messages(attributed_transcript, label_names, window_local_date, profile);
                 let json = engine
                     .chat_completion(messages, params, EnginePriority::Internal)
                     .await
