@@ -184,6 +184,14 @@ impl CaptureDaemon {
     pub async fn is_running(&self) -> bool {
         self.inner.lock().await.handle.is_some()
     }
+
+    /// Test-only: inject a synthetic CaptureEvent into the broadcast.
+    /// Cross-module tests (e.g. clip_writer) use this to drive the loop
+    /// without touching cpal/Silero.
+    #[cfg(test)]
+    pub fn test_push(&self, ev: CaptureEvent) {
+        let _ = self.tx.send(ev);
+    }
 }
 
 #[cfg(test)]
