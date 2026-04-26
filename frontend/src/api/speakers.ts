@@ -174,3 +174,9 @@ export async function candidateClipUrl(audioRef: string): Promise<string> {
   const encoded = encodeURIComponent(audioRef);
   return getApiUrl(`/candidates/audio/${encoded}`);
 }
+
+export async function markSpeakerAsSelf(speakerId: string): Promise<void> {
+  await requestJson<void>(`/speakers/${encodeURIComponent(speakerId)}/mark-self`, {
+    method: 'POST',
+  });
+}
