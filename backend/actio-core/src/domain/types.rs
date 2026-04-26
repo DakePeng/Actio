@@ -245,6 +245,12 @@ pub struct ReminderTraceLine {
     pub text: String,
     pub speaker_id: Option<String>,
     pub speaker_name: Option<String>,
+    /// Set when the line came from a batch-processed clip (the new
+    /// pipeline). The frontend uses (clip_id, segment_id) to fetch the
+    /// per-segment WAV via `GET /clips/{clip_id}/segments/{segment_id}/audio`.
+    /// Null for legacy time-window-extracted lines.
+    pub clip_id: Option<String>,
+    pub segment_id: Option<String>,
 }
 
 /// Response body for `GET /reminders/{id}/trace`. Carries the originating

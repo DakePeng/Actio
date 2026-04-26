@@ -706,8 +706,9 @@ pub async fn get_reminder_trace(
     let lines = match (&source_kind, session_id, window_start_ms, window_end_ms) {
         (SourceKind::Clip, _, _, _) => {
             let wid = window_id.expect("Clip kind implies window_id present");
-            sqlx::query_as::<_, (i64, i64, String, Option<String>, Option<String>)>(
-                r#"SELECT t.start_ms, t.end_ms, t.text, sp.id, sp.display_name
+            sqlx::query_as::<_, (i64, i64, String, Option<String>, Option<String>, String, Option<String>)>(
+                r#"SELECT t.start_ms, t.end_ms, t.text, sp.id, sp.display_name,
+                          s.id, s.clip_id
                    FROM transcripts t
                    JOIN audio_segments s ON s.id = t.segment_id
                    LEFT JOIN speakers sp ON sp.id = s.speaker_id
@@ -720,13 +721,17 @@ pub async fn get_reminder_trace(
             .await
             .map_err(|e| AppApiError::Internal(e.to_string()))?
             .into_iter()
-            .map(|(s_ms, e_ms, text, sid, name)| ReminderTraceLine {
-                start_ms: s_ms,
-                end_ms: e_ms,
-                text,
-                speaker_id: sid,
-                speaker_name: name,
-            })
+            .map(
+                |(s_ms, e_ms, text, sid, name, seg_id, clip_id_opt)| ReminderTraceLine {
+                    start_ms: s_ms,
+                    end_ms: e_ms,
+                    text,
+                    speaker_id: sid,
+                    speaker_name: name,
+                    clip_id: clip_id_opt,
+                    segment_id: Some(seg_id),
+                },
+            )
             .collect()
         }
         (SourceKind::LegacyWindow, Some(sid), Some(start), Some(end)) => {
@@ -754,6 +759,8 @@ pub async fn get_reminder_trace(
                 text,
                 speaker_id: sid,
                 speaker_name: name,
+                clip_id: None,
+                segment_id: None,
             })
             .collect()
         }

@@ -7,6 +7,7 @@ import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-mo
 import { useT, type TKey } from '../i18n';
 import { translateLabelName } from '../i18n/label-names';
 import { createActioApiClient } from '../api/actio-api';
+import { clipSegmentAudioUrl } from '../api/speakers';
 
 const apiClient = createActioApiClient();
 
@@ -542,6 +543,12 @@ function TraceInspector({ reminderId }: { reminderId: string }) {
                       </span>
                       <span className="trace-line__text">{line.text}</span>
                     </div>
+                    {line.clip_id && line.segment_id && (
+                      <TraceLineAudio
+                        clipId={line.clip_id}
+                        segmentId={line.segment_id}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -550,5 +557,46 @@ function TraceInspector({ reminderId }: { reminderId: string }) {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/// Inline audio control for a single trace line. Resolves the WAV URL
+/// lazily (so the discovery probe only fires when the trace inspector
+/// is open) and renders a compact native <audio> player. The element
+/// is `preload="none"` so opening the inspector doesn't fetch every
+/// segment up front — playback waits until the user hits play.
+function TraceLineAudio({
+  clipId,
+  segmentId,
+}: {
+  clipId: string;
+  segmentId: string;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void clipSegmentAudioUrl(clipId, segmentId)
+      .then((url) => {
+        if (!cancelled) setSrc(url);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clipId, segmentId]);
+
+  if (error || !src) return null;
+  return (
+    <audio
+      className="trace-line__audio"
+      controls
+      preload="none"
+      src={src}
+      onError={() => setError(true)}
+    />
   );
 }

@@ -81,6 +81,19 @@ export async function dismissCandidateSpeaker(id: string): Promise<void> {
   await requestJson<void>(`/candidate-speakers/${id}`, { method: 'DELETE' });
 }
 
+// ── Clip segment audio (batch pipeline trace playback) ────────────────────
+
+/// Build a fully-qualified URL for an `<audio>` element that points at a
+/// clip's segment WAV. Returns null when either id is null so callers can
+/// short-circuit on legacy (time-window) trace lines.
+export async function clipSegmentAudioUrl(
+  clipId: string | null,
+  segmentId: string | null,
+): Promise<string | null> {
+  if (!clipId || !segmentId) return null;
+  return await getApiUrl(`/clips/${clipId}/segments/${segmentId}/audio`);
+}
+
 /**
  * Upload 1-N WAV clips and extract/store voiceprints. `mode=replace` deletes
  * any prior embeddings for this speaker before inserting the new ones.

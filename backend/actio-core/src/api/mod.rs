@@ -1,4 +1,5 @@
 pub mod candidate_speaker;
+pub mod clip;
 pub mod label;
 pub mod llm;
 pub mod reminder;
@@ -144,6 +145,11 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/candidate-speakers/:id",
             delete(candidate_speaker::dismiss),
+        )
+        // clip audio playback (per-segment WAVs from the batch pipeline)
+        .route(
+            "/clips/:clip_id/segments/:segment_id/audio",
+            get(clip::get_clip_segment_audio),
         )
         // segment routes (unknown speakers + retroactive tagging)
         .route(

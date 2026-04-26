@@ -115,6 +115,11 @@ export interface ReminderTraceLine {
   text: string;
   speaker_id: string | null;
   speaker_name: string | null;
+  /** Set when the line came from a batch-processed clip (new pipeline).
+   *  The Card's TraceInspector uses (clip_id, segment_id) to fetch the
+   *  per-segment WAV via GET /clips/{clip_id}/segments/{segment_id}/audio. */
+  clip_id: string | null;
+  segment_id: string | null;
 }
 
 export interface ReminderTrace {
