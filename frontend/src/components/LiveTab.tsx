@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useStore } from '../store/use-store';
 import { useVoiceStore } from '../store/use-voice-store';
 import { LiveTranscript } from './LiveTranscript';
@@ -20,37 +20,29 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-/** Five-bar audio-level visualisation. We don't have backend RMS on
- *  the WebSocket today, so the wave reflects PROXY activity: a fresh
- *  transcript or partial flips it to high amplitude for ~600ms; in
- *  between, a gentle baseline animation when listening, flat when
- *  muted. Replace with real RMS once the backend broadcasts it. */
+/** Five-bar audio-level visualisation driven by real mic RMS streamed
+ *  from the backend at ~15Hz. Each bar maps the raw RMS through a
+ *  per-bar amplitude multiplier so the bars never move in lockstep —
+ *  natural-looking "wave" instead of a single rising/falling block.
+ *
+ *  Gain mapping: typical speech RMS sits in 0.02–0.20; we normalise
+ *  via `min(1, rms * 6)` so an RMS of 0.17 saturates the bars. */
+const BAR_AMPS = [0.55, 0.85, 1.0, 0.78, 0.5] as const;
+
 function VoiceWave() {
   const isListening = useStore((s) => s.ui.listeningEnabled);
-  const partialText = useVoiceStore((s) => s.currentSession?.pendingPartial?.text ?? '');
-  const linesLen = useVoiceStore((s) => s.currentSession?.lines.length ?? 0);
-  const [active, setActive] = useState(false);
+  const audioLevel = useVoiceStore((s) => s.audioLevel);
 
-  useEffect(() => {
-    if (!isListening) return;
-    setActive(true);
-    const id = window.setTimeout(() => setActive(false), 600);
-    return () => window.clearTimeout(id);
-  }, [partialText, linesLen, isListening]);
-
-  const stateClass = !isListening
-    ? 'voice-wave--idle'
-    : active
-      ? 'voice-wave--active'
-      : 'voice-wave--quiet';
+  const gain = isListening ? Math.min(1, audioLevel * 6) : 0;
+  const stateClass = !isListening ? 'voice-wave--idle' : 'voice-wave--live';
 
   return (
     <div className={`voice-wave ${stateClass}`} aria-hidden="true">
-      {[0, 1, 2, 3, 4].map((i) => (
+      {BAR_AMPS.map((amp, i) => (
         <span
           key={i}
           className="voice-wave__bar"
-          style={{ animationDelay: `${i * 80}ms` }}
+          style={{ '--bar-h': `${4 + gain * amp * 26}px` } as CSSProperties}
         />
       ))}
     </div>

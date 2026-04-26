@@ -3592,11 +3592,17 @@ body.body--native-board .desktop-window {
   font-style: italic;
 }
 
-/* ─── Voice wave — animated audio-level visualisation ─────────────
- * Five bars, staggered animation delays. Three states:
- *   --idle     : muted; flat gray bars, no animation
- *   --quiet    : listening, no recent activity; gentle low wave
- *   --active   : recent transcript / partial; high-amplitude pulse */
+/* ─── Voice wave — real mic-RMS visualisation ─────────────────────
+ * Five bars whose heights are computed per-frame from the EMA-smoothed
+ * RMS that the backend broadcasts at ~15Hz on the WebSocket. Each
+ * bar's height is set inline via the --bar-h CSS variable; the
+ * height transition smooths the discrete updates into a continuous
+ * wave. Per-bar amplitude multipliers (in JS) give the array of bars
+ * an organic shape — middle bars peak higher than edge bars.
+ *
+ * States:
+ *   --idle : muted; flat gray, no input. CSS variable falls back.
+ *   --live : listening; height tracks RMS in real time. */
 .voice-wave {
   display: inline-flex;
   align-items: center;
@@ -3609,37 +3615,18 @@ body.body--native-board .desktop-window {
   width: 4px;
   background: var(--color-accent);
   border-radius: 2px;
-  height: 6px;
-  transform-origin: center;
+  height: var(--bar-h, 4px);
+  transition: height 80ms linear;
 }
 
 .voice-wave--idle .voice-wave__bar {
   background: var(--color-text-tertiary);
   opacity: 0.4;
   height: 4px;
-  animation: none;
-}
-
-.voice-wave--quiet .voice-wave__bar {
-  animation: voice-wave-quiet 1.2s ease-in-out infinite alternate;
-}
-
-.voice-wave--active .voice-wave__bar {
-  animation: voice-wave-active 0.4s ease-in-out infinite alternate;
-}
-
-@keyframes voice-wave-quiet {
-  0% { height: 4px; }
-  100% { height: 12px; }
-}
-
-@keyframes voice-wave-active {
-  0% { height: 6px; }
-  100% { height: 26px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .voice-wave__bar { animation: none !important; height: 8px; }
+  .voice-wave__bar { transition: none; }
 }
 
 /* ─── People tab ─────────────────────────────────────────────────── */

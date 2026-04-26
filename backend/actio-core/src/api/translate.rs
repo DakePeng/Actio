@@ -145,6 +145,7 @@ mod tests {
             remote_client_envseed: None,
             router: Arc::new(tokio::sync::RwLock::new(router)),
             llm_inflight: Arc::new(tokio::sync::Mutex::new(())),
+            audio_levels: Arc::new(tokio::sync::broadcast::channel::<f32>(8).0),
             llm_endpoint: Arc::new(tokio::sync::Mutex::new(LocalLlmEndpoint::new())),
         };
         (state, tmp)

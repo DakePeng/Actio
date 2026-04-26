@@ -53,6 +53,11 @@ interface VoiceState {
   /** Internal — not serialised to localStorage */
   _ws: WebSocket | null;
 
+  /** EMA-smoothed mic RMS, sampled by the backend at ~15Hz and pushed
+   *  on the WebSocket as `{kind: "audio_level", rms: …}`. Drives the
+   *  voice-wave visualisation. Reset to 0 on stopRecording. */
+  audioLevel: number;
+
   // Recording + segment CRUD (unchanged).
   startRecording: () => void;
   stopRecording: () => void;
@@ -516,6 +521,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   _ws: null,
 
+  audioLevel: 0,
+
   startRecording: () => {
     // The backend starts microphone capture while at least one WebSocket
     // subscriber is attached. Closing this socket stops our recording session.
@@ -539,6 +546,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
               handleTranscriptMessage(set, msg);
             } else if (msg.kind === 'speaker_resolved') {
               handleSpeakerResolved(set, msg);
+            } else if (msg.kind === 'audio_level' && typeof msg.rms === 'number') {
+              // Hot-path frame at ~15Hz; keep this lean.
+              set({ audioLevel: msg.rms });
             }
           } catch { /* ignore malformed frames */ }
         };
@@ -557,6 +567,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       isRecording: false,
       currentSession: null,
       _ws: null,
+      audioLevel: 0,
       translation: { ...state.translation, byLineId: {}, cache: {} },
     }));
   },
