@@ -59,6 +59,21 @@ The pipeline reads 16 kHz mono via cpal → Silero VAD → ASR (Zipformer / Whis
 
 **`sherpa-onnx` is `!Send`.** Wrap each extractor/recognizer's entire lifecycle in a single `tokio::task::spawn_blocking` (or a plain `std::thread` for long-lived workers) and bridge with `mpsc`/`oneshot`/`crossbeam_channel`. See `diarization.rs::EMBEDDING_WORKERS` — per-model worker threads cached in an LRU-capped registry (size 2) so model swaps don't leak ONNX speaker-embedding models (~30–70MB each).
 
+### Batch clip processing pipeline (opt-in, behind `audio.use_batch_pipeline`)
+
+Parallel always-on path that replaces the legacy `InferencePipeline` when the flag is true. Components in `engine/`:
+
+- **`capture_daemon.rs`** — long-lived cpal + Silero VAD producer; broadcasts `CaptureEvent::{Speech | Muted | Unmuted}` on a tokio broadcast channel. `archive_enabled` flag (driven from `always_listening` by the supervisor) gates whether the clip writer persists; live subscribers receive events regardless.
+- **`clip_writer.rs`** — subscribes to the daemon, runs `clip_boundary` state machine (close on first ≥1.5 s silence after the 5-min target, hard-cap 6 min, immediate-close on mute), writes per-VAD-segment WAVs under `<clips_dir>/<session_id>/<clip_id>/seg_NNNN.wav` plus a `manifest.json`, and inserts the matching `audio_clips` row.
+- **`batch_processor.rs`** — single-worker claim loop. `process_clip_production` runs offline ASR over every segment in a manifest, embeds each segment via `diarization::extract_embedding`, AHC-clusters the embeddings, matches centroids against `speakers` (enrolled rows from `speaker_embeddings`, provisional rows aggregated from `audio_segments.embedding`), reuses an existing speaker or inserts a fresh provisional one, and assigns `speaker_id` + `clip_local_speaker_idx` to every segment. Then calls `window_extractor::extract_for_clip` for action items.
+- **`live_streaming.rs`** — on-demand service for dictation/translation that subscribes to the same daemon, runs offline ASR per segment, broadcasts on `/ws` via `TranscriptAggregator::broadcast_*` without DB writes. Streaming Zipformer is intentionally not supported (consumes raw chunks, not VAD segments).
+
+`speakers.kind` (`'enrolled' | 'provisional'`) and `speakers.provisional_last_matched_at` were added in migration 005. Provisional rows surface in the **Candidate Speakers panel** (`/candidate-speakers` API + People-tab UI section); promote renames + flips kind, dismiss hard-deletes (segments lose `speaker_id` via existing FK).
+
+`reminders.source_window_id` no longer FKs to `extraction_windows` (migration 006 dropped the constraint). The `/reminders/:id/trace` endpoint resolves the source ID against `audio_clips` first, falling back to `extraction_windows` for legacy rows.
+
+The flag is mutually exclusive with the legacy `InferencePipeline` because both grab the microphone. Toggling it requires a restart. Live enrollment + dictation/translation handlers in `api/session.rs` and `api/translate.rs` still call `InferencePipeline::start_session` — flipping those over is the last unfinished migration step.
+
 ### Speaker continuity (`engine/continuity.rs`)
 
 Pure state machine: `MatchEvidence { Confirmed | Tentative | Unknown }` → `(AttributionOutcome, new ContinuityState)`. Notable rules — a **single** tentative match for a different speaker does not flip state when there's a carry-over in progress; two consecutive tentatives for the same candidate, or any confirmed, are required. Out-of-order segments (now possible because the cached embedding-worker pool can resolve segments out of order) are rejected explicitly in `within_window`.
