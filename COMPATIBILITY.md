@@ -2,6 +2,10 @@
 
 Current state: **Windows-only**. The app builds and ships for Windows. macOS and Linux targets require the work listed here before they are viable.
 
+## Recent fixes (loop iteration 9)
+
+- **#11** — Marked **Fixed**. The original audit complained "no CI pipeline at all"; iter 5 added `ci.yml` and iter 7 expanded `release.yml` to a multi-OS matrix. Both workflows now exist and are platform-broad. The catch-all entry (#11) is fully covered by #33's resolution.
+
 ## Recent fixes (loop iteration 8)
 
 Regression test coverage for the cross-platform shortcut + audio fixes — locks platform-aware behavior into the test suite so future refactors don't quietly regress.
@@ -1104,6 +1108,54 @@ Without a designed icon yet, `cargo tauri icon` against a placeholder graphic st
 
 ---
 
+---
+
+# Eighth-pass additions (loop iteration 9)
+
+While verifying coverage of all the existing items, I scanned for native browser dialog usage and found a cross-WebView consistency issue.
+
+---
+
+### 43. Native `window.confirm()` dialogs render inconsistently across WebViews
+
+`frontend/src/components/CandidateSpeakersPanel.tsx:49`, `frontend/src/components/settings/ModelSetup.tsx:180`, and `:197` use `window.confirm(...)` for destructive-action confirmation:
+
+```ts
+if (!window.confirm(t('candidates.confirmDismiss'))) return;
+```
+
+`window.confirm()` is implemented per-WebView, with three meaningful differences:
+
+| Platform | WebView | Dialog appearance / behavior |
+|---|---|---|
+| Windows | WebView2 (Chromium) | Native Windows confirm dialog, modal to the WebView frame |
+| macOS | WKWebView | Native macOS confirm dialog, modal to the page; matches OS theme |
+| Linux | WebKitGTK | Tauri's WebKitGTK build can render through GTK or **silently return false** depending on the embedder's `WebKitWebView` settings — the Tauri default in some 2.x versions disables native confirm to avoid IPC reentrance |
+
+The third case is the real risk: a user on Linux clicking the "Dismiss candidate" button in `CandidateSpeakersPanel` could see *nothing happen* — the confirm returns false (the user never saw it), and the destructive action is skipped. They press the button again, same result. Frustrating bug class.
+
+Even on Windows/macOS where it works, the look is jarringly OS-native against the app's custom Tailwind UI — looks like a security warning rather than a friendly app prompt.
+
+**Severity:** Medium · **Platform:** All (worst on Linux/WebKitGTK)
+
+**Fix:** Either:
+
+1. Use the Tauri dialog plugin — add `tauri-plugin-dialog = "2"` and `@tauri-apps/plugin-dialog`:
+
+```ts
+import { ask } from '@tauri-apps/plugin-dialog';
+const ok = await ask(t('candidates.confirmDismiss'), { kind: 'warning' });
+if (!ok) return;
+```
+
+The plugin renders consistent native dialogs on all three platforms via Tauri's IPC and avoids the WebKitGTK quirk.
+
+2. Or build a small in-app `<ConfirmDialog>` modal component using framer-motion (already a dep). This gives complete visual consistency with the rest of the UI and works in browser dev mode (no Tauri runtime needed).
+
+Option 2 is more code but matches the app's existing visual language.
+
+---
+
 ## Combined summary table
 
 | # | File | Severity | Platform | Status |
@@ -1118,7 +1170,7 @@ Without a designed icon yet, `cargo tauri icon` against a placeholder graphic st
 | 8 | `src-tauri/Cargo.toml:19` | High | Linux | **Fixed** (clear error + clipboard fallback on Wayland) |
 | 9 | `tauri.conf.json:22` | High | Linux | Open |
 | 10 | `docs/dev-setup.md` | Medium | All | **Fixed** |
-| 11 | `release.yml` Windows-only | Medium | All | See #33 |
+| 11 | `release.yml` Windows-only | Medium | All | **Fixed** (covered by #33) |
 | 12 | `.gitattributes` | Medium | macOS + Linux | **Fixed** |
 | 13 | `globals.css:60` | Low | macOS + Linux | **Fixed** |
 | 14 | `tauri.conf.json:26` | Low | macOS | **Fixed via #19** |
@@ -1150,3 +1202,4 @@ Without a designed icon yet, `cargo tauri icon` against a placeholder graphic st
 | 40 | `index.html:7-9` Google Fonts loaded externally | Medium | All | **Fixed** |
 | 41 | `globals.css:60` Plus Jakarta Sans unloaded | Low | All | **Fixed** |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
+| 43 | `window.confirm()` in 3 places | Medium | All (worst Linux) | Open |
