@@ -1152,6 +1152,89 @@ mod tests {
         assert_eq!(segs1[0].speaker_id, segs2[0].speaker_id);
     }
 
+    /// process_clip_production with an archive_model_id that points at no
+    /// downloaded files in ModelPaths must surface a clear error and not
+    /// hang or silently succeed. This is the most-likely user-facing
+    /// failure mode in production (clip lands but no archive model is
+    /// downloaded yet).
+    #[tokio::test]
+    async fn process_clip_production_errors_on_missing_archive_model() {
+        let pool = fresh_pool().await;
+        let session_id = mk_session(&pool).await;
+
+        let tmp = tempdir().unwrap();
+        let manifest = ClipManifest {
+            clip_id: Uuid::new_v4(),
+            session_id,
+            started_at_ms: 0,
+            ended_at_ms: 300_000,
+            segments: vec![ClipManifestSegment {
+                id: Uuid::new_v4(),
+                start_ms: 0,
+                end_ms: 1_000,
+                file: "a.wav".into(),
+            }],
+        };
+        let manifest_path = write_manifest(tmp.path(), &manifest).unwrap();
+        // Write a placeholder WAV so manifest decoding can read it before
+        // the ASR start path fails (so the failure is specifically the
+        // missing model file, not a missing audio file).
+        crate::engine::clip_writer::write_segment_wav(
+            tmp.path(),
+            "a.wav",
+            &[0.0_f32; 16_000],
+        )
+        .unwrap();
+
+        audio_clip::insert_pending(
+            &pool,
+            session_id,
+            0,
+            300_000,
+            1,
+            manifest_path.to_string_lossy().as_ref(),
+        )
+        .await
+        .unwrap();
+        let clip = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
+
+        // ModelPaths with no downloaded archive model — start_offline_asr
+        // should bail with a clear error.
+        let model_paths = crate::engine::model_manager::ModelPaths {
+            silero_vad: std::path::PathBuf::from("nonexistent_silero.onnx"),
+            transducers: std::collections::HashMap::new(),
+            speaker_embedding: None,
+            sense_voice: None,
+            moonshine_en: None,
+            paraformer_zh_small: None,
+            zipformer_ctc_zh_small: None,
+            funasr_nano: None,
+            whisper_base: None,
+            whisper_turbo: None,
+            pyannote_segmentation: None,
+        };
+
+        let result = process_clip_production(
+            &pool,
+            &clip,
+            "sense_voice_multi", // not in model_paths
+            None,
+            &model_paths,
+            0.4,
+            0.55,
+            None,
+        )
+        .await;
+
+        assert!(result.is_err(), "expected error on missing archive model");
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.contains("archive ASR start failed") || msg.contains("not downloaded"),
+            "expected clear error message, got: {}",
+            msg
+        );
+    }
+
     #[tokio::test]
     async fn process_clip_propagates_asr_errors() {
         struct FailingAsr;
