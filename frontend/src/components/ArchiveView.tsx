@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { useVoiceStore } from '../store/use-voice-store';
@@ -76,6 +76,14 @@ export function ArchiveView() {
   const starSegment = useVoiceStore((s) => s.starSegment);
   const unstarSegment = useVoiceStore((s) => s.unstarSegment);
   const deleteSegment = useVoiceStore((s) => s.deleteSegment);
+  const loadBackendClips = useVoiceStore((s) => s.loadBackendClips);
+
+  // Pull processed clips from the always-listening batch pipeline. Re-runs
+  // whenever the user opens Archive so newly-finished clips show up without
+  // a page refresh. Cheap call (single SQL query) — no need to debounce.
+  useEffect(() => {
+    void loadBackendClips();
+  }, [loadBackendClips]);
   const t = useT();
   const { lang } = useLanguage();
   const dateLocale = lang === 'zh-CN' ? 'zh-CN' : 'en-US';

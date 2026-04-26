@@ -15,14 +15,78 @@
 //! filenames that contain '/' or '\\'.
 
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::types::ClipManifest;
 use crate::repository::audio_clip;
 use crate::AppState;
+
+/// Frontend-shaped clip — matches the `Segment` type in
+/// `frontend/src/types/index.ts` so the Archive view can render backend
+/// clips with the same component used for live-flushed segments.
+#[derive(Debug, Serialize)]
+pub struct ClipResponse {
+    pub id: String,
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    pub text: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    /// Starred state lives in browser localStorage (clip ids that the user
+    /// starred). The backend doesn't track it, so this is always `false`
+    /// from the API; the frontend overlays the user's starred set.
+    pub starred: bool,
+    /// Convenience: clip duration in ms, derived from started/ended_at_ms.
+    /// Useful for the UI to label a clip as "5:00" without parsing text.
+    #[serde(rename = "durationMs")]
+    pub duration_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListClipsQuery {
+    /// Cap returned rows. Default 50; max 500 to bound response size.
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+}
+
+fn default_limit() -> i64 {
+    50
+}
+
+/// `GET /clips` — recent processed clips with joined transcript text.
+///
+/// Returns up to `?limit` clips ordered newest-first. Each clip's `text`
+/// is the concatenation of every final transcript across its VAD segments;
+/// empty for clips that ended up containing no speech.
+pub async fn list_clips(
+    State(state): State<AppState>,
+    Query(q): Query<ListClipsQuery>,
+) -> Response {
+    let limit = q.limit.clamp(1, 500);
+    let rows = match audio_clip::list_recent_with_text(&state.pool, limit).await {
+        Ok(r) => r,
+        Err(e) => return internal(format!("clip list query failed: {e}")),
+    };
+
+    let body: Vec<ClipResponse> = rows
+        .into_iter()
+        .map(|r| ClipResponse {
+            id: r.id,
+            session_id: r.session_id,
+            text: r.text.unwrap_or_default().trim().to_string(),
+            created_at: r.created_at,
+            starred: false,
+            duration_ms: r.ended_at_ms - r.started_at_ms,
+        })
+        .collect();
+
+    (StatusCode::OK, Json(body)).into_response()
+}
 
 pub async fn get_clip_segment_audio(
     State(state): State<AppState>,

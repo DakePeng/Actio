@@ -176,6 +176,56 @@ pub async fn get_by_id(
     Ok(row.map(AudioClipRow::into_clip))
 }
 
+/// One processed clip with its joined transcript text, for the Archive view.
+/// `text` is the concatenation of every final transcript across all segments
+/// in the clip, space-separated. Empty string for clips with zero finals.
+#[derive(Debug, Clone, FromRow)]
+pub struct ClipArchiveRow {
+    pub id: String,
+    pub session_id: String,
+    pub created_at: String,
+    pub started_at_ms: i64,
+    pub ended_at_ms: i64,
+    pub text: Option<String>,
+}
+
+/// List the most recent processed clips with their joined transcript text.
+/// Used by `GET /clips` to populate the Archive view's Clips section.
+///
+/// Filters:
+///   * status = 'processed' or 'empty' — clips that finished the batch pass
+///     (failed clips aren't shown; pending/running aren't yet useful)
+///   * ordered by started_at_ms DESC so newest is first
+///   * limit caps the row count to avoid sending megabytes of joined text
+pub async fn list_recent_with_text(
+    pool: &SqlitePool,
+    limit: i64,
+) -> Result<Vec<ClipArchiveRow>, sqlx::Error> {
+    sqlx::query_as::<_, ClipArchiveRow>(
+        r#"
+        SELECT
+            c.id,
+            c.session_id,
+            c.created_at,
+            c.started_at_ms,
+            c.ended_at_ms,
+            (
+                SELECT GROUP_CONCAT(t.text, ' ')
+                FROM transcripts t
+                JOIN audio_segments s ON s.id = t.segment_id
+                WHERE s.clip_id = c.id AND t.is_final = 1
+            ) AS text
+        FROM audio_clips c
+        WHERE c.status IN ('processed', 'empty')
+        ORDER BY c.started_at_ms DESC
+        LIMIT ?1
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +328,90 @@ mod tests {
         assert_eq!(clip.status, "failed");
         assert_eq!(clip.last_error.as_deref(), Some("boom3"));
         assert!(clip.finished_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn list_recent_with_text_returns_processed_and_empty_only() {
+        let pool = fresh_pool().await;
+        let session_id = mk_session(&pool).await;
+
+        // 3 clips: pending, processed, empty. Only the latter two should
+        // appear in the archive list.
+        let pending_id =
+            insert_pending(&pool, session_id, 0, 1_000, 0, "/tmp/p.json").await.unwrap();
+        let processed_id =
+            insert_pending(&pool, session_id, 1_000, 2_000, 1, "/tmp/q.json").await.unwrap();
+        let empty_id =
+            insert_pending(&pool, session_id, 2_000, 3_000, 0, "/tmp/r.json").await.unwrap();
+
+        // Promote and terminalize the latter two.
+        let _ = claim_next_pending(&pool).await.unwrap();
+        let _ = claim_next_pending(&pool).await.unwrap();
+        let _ = claim_next_pending(&pool).await.unwrap();
+        // claim_next_pending picks ORDER BY started_at_ms — first claim is
+        // pending_id (0), second is processed_id (1_000), third is empty_id.
+        // We intentionally leave pending_id in 'running' so it doesn't match.
+        mark_processed(&pool, processed_id, None).await.unwrap();
+        mark_empty(&pool, empty_id).await.unwrap();
+        // pending_id was claimed but we didn't mark it; it stays running.
+        // The list query shouldn't return it.
+
+        let rows = list_recent_with_text(&pool, 50).await.unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&processed_id.to_string().as_str()));
+        assert!(ids.contains(&empty_id.to_string().as_str()));
+        assert!(!ids.contains(&pending_id.to_string().as_str()));
+        // Newest first: empty_id started later than processed_id.
+        assert_eq!(rows[0].id, empty_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn list_recent_with_text_concatenates_transcripts() {
+        let pool = fresh_pool().await;
+        let session_id = mk_session(&pool).await;
+        let clip_id = insert_pending(&pool, session_id, 0, 5_000, 2, "/tmp/m.json")
+            .await
+            .unwrap();
+        let _ = claim_next_pending(&pool).await.unwrap();
+        mark_processed(&pool, clip_id, None).await.unwrap();
+
+        // Insert two segments tied to the clip + a final transcript on each.
+        let seg1 = Uuid::new_v4().to_string();
+        let seg2 = Uuid::new_v4().to_string();
+        sqlx::query(
+            r#"INSERT INTO audio_segments (id, session_id, start_ms, end_ms, clip_id)
+               VALUES (?1, ?2, 0, 1_000, ?3), (?4, ?2, 1_000, 2_000, ?3)"#,
+        )
+        .bind(&seg1)
+        .bind(session_id.to_string())
+        .bind(clip_id.to_string())
+        .bind(&seg2)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO transcripts
+               (id, session_id, segment_id, start_ms, end_ms, text, is_final, backend_type)
+               VALUES
+               (?1, ?2, ?3, 0, 1_000, 'hello world', 1, 'local'),
+               (?4, ?2, ?5, 1_000, 2_000, 'goodbye', 1, 'local')"#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(session_id.to_string())
+        .bind(&seg1)
+        .bind(Uuid::new_v4().to_string())
+        .bind(&seg2)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = list_recent_with_text(&pool, 50).await.unwrap();
+        let row = rows.iter().find(|r| r.id == clip_id.to_string()).unwrap();
+        // GROUP_CONCAT order is unspecified by SQL but SQLite typically
+        // preserves table-row order; assert both substrings present.
+        let text = row.text.clone().unwrap_or_default();
+        assert!(text.contains("hello world"), "got {text:?}");
+        assert!(text.contains("goodbye"), "got {text:?}");
     }
 
     #[tokio::test]

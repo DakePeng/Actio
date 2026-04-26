@@ -146,7 +146,8 @@ pub fn router(state: AppState) -> Router {
             "/candidate-speakers/:id",
             delete(candidate_speaker::dismiss),
         )
-        // clip audio playback (per-segment WAVs from the batch pipeline)
+        // clip listing (Archive view) + per-segment WAV playback
+        .route("/clips", get(clip::list_clips))
         .route(
             "/clips/:clip_id/segments/:segment_id/audio",
             get(clip::get_clip_segment_audio),

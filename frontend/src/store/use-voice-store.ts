@@ -7,7 +7,8 @@
 import { create } from 'zustand';
 import type { Segment } from '../types';
 import type { Speaker } from '../types/speaker';
-import { getWsUrl } from '../api/backend-url';
+import { getApiBaseUrl, getWsUrl } from '../api/backend-url';
+import { DEV_TENANT_ID } from '../api/actio-api';
 import * as speakerApi from '../api/speakers';
 import { translateLines, LlmDisabledError } from '../api/translate';
 
@@ -80,6 +81,11 @@ interface VoiceState {
   stopRecording: () => void;
   appendLiveTranscript: (text: string) => void;
   flushInterval: () => void;
+  /** Pull processed clips from the backend `audio_clips` table (the
+   *  always-listening batch pipeline) and merge them into `segments`.
+   *  Idempotent: existing segment ids are preserved with their starred
+   *  state, only new backend clips get appended. */
+  loadBackendClips: () => Promise<void>;
   starSegment: (id: string) => void;
   unstarSegment: (id: string) => void;
   deleteSegment: (id: string) => void;
@@ -811,6 +817,64 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       segments: next,
       currentSession: { ...currentSession, lines: [] },
     });
+  },
+
+  loadBackendClips: async () => {
+    // The always-listening batch pipeline writes processed clips to the
+    // `audio_clips` table independently of the live-recording UI. Fetch
+    // them here and merge into segments so the Archive view shows clips
+    // recorded while the user wasn't on the Live tab.
+    try {
+      const baseUrl = await getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/clips?limit=200`, {
+        headers: { 'x-tenant-id': DEV_TENANT_ID },
+      });
+      if (!res.ok) {
+        console.warn('[Actio] loadBackendClips: HTTP', res.status);
+        return;
+      }
+      const data: Array<{
+        id: string;
+        sessionId: string;
+        text: string;
+        createdAt: string;
+        starred: boolean;
+      }> = await res.json();
+
+      // Filter empty clips ("we listened to silence for 5 minutes") so the
+      // Archive doesn't fill up with blank cards.
+      const withText = data.filter((d) => d.text && d.text.trim().length > 0);
+
+      set((state) => {
+        const existing = new Map(state.segments.map((s) => [s.id, s]));
+        const merged: Segment[] = withText.map((d) => {
+          // Preserve any local starred state for clips we've seen before.
+          const prior = existing.get(d.id);
+          return {
+            id: d.id,
+            sessionId: d.sessionId,
+            text: d.text,
+            createdAt: d.createdAt,
+            starred: prior?.starred ?? false,
+          };
+        });
+
+        // Add any segments that exist locally but aren't in the backend
+        // response (e.g. legacy localStorage segments from before the batch
+        // pipeline, or clips with starred state we want to keep).
+        const backendIds = new Set(merged.map((s) => s.id));
+        for (const seg of state.segments) {
+          if (!backendIds.has(seg.id)) merged.push(seg);
+        }
+
+        merged.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const pruned = pruneSegments(merged);
+        saveVoiceData(pruned, state.clipInterval);
+        return { segments: pruned };
+      });
+    } catch (e) {
+      console.warn('[Actio] loadBackendClips failed:', e);
+    }
   },
 
   starSegment: (id) => {
