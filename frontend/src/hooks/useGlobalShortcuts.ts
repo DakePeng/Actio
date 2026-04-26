@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store/use-store';
-import { getWsUrl } from '../api/backend-url';
+import { getApiUrl, getWsUrl } from '../api/backend-url';
 import { primaryMod } from '../utils/platform';
 import { flashWordmark } from './useWordmarkFlash';
 
@@ -94,7 +94,7 @@ export function useGlobalShortcuts() {
     (async () => {
       let shortcuts: Record<string, string> = { ...DEFAULT_GLOBAL_SHORTCUTS };
       try {
-        const res = await fetch('http://127.0.0.1:3000/settings');
+        const res = await fetch(await getApiUrl('/settings'));
         if (res.ok) {
           const data = await res.json();
           const persisted: Record<string, string> | undefined =

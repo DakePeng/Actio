@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useT, useTMaybe, type TKey } from '../../i18n';
 import { ConfirmDialog, useConfirm } from '../ConfirmDialog';
+import { getApiBaseUrl, getApiUrl } from '../../api/backend-url';
 
 type DownloadTarget =
   | { type: 'shared' }
@@ -50,8 +51,6 @@ interface Settings {
   llm?: Record<string, unknown>;
 }
 
-const API_BASE = 'http://127.0.0.1:3000';
-
 type LanguageTab = 'all' | 'chinese' | 'english' | 'korean' | 'french' | 'multilingual';
 
 const LANGUAGE_TABS: { id: LanguageTab; labelKey: TKey }[] = [
@@ -94,12 +93,13 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
 
   const refreshAll = useCallback(async () => {
     try {
+      const baseUrl = await getApiBaseUrl();
       const [statusRes, modelsRes, settingsRes, embeddingsRes, speakersRes] = await Promise.all([
-        fetch(`${API_BASE}/settings/models`),
-        fetch(`${API_BASE}/settings/models/available`),
-        fetch(`${API_BASE}/settings`),
-        fetch(`${API_BASE}/settings/models/embeddings`),
-        fetch(`${API_BASE}/speakers`),
+        fetch(`${baseUrl}/settings/models`),
+        fetch(`${baseUrl}/settings/models/available`),
+        fetch(`${baseUrl}/settings`),
+        fetch(`${baseUrl}/settings/models/embeddings`),
+        fetch(`${baseUrl}/speakers`),
       ]);
       if (statusRes.ok) {
         const s: ModelStatus = await statusRes.json();
@@ -136,7 +136,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
 
   const handleCancelDownload = async () => {
     try {
-      await fetch(`${API_BASE}/settings/models/cancel-download`, { method: 'POST' });
+      await fetch(await getApiUrl('/settings/models/cancel-download'), { method: 'POST' });
       await refreshAll();
     } catch {
       // ignore
@@ -146,7 +146,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
   const handleDownload = async (target: DownloadTarget) => {
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/settings/models/download`, {
+      const res = await fetch(await getApiUrl('/settings/models/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -164,7 +164,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
   const handleSelectModel = async (modelId: string) => {
     setActiveModel(modelId);
     try {
-      await fetch(`${API_BASE}/settings`, {
+      await fetch(await getApiUrl('/settings'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audio: { asr_model: modelId } }),
@@ -188,7 +188,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     }
     setActiveEmbedding(id);
     try {
-      await fetch(`${API_BASE}/settings`, {
+      await fetch(await getApiUrl('/settings'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audio: { speaker_embedding_model: id } }),
@@ -211,7 +211,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
     if (!confirmed) return;
     try {
       const res = await fetch(
-        `${API_BASE}/settings/models/${encodeURIComponent(modelId)}`,
+        await getApiUrl(`/settings/models/${encodeURIComponent(modelId)}`),
         { method: 'DELETE' },
       );
       if (!res.ok) {
@@ -223,7 +223,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
       if (activeModel === modelId) {
         setActiveModel('');
         try {
-          await fetch(`${API_BASE}/settings`, {
+          await fetch(await getApiUrl('/settings'), {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ audio: { asr_model: null } }),
@@ -235,7 +235,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
       if (activeEmbedding === modelId) {
         setActiveEmbedding('');
         try {
-          await fetch(`${API_BASE}/settings`, {
+          await fetch(await getApiUrl('/settings'), {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ audio: { speaker_embedding_model: null } }),
@@ -275,7 +275,7 @@ export function ModelSetup({ onReady }: { onReady?: () => void }) {
             const src = e.target.value as AsrDownloadSource;
             setDownloadSource(src);
             try {
-              await fetch(`${API_BASE}/settings`, {
+              await fetch(await getApiUrl('/settings'), {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ audio: { download_source: src } }),

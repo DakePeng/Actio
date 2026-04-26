@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../../i18n';
-
-const API_BASE = 'http://127.0.0.1:3000';
+import { getApiUrl } from '../../api/backend-url';
 
 interface AudioDeviceInfo {
   name: string;
@@ -37,19 +36,19 @@ interface AudioSettingsShape {
 }
 
 async function fetchDevices(): Promise<AudioDeviceInfo[]> {
-  const res = await fetch(`${API_BASE}/settings/audio-devices`);
+  const res = await fetch(await getApiUrl('/settings/audio-devices'));
   if (!res.ok) throw new Error('Failed to fetch audio devices');
   return res.json();
 }
 
 async function fetchSettings(): Promise<{ audio?: AudioSettingsShape }> {
-  const res = await fetch(`${API_BASE}/settings`);
+  const res = await fetch(await getApiUrl('/settings'));
   if (!res.ok) throw new Error('Failed to fetch settings');
   return res.json();
 }
 
 async function patchAudio(patch: Partial<AudioSettingsShape>): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings`, {
+  const res = await fetch(await getApiUrl('/settings'), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ audio: patch }),
@@ -82,10 +81,15 @@ export function AudioSettings() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/settings/models/available`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: AsrModelOption[]) => setModels(rows))
-      .catch(() => setModels([]));
+    void (async () => {
+      try {
+        const r = await fetch(await getApiUrl('/settings/models/available'));
+        const rows: AsrModelOption[] = r.ok ? await r.json() : [];
+        setModels(rows);
+      } catch {
+        setModels([]);
+      }
+    })();
   }, []);
 
   useEffect(() => {

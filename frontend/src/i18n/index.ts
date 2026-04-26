@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { en, type TKey, type Translations } from './locales/en';
 import { zhCN } from './locales/zh-CN';
+import { getApiUrl } from '../api/backend-url';
 
 export type Locale = 'en' | 'zh-CN';
 
@@ -64,7 +65,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('http://127.0.0.1:3000/settings');
+        const res = await fetch(await getApiUrl('/settings'));
         if (!res.ok) return;
         const settings = await res.json();
         const remote: unknown = settings?.language;
@@ -98,11 +99,17 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     }
     // Fire-and-forget the backend write; settings persistence survives a
     // failed request because the boot cache picks up the last value.
-    void fetch('http://127.0.0.1:3000/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language: next }),
-    }).catch(() => {});
+    void (async () => {
+      try {
+        await fetch(await getApiUrl('/settings'), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: next }),
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
   }, []);
 
   const t = useCallback<LanguageContextValue['t']>(

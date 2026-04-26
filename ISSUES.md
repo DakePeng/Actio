@@ -398,6 +398,9 @@ No behaviour change; this is a comment-only fix.
 
 ### 52. Frontend hardcodes `http://127.0.0.1:3000` in 7 places, bypassing port-fallback
 
+**Status:** Resolved 2026-04-26 — all 7 sites now go through `getApiUrl()` (or `getApiBaseUrl()` for the parallel-fetch refresh in `ModelSetup.tsx`). 177/177 tests pass; `pnpm build` clean of static/dynamic mixing warnings. Bundle size effectively unchanged (`backend-url.ts` was already universally imported elsewhere).
+
+
 `frontend/src/api/backend-url.ts` exposes `getApiUrl(path)` and `getApiBaseUrl()` which probe ports 3000–3009 (`/health`) and respect the `VITE_ACTIO_API_BASE_URL` env var. Several files still hardcode `http://127.0.0.1:3000` directly, which silently fails when the backend lands on a fallback port (e.g. when 3000 is held by another process — exactly the scenario the comment at `useGlobalShortcuts.ts:245` calls out for the WS path).
 
 Concrete sites (production code, not tests):
@@ -535,4 +538,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 50 | Cluster gate settings — UI knob still pending | Low | All | Partial — docs landed; UI follow-up open |
-| 52 | 7 frontend sites hardcode `http://127.0.0.1:3000` | Low | All | Open |
