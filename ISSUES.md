@@ -1140,6 +1140,80 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 80. `StandbyTray.tray-transcript` combines `aria-live` with `aria-label` — streaming text never reaches screen readers
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/StandbyTray.tsx:198-216` renders the dictation transcript region as:
+
+```tsx
+<div
+  className={`tray-transcript${transcriptText ? '' : ' tray-transcript--empty'}`}
+  role="status"
+  aria-live="polite"
+  aria-label={isDictationTranscribing ? t('tray.aria.transcribing') : t('tray.aria.listening')}
+>
+  <span className="tray-transcript__label">
+    {isDictationTranscribing ? t('tray.status.transcribing') : t('tray.status.listening')}
+  </span>
+  <div ref={transcriptViewportRef} className="tray-transcript__viewport">
+    {transcriptText || t('tray.status.listening')}
+  </div>
+</div>
+```
+
+Three ARIA attributes coexist on the parent div, and they fight each other:
+
+1. **`aria-label` overrides inner content for assistive tech.** Per the WAI-ARIA spec, when an element has `aria-label`, screen readers announce the label *instead of* the element's text content. So the streaming `transcriptText` inside the viewport never reaches the screen-reader user — the very text the dictation feature is producing is invisible to them.
+2. **`role="status"` already implies `aria-live="polite"`** ([WAI-ARIA spec](https://www.w3.org/TR/wai-aria-1.2/#status)). The explicit `aria-live="polite"` is redundant.
+3. **The aria-label changes once between two static strings** (`tray.aria.listening` → `tray.aria.transcribing`) when the dictation phase advances. So screen readers do get one polite announcement on state change — but that's the *only* dictation feedback they receive.
+
+For a sighted user the experience is: small panel pops up showing "Listening…", you speak, the panel updates with partial transcript text, then settles on the final text. For a screen-reader user it's: announcement "Listening" → silence (no streaming text) → announcement "Transcribing" → silence → panel disappears. They never hear what was captured.
+
+**Adjacent observation:** the streaming transcript would *itself* be too noisy to announce verbatim through `aria-live` — partials mutate ~10×/second, swamping any polite announcement queue. So the fix isn't simply "drop aria-label and let the inner text be live" — that swaps one bad UX for another.
+
+**Severity:** Medium · **Platform:** All · **Type:** a11y / bug · **Scope:** small (~10 LoC: split label vs viewport responsibilities)
+
+**Proposed direction:** keep the announcement narrow and useful — only the phase label.
+
+```tsx
+<div
+  className={`tray-transcript${transcriptText ? '' : ' tray-transcript--empty'}`}
+  // No role/aria-live on the outer container — it's just visual scaffolding.
+>
+  <span
+    className="tray-transcript__label"
+    role="status"
+    aria-live="polite"
+  >
+    {isDictationTranscribing ? t('tray.status.transcribing') : t('tray.status.listening')}
+  </span>
+  <div
+    ref={transcriptViewportRef}
+    className="tray-transcript__viewport"
+    aria-hidden="true"
+  >
+    {transcriptText || t('tray.status.listening')}
+  </div>
+</div>
+```
+
+Rationale:
+- The label span carries the live region. It changes between two stable strings — exactly two announcements per dictation cycle, exactly the right granularity.
+- The viewport is marked `aria-hidden="true"` because the streaming partials are visual feedback, not assistive-tech-friendly content. Screen-reader users get the phase change; they don't get drowned in partial text.
+- After dictation completes, the result is pasted into the focused input — the *consuming* element gets to announce the final text via its own focus/value changes, not this preview region.
+
+**Acceptance:**
+1. The outer `tray-transcript` div has no `role`, `aria-live`, or `aria-label`.
+2. The `tray-transcript__label` span has `role="status" aria-live="polite"` (kept tight; only announces when the label string changes).
+3. The `tray-transcript__viewport` div has `aria-hidden="true"`.
+4. New vitest pins the structure: render with `isDictating=true` + `isDictationTranscribing=false` → assert the outer container lacks aria-label and the inner label span has role=status. Toggle `isDictationTranscribing` → assert the label text changed.
+5. `pnpm tsc --noEmit` clean; `pnpm test` 221+/221+ green; `pnpm build` flat.
+
+**Out of scope:** the broader StandbyTray a11y sweep — keyboard navigation between drag-handle / brand-trigger / mic / chevron, focus order when expanded, etc. #80 is the contradictory ARIA on the dictation transcript only.
+
+---
+
 ### 79. `LiveTab` "Listening since" pill announces elapsed time at 1 Hz to screen readers
 
 **Status:** Resolved 2026-04-27 — dropped `aria-live="polite"` from `<p className="live-tab__since">`. Added a separate `<span className="visually-hidden" role="status" aria-live="polite">` whose content is driven by a `useEffect` that fires only on the `isOn` transition (with a `prevIsOnRef` guard). On initial mount the status is empty so the page-load state doesn't announce as if the user just stopped a session. Two new i18n keys (`live.aria.listeningStarted`, `live.aria.listeningStopped`) added in both `en.ts` and `zh-CN.ts`. Added a `.visually-hidden` utility class to `globals.css`. New `LiveTab.aria-live.test.tsx` (4 tests) pins: pill no longer carries aria-live, initial mount = empty status, transition-on = single started-at announcement (stable across `now` ticks), transition-off = "Listening stopped". Verification: `pnpm tsc --noEmit` clean, `pnpm test` 217 → 221, `pnpm build` succeeded.
