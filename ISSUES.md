@@ -568,6 +568,38 @@ The shape mirrors `http.ts::requestJson` exactly except for the URL resolution. 
 
 ---
 
+### 64. `pushFeedback` lifetime branch (actionable vs plain) has no test
+
+`frontend/src/store/use-store.ts::pushFeedback` (added/extended for the undo-toast work in ISS-054) has a load-bearing conditional that picks the toast lifetime:
+
+```ts
+const lifetimeMs = action ? 5000 : 2200;
+feedbackTimer = window.setTimeout(() => {
+  set((state) => ({ ui: { ...state.ui, feedback: null } }));
+  feedbackTimer = null;
+}, lifetimeMs);
+```
+
+The intent is: actionable toasts (carry an `action: { labelKey, onAction }`) get a 5 s grace period so the user has time to hit "Undo"; plain toasts auto-dismiss at 2.2 s. The Needs-Review undo-flow tests added in #54 (`NeedsReviewView.test.tsx`) cover the user clicking Undo within the window — but none of the existing store tests pin the **timeout** itself: that an unattended actionable toast survives for ~5 s, that an unattended plain toast disappears at ~2.2 s, that a follow-up `setFeedback` call cancels the prior timer rather than letting two timers race, and that `clearFeedback` clears the timer.
+
+A grep across `frontend/src/store/__tests__/*.ts` for `pushFeedback`, `setFeedback`, `lifetimeMs`, `5000`, or `2200` returns zero hits — no regression test pins this.
+
+The risk if the branch breaks (someone refactors back to a single timeout, or flips the conditional): the undo-toast UX silently regresses to a 2.2 s window that's too short to react to, or the plain toast lingers visibly longer than designed. Both would land typecheck + test green.
+
+**Severity:** Low · **Platform:** All · **Type:** test · **Scope:** small (vitest with `vi.useFakeTimers()`)
+
+**Acceptance:**
+1. New `use-store.feedback.test.ts` (or extend `use-store.settings.test.ts`) under `vi.useFakeTimers()` covering at minimum:
+   - Plain toast: after `setFeedback('msg', 'neutral')`, advancing time by 2 200 ms clears `ui.feedback` to `null`. Advancing by 2 199 ms does not.
+   - Actionable toast: after `setFeedback('msg', 'neutral', vars, { labelKey, onAction })`, advancing by 4 999 ms keeps the toast; 5 000 ms clears it.
+   - Replace-in-flight: a second `setFeedback` call before the first timer fires replaces both message and timer (the second's lifetime applies, not the first's).
+   - `clearFeedback` clears the toast and cancels the timer (advancing time after `clearFeedback` doesn't re-null an already-null state, and importantly doesn't fire a stale callback).
+2. 196 → 200ish frontend tests, all green.
+
+This is a small gap on logic I just shipped — surfacing it as a separate issue rather than slipping it into the next refactor so the cleanup is auditable.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -977,3 +1009,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 64 | `pushFeedback` lifetime branch has no test | Low | All | Open |
