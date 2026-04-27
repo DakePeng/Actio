@@ -909,7 +909,53 @@ These are the AGENTS.md analogue of ISS-049 (CLAUDE.md) and ISS-069 (README) —
 
 ---
 
+### 72. `formatTimeShort` has time-vs-calendar bucketing bugs the tests now pin
+
+Two real UX bugs surfaced while writing the ISS-071 tests for `formatTimeShort`:
+
+**(a) "today" label leaks into next-calendar-day times under 24h ahead.** The function uses `diffMin = (target - now) / 60000` and `diffDays = floor(diffMin / 1440)` for time-bucket arithmetic, *not* calendar-day boundaries. So:
+
+```
+now    = Mon 14:00
+target = Tue 09:00 (next calendar day, but only 19h ahead)
+diffMin = 1140  → falls into `if (diffMin < 1440) return ${timeStr} today`
+                 → renders as "9:00 AM today"
+```
+
+A reminder due Tuesday morning shows up labeled "today" on Monday afternoon. Subtle but visible — every reminder card on the Board, Needs-Review, and the trace inspector formats this way.
+
+**(b) Weekday name is computed from time-bucketed `diffDays`, not calendar position.** Same root cause:
+
+```
+now    = Mon 14:00
+target = Sun 11:30 (+6 calendar days)
+diff   = 5d 21h 30m → diffMin = 8490 → diffDays = floor(8490/1440) = 5
+                                        ^ NOT 6, so weekday rolls to Saturday not Sunday
+                  → renders as "Saturday at 11:30 AM"
+```
+
+The render says "Saturday" for what is actually Sunday, again because the bucket is hour-based.
+
+**(c) "Due {dayName}" emits "Due undefined" for past dates.** The `dayLabel` helper at `time.ts:15-19` does `dayNames[(now.getDay() + diffDays) % 7]`. For past dates, `diffDays` is negative, and JS's `%` operator preserves sign: `-3 % 7 === -3`, which indexes `dayNames` out of bounds → `undefined`. So a reminder due 3 days ago renders the literal string `"Due undefined"`. The fix is `((diffDays % 7) + 7) % 7` (canonical positive-modulo).
+
+The ISS-071 test file pins all three behaviours as "current state" with comments — a future deliberate fix will update both the function and the tests together.
+
+**Severity:** Low · **Platform:** All · **Type:** bug · **Scope:** small (one function, ~10 lines of arithmetic — the trick is doing it without breaking the assertion that `iso(0,...)` falls into the right bucket)
+
+**Acceptance:**
+1. `formatTimeShort` renders "today" only when `target.getDate() === now.getDate()` AND the timezone month/year agree, not just `diffMin < 1440`. Move to calendar-aware comparisons (`startOfDay(target).getTime() - startOfDay(now).getTime()` etc.).
+2. Weekday name uses `target.getDay()` directly rather than `(now.getDay() + diffDays) % 7`. Eliminates both the time-bucket lag and the negative-modulo bug at once.
+3. The "Due {dayName}" branch shows the actual past weekday (target.getDay()) — never "undefined".
+4. Update `time.test.ts` so that the formerly-pinned-as-buggy cases now assert correct behaviour: `iso(1, 9, 0)` → "Tomorrow at 9:00 AM", `iso(6, 11, 30)` → "Sunday at 11:30 AM", `iso(-3, 10)` → "Due Friday".
+5. Existing "1-23h ahead today" cases remain correct (just `today` label re-anchored to calendar same-day).
+
+This is the natural follow-up to #71: now that the buggy behaviour is pinned, fixing it is a deliberate edit instead of an accidental break.
+
+---
+
 ### 71. `formatTimeShort` is unrendered-everywhere and untested
+
+**Status:** Resolved 2026-04-27 — added `frontend/src/utils/__tests__/time.test.ts` with 10 cases under `vi.useFakeTimers()` (anchored at `2026-04-27 14:00 Mon`) covering all 7 rendering branches, the 12-hour edge cases, and minute-padding. Three buggy behaviours discovered during the fix were pinned as current state with inline comments, and filed as ISS-072 for a deliberate cleanup tick. 205 → 215 frontend tests; tsc clean.
 
 `frontend/src/utils/time.ts::formatTimeShort` (32 lines) is the function rendered on every reminder card (Board, Needs-Review, Card.tsx, NeedsReviewView.tsx) for the "due time" display — and it has zero direct test coverage. `frontend/src/utils/__tests__/` only contains `platform.test.ts`.
 
@@ -1362,4 +1408,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 71 | `formatTimeShort` (every reminder card) untested | Low | All | Open |
+| 72 | `formatTimeShort` time-vs-calendar bucketing bugs | Low | All | Open |
