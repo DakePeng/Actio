@@ -132,8 +132,12 @@ pub struct AudioSettings {
     pub speaker_embedding_model: Option<String>,
     #[serde(default)]
     pub download_source: DownloadSource,
-    /// Number of days to keep retained voiceprint-candidate clips on disk
-    /// before the background cleanup task deletes them.
+    /// Legacy retention for the flat-dir voiceprint-candidate sweep at
+    /// `<clips_dir>/`. Coexists with `audio_retention_days` (which handles
+    /// the nested per-clip dirs from the batch pipeline) until Plan Task 17
+    /// retires the legacy infra. Both cleanup tasks run concurrently — see
+    /// `lib.rs::audio_session_loop` and the comments around the two
+    /// `clip_storage::*_cleanup_task` calls.
     #[serde(default = "default_clip_retention_days")]
     pub clip_retention_days: u32,
     /// Cosine similarity at or above which a match is called "confirmed"
@@ -213,8 +217,9 @@ pub struct AudioSettings {
     pub cluster_min_duration_ms: u32,
 
     /// Per-clip WAV files older than this many days are swept by the
-    /// background cleanup task. Replaces the per-failed-segment retention
-    /// path that used `clip_retention_days`.
+    /// background cleanup task. Coexists with the legacy `clip_retention_days`
+    /// flat-dir sweep — both run concurrently until Plan Task 17 retires the
+    /// legacy infra (see `lib.rs::audio_session_loop`).
     #[serde(default = "default_audio_retention_days")]
     pub audio_retention_days: u32,
     /// Provisional speakers (kind='provisional') with no match in this many

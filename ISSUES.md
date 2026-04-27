@@ -398,6 +398,9 @@ No behaviour change; this is a comment-only fix.
 
 ### 56. Doc-comment drift: `clip_retention_days` is not actually replaced by `audio_retention_days`
 
+**Status:** Resolved 2026-04-26 — both `clip_retention_days` and `audio_retention_days` doc-comments rewritten to call out the coexistence and the Plan Task 17 retirement reference. `cargo check` clean; no behaviour change.
+
+
 `backend/actio-core/src/engine/app_settings.rs` documents the relationship between two retention settings:
 
 ```rust
@@ -675,4 +678,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 56 | `clip_retention_days` doc says "replaced" but both sweeps still run | Low | All | Open |
