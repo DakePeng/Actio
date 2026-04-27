@@ -763,6 +763,15 @@ Option B is more idiomatic for a multi-module API crate (the type is API-specifi
 
 ### 68. `.env.example` files are stale (backend) or missing (frontend)
 
+**Status:** Resolved 2026-04-27 — both files updated. Verified actual env-var usage by grep before rewriting:
+
+- `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` are **live** — `config::LlmConfig::from_env_optional()` reads them to seed the initial Remote-LLM config on first launch. Kept (commented out by default with a note that they're bootstrap-only).
+- `RUST_LOG` standard tracing var — kept.
+- `DATABASE_URL`, `HTTP_PORT`, `WORKER_HOST`, `WORKER_PORT` had **zero references** in `backend/`. Dropped, and added a footer block explaining what replaces them (SQLite path is computed from `config.data_dir`; backend HTTP uses port-discovery 3000–3009; no Python worker).
+- New `frontend/.env.example` documents `VITE_ACTIO_API_BASE_URL` with a "set this only when…" note covering Tauri custom shell, remote dev, and bypass-discovery cases.
+
+The original triage assumption that `LLM_*` were unused was wrong (they're bootstrap-only, but they're alive); the rewritten file keeps them with the right framing instead of dropping them.
+
 Two environment-config docs gaps surfaced during the ISS-067 cleanup:
 
 **(a) Backend `.env.example` is stale and misleading.** `backend/.env.example`:
@@ -1207,4 +1216,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 68 | `.env.example` stale (backend) or missing (frontend) | Low | All | Open |
