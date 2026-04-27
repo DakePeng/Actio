@@ -1140,6 +1140,46 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 79. `LiveTab` "Listening since" pill announces elapsed time at 1 Hz to screen readers
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/LiveTab.tsx:107` renders the listening-since pill as:
+
+```tsx
+{isOn && listeningStartedAt && (
+  <p className="live-tab__since" aria-live="polite">
+    {t('live.listeningSince', {
+      time: formatTime(listeningStartedAt),
+      duration: formatDuration(now - listeningStartedAt),
+    })}
+  </p>
+)}
+```
+
+`now` is updated every second by a `setInterval` (`useEffect` lines 71-75). The component re-renders, the duration string changes from `"0:01"` → `"0:02"` → `"0:03"` …, and because the parent paragraph is marked `aria-live="polite"`, **assistive technology gets a fresh announcement every second**: "Listening since 9:42 AM, 0:01" → "…0:02" → "…0:03" → … until the user toggles listening off.
+
+This is an audible spam problem for screen-reader users. NVDA/JAWS/VoiceOver will queue these announcements, and a long session quickly drowns more important transitions (e.g. a partial transcript landing, a candidate-speaker arriving) under a stream of timer ticks.
+
+**Why this happened (likely):** the developer wanted the *initial* "Listening since 9:42 AM" message to be announced when listening flipped on. `aria-live="polite"` is the right tool for that one transition, but it doesn't filter — every subsequent text change triggers another announcement. Combined with the 1 Hz update loop, that becomes ~3,600 announcements per hour.
+
+**Adjacent risk (not blocking #79):** `tray-transcript` in `components/StandbyTray.tsx:199-208` sets both `aria-live="polite"` AND `aria-label` on the same element — `aria-label` overrides the inner content for assistive tech, so the polite region effectively doesn't announce its updates anyway, but it's a contradictory ARIA pattern that should be cleaned up. Out of scope for #79; flagged here so it's not lost.
+
+**Severity:** Medium · **Platform:** All · **Type:** a11y / bug · **Scope:** small (~5 LoC: drop the `aria-live` from the pill, optionally introduce a separate visually-hidden status element that announces only the on/off transition once)
+
+**Proposed direction (recommended):**
+1. Remove `aria-live="polite"` from `<p className="live-tab__since">`. The visual pill keeps doing its job; sighted users see the timer tick.
+2. Add a one-shot `<span className="visually-hidden" role="status">` somewhere in `LiveTab.tsx` that emits a single static message when listening flips on (e.g., "Listening started at 9:42 AM"), and another when it flips off. Two announcements per session instead of 3,600 per hour.
+
+**Acceptance:**
+1. The duration pill no longer carries `aria-live`.
+2. A new visually-hidden region announces the on/off transitions once each (verifiable via a vitest that mounts LiveTab in `isOn=false`, flips to `isOn=true`, and asserts the `role="status"` content updated to the started-at message — but does NOT update on subsequent `now` ticks).
+3. `pnpm tsc --noEmit` clean; `pnpm test` 217+/217+ green; `pnpm build` flat.
+
+**Out of scope:** the broader a11y sweep across LiveTab (e.g., `<main>` line 117 also has `aria-live="polite"` for the streaming transcript — which is intentional and useful, but its interaction with screen-reader rate limiting is a deeper design question). #79 is the duration-pill timer only.
+
+---
+
 ### 78. `PreferencesSection` toggles use the legacy `.toggle` style — drift from the documented `.settings-check` pattern
 
 **Status:** Resolved 2026-04-27 — rewrote both toggles in `PreferencesSection.tsx` to use `<input className="settings-check" role="switch" aria-checked aria-label … />`, matching `AudioSettings.tsx:306,400`. With zero remaining `className="toggle"` consumers, deleted the `.toggle`, `.toggle input`, `.toggle__track`, `.toggle__thumb`, and the two `:checked` selector rules from `globals.css` (45 lines). Build CSS chunk shrunk 114.01 → 113.32 kB (-690 B uncompressed, -110 B gzipped). Verification: `pnpm tsc --noEmit` clean, `pnpm test` 217/217, `pnpm build` succeeded.
