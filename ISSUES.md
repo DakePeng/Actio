@@ -703,6 +703,61 @@ Lower-cost incremental option: tackle one route group per tick (reminders, label
 
 ---
 
+### 67. `AppApiError` lives in `api/session.rs`; the unused `crate::error::AppError` shadows it
+
+Two related code-organization findings:
+
+**(a) Dead module: `crate::error::AppError`** — `backend/actio-core/src/error.rs` (10 lines) declares:
+
+```rust
+#[derive(Error, Debug)]
+pub enum AppError {
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
+}
+```
+
+Zero importers across the codebase. The crate's `lib.rs` declares `pub mod error;`, but a grep for `crate::error`, `use crate::error::`, or any `AppError` usage returns nothing. This was probably scaffolded as the first error type and abandoned when `AppApiError` (see below) became the de-facto choice.
+
+**(b) Misplaced active type: `crate::api::session::AppApiError`** — the actually-used enum lives in `api/session.rs:572-576`:
+
+```rust
+#[derive(Debug, ToSchema)]
+#[allow(dead_code)]
+pub enum AppApiError {
+    Internal(String),
+    BadRequest(String),
+    Conflict(String),
+}
+```
+
+7 sibling files import `use crate::api::session::AppApiError;`:
+
+```
+api/candidate_speaker.rs:19    api/clip.rs:25
+api/label.rs:6                 api/llm.rs:6
+api/reminder.rs:8              api/settings.rs:7
+api/translate.rs:7
+```
+
+The location is a vestige of when `session.rs` was the first API module; the type is now shared infrastructure. A new contributor reading any of those 7 files sees an oddly-specific cross-module reach.
+
+**Severity:** Low · **Platform:** All · **Type:** refactor · **Scope:** small
+
+**Acceptance:**
+1. Decide between two clean homes:
+   - **(A)** Move `AppApiError` into the existing `crate::error` module (replacing or coexisting with the dead `AppError`). Imports become `use crate::error::AppApiError;`. Touches the 7 importers + `error.rs` + a couple lines in `api/mod.rs` for the `OpenApi` schema reference.
+   - **(B)** Move `AppApiError` into a new `crate::api::error` module. Imports become `use crate::api::error::AppApiError;`. Same touch surface; keeps API-specific types under `api/`.
+2. Delete the dead `crate::error::AppError` enum either way (option A folds it; option B drops it).
+3. Update the OpenAPI registration in `api/mod.rs` (currently `paths(...)` references handlers that return `AppApiError` and `components(schemas(...))` includes it as a bare ident — adjust path if the type moves).
+4. `cargo test -p actio-core --lib` 214/214 stays green; `cargo check` clean of new warnings.
+
+Option B is more idiomatic for a multi-module API crate (the type is API-specific, not a general crate error). Option A is shorter (uses the existing module). Either is fine — the win is removing the surprise of `use crate::api::session::AppApiError;` from sibling files plus retiring the dead `AppError`.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1112,3 +1167,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 67 | `AppApiError` parked in `session.rs`; dead `crate::error` | Low | All | Open |
