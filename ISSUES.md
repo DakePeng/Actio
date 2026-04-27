@@ -434,6 +434,9 @@ The `applyPendingResolutions` function is currently file-private (no `export`). 
 
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
+**Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
+
+
 `backend/actio-core/src/engine/live_enrollment.rs` (261 lines, **0 tests**) implements the live voiceprint enrollment flow that CLAUDE.md (line 100) describes:
 
 > Gate checks happen **inside** the Mutex critical section to avoid snapshot-recheck races. Cancelling cleans **only** the rows saved during the current session via `cleanup_partial_embeddings` — prior successful enrollments for the same speaker survive. A watchdog tokio task owns natural-completion teardown (pipeline stop + `session::end_session`) so a Complete status doesn't leak an unbounded DB session.
@@ -838,4 +841,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 60 | `live_enrollment::consume_segment` race-fix has no tests | Low | All | Open |
