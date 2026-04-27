@@ -603,6 +603,43 @@ This is a small gap on logic I just shipped — surfacing it as a separate issue
 
 ---
 
+### 65. `mapBackendReminder` null-fallback branches are mostly untested
+
+`frontend/src/api/actio-api.ts::mapBackendReminder` (lines 45-62) has four non-trivial null-coalescing branches that the existing test doesn't cover. The single test in `actio-api.test.ts` exercises the all-fields-populated archived path; nullable inputs slip through.
+
+```ts
+title: dto.title ?? dto.description,                                // (a)
+priority: dto.priority ?? 'medium',                                 // (b)
+speakerId: dto.speaker_id ?? undefined,                             // (c) and similar
+archivedAt: dto.status === 'archived'
+  ? dto.archived_at ?? dto.updated_at
+  : null,                                                            // (d)
+```
+
+(a) When the backend returns a reminder without an explicit title (older auto-extracted items had `title: null`), the description doubles as the title — the UI's primary text. A refactor that swapped `??` for `||` would change behaviour for empty-string descriptions.
+
+(b) When priority is null, the UI defaults to `'medium'`. Without this, the Card component renders a non-existent priority class.
+
+(d) Three-way branch:
+- `status='archived'` AND `archived_at` set → use `archived_at` (✅ tested)
+- `status='archived'` AND `archived_at` null → fall back to `updated_at` (untested — supports legacy rows)
+- `status` is `'open'` / `'pending'` → `archivedAt` is null regardless of any DB-side `archived_at` (untested — frontend treats status as source of truth)
+
+**Severity:** Low · **Platform:** All · **Type:** test · **Scope:** small (extend existing `actio-api.test.ts`)
+
+**Acceptance:**
+1. New cases in `actio-api.test.ts`:
+   - Null title falls back to description.
+   - Null priority falls back to `'medium'`.
+   - Null nullable fields (`speaker_id`, `due_time`, `transcript_excerpt`, `context`, `source_time`, `source_window_id`) become `undefined` on the Reminder side (not null).
+   - Status='archived' with null `archived_at` falls back to `updated_at`.
+   - Status='open' with non-null `archived_at` produces `archivedAt: null` (status wins).
+2. 200 → 205ish frontend tests, all green.
+
+These branches survived the codebase ~unchanged since the API client was first written; protecting them is cheap and pays off the next time the DTO grows a new nullable field.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1012,3 +1049,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 65 | `mapBackendReminder` null-fallback branches untested | Low | All | Open |
