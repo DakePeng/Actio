@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 83. `NewReminderBar` LLM-config probe races against port discovery — falsely flips chat → form on slow first launches
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — dropped the outer 800 ms `setTimeout` + `AbortController` from `NewReminderBar.tsx:54-72` and removed the now-unused `signal` parameter from `fetchLlmConfigured`. The existing `cancelled` flag still protects the no-op-after-unmount path; port discovery's per-port timeout in `backend-url.ts` provides the only timeout the probe actually needs. Added `NewReminderBar.probe-race.test.tsx` which simulates a `/settings` response that takes 1500 ms (well past the old deadline), waits for it, asserts chat mode persists and the misconfigured toast was *not* pushed. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 229 → 230, `pnpm build` succeeded.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/NewReminderBar.tsx:54-72` runs a one-shot probe when the bar opens in chat mode:
 
