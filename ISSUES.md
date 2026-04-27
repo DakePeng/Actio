@@ -854,13 +854,17 @@ This is the natural follow-up to ISS-068: now that the env templates are accurat
 
 ### 70. AGENTS.md drift — embedding dim, session-end vs rolling windows, broken xrefs
 
-**Status:** Won't fix at repo level (2026-04-27) — the audit was correct but the framing was wrong. Both `AGENTS.md` files are matched by `**/AGENTS.md` in `.gitignore`, so they're local-only / per-user files (likely generated or maintained by external AI tooling like OMC, Codex, Cursor). They're not tracked source-of-truth and can't accept committed fixes.
+**Status:** Resolved 2026-04-27 (mostly).
 
-**What did happen:** the local copies in this working tree got updated with the corrected guidance during this tick — the embedding-dim line, the rolling-window-extractor framing, the CAM++ clarification, and the broken `tests/AGENTS.md` xref drop. Those edits sit on disk and will benefit any future AI session reading this repo's local AGENTS.md, but they aren't a repo-level fix.
+Two-step process: the `**/AGENTS.md` line in `.gitignore` matches both files via `git check-ignore`, but `git ls-files` shows `backend/AGENTS.md` IS tracked (predates the gitignore rule and was never `git rm --cached`'d). Only the root `AGENTS.md` is truly untracked. So the fixes split across two files with different commit shapes:
 
-**Takeaway for future discovery ticks:** pre-check `git check-ignore` before filing issues against any docs file. The AGENTS.md drift was the same class as ISS-049 / ISS-069, but the artifact lives outside the tracked surface, so the rest-of-the-world impact is nil; only this user's local AI tooling consumed the bad guidance.
+- (a) `backend/AGENTS.md:48` rewritten to mirror CLAUDE.md's Non-obvious-patterns wording. **Committed.**
+- (b) `backend/AGENTS.md:7` rewritten — rolling 5-min window extractor, confidence-gating, frontend-side port-fallback. **Committed.**
+- (d) `tests/AGENTS.md` xref dropped from `backend/AGENTS.md`'s Subdirectories table. **Committed.**
+- (c) Root `AGENTS.md:31` CAM++ clarification — local-only (root file is genuinely not tracked); the working-tree edit benefits this user's AI tooling but doesn't ship.
+- (e) Both files stamped `Updated: 2026-04-27` (root locally, backend committed).
 
-The original audit findings (a-d) below are kept verbatim as a record of what the local files said before the in-tree fix.
+**Takeaway:** `git check-ignore` reports a rule match even on already-tracked files; the operational difference is whether `git ls-files --error-unmatch <path>` succeeds. The earlier "won't fix" framing in this issue was wrong about the backend file; corrected here. The audit lesson stands but with a sharper test: combine `check-ignore` with `ls-files` to distinguish "rule applies but file is already tracked" from "file truly outside the repo."
 
 `backend/AGENTS.md` and the root `AGENTS.md` haven't been updated since 2026-04-17 and now contradict the code in ways that would actively mislead a contributor.
 
