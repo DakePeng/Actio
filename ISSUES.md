@@ -1140,6 +1140,93 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 87. CORS predicate uses `starts_with` without boundary checks — `http://localhost.evil.com` and `http://127.0.0.1.evil.com` are accepted
+
+**Status:** Open · **Found:** 2026-04-27
+
+`backend/actio-core/src/lib.rs:365-380` configures the Axum CORS layer with a custom predicate:
+
+```rust
+let cors = CorsLayer::new()
+    .allow_origin(AllowOrigin::predicate(|origin, _req| {
+        let s = match origin.to_str() { Ok(s) => s, Err(_) => return false };
+        s == "tauri://localhost"
+            || s == "https://tauri.localhost"
+            || s.starts_with("http://localhost")
+            || s.starts_with("http://127.0.0.1")
+    }))
+    .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+    .allow_headers([
+        HeaderName::from_static("content-type"),
+        HeaderName::from_static("x-tenant-id"),
+    ]);
+```
+
+The intent (per the comment) is "Tauri's WebView origins + any localhost-bound HTTP origin." The implementation has a classic prefix-match bug: `starts_with` doesn't anchor what comes *after* the prefix, so:
+
+- `"http://localhost.evil.com".starts_with("http://localhost")` → **true**
+- `"http://127.0.0.1.evil.com".starts_with("http://127.0.0.1")` → **true**
+- `"http://localhost@attacker.com/".starts_with("http://localhost")` → **true** (URL with userinfo; some user-agents accept it)
+- `"http://127.0.0.1XYZ".starts_with("http://127.0.0.1")` → **true** (bizarre but allowed)
+
+`localhost.evil.com` and `127.0.0.1.evil.com` are real hostnames an attacker can register; their DNS resolves to whatever the attacker chose. A victim who:
+
+1. Has Actio running (`127.0.0.1:3000`, holding their reminders + transcripts + voiceprint metadata + LLM keys).
+2. Visits `http://localhost.evil.com` in a browser.
+
+…would have their browser send Origin: `http://localhost.evil.com` on a `fetch("http://127.0.0.1:3000/reminders")` request. Actio's CORS predicate accepts it. The browser exposes the response to the malicious script.
+
+**Mitigations already in place** (i.e., why this isn't a P0):
+1. Chrome's Private Network Access (PNA) blocks public→private fetches by default. Firefox and Safari have similar guards.
+2. The `x-tenant-id` header isn't auto-attached by browsers; an exploit page would need a same-site preflight that the browser typically blocks for PNA reasons too.
+3. Actio's data is local-only; an attacker has to discover the running instance somehow (port-scan, etc.).
+
+**But the policy is the *last* line of defense, and PNA bypasses come and go.** Fixing this is purely defensive — when PNA breaks (as it has, in past Chromium incidents) or for browsers that don't implement PNA strictly, the CORS policy needs to do its actual job.
+
+**Severity:** Medium · **Platform:** All · **Type:** security / bug · **Scope:** small (~15 LoC: a single helper that anchors the prefix match)
+
+**Proposed direction:** strict prefix + boundary check.
+
+```rust
+fn is_safe_localhost_origin(s: &str) -> bool {
+    fn matches_with_boundary(s: &str, prefix: &str) -> bool {
+        if !s.starts_with(prefix) { return false; }
+        match s.as_bytes().get(prefix.len()) {
+            None => true,                    // exact match: "http://localhost"
+            Some(b':') => true,              // port: "http://localhost:5173"
+            Some(b'/') => true,              // path: "http://localhost/foo"
+            _ => false,
+        }
+    }
+    matches_with_boundary(s, "http://localhost")
+        || matches_with_boundary(s, "http://127.0.0.1")
+}
+
+let cors = CorsLayer::new()
+    .allow_origin(AllowOrigin::predicate(|origin, _req| {
+        let s = match origin.to_str() { Ok(s) => s, Err(_) => return false };
+        s == "tauri://localhost"
+            || s == "https://tauri.localhost"
+            || is_safe_localhost_origin(s)
+    }))
+    // unchanged below…
+```
+
+**Acceptance:**
+1. Replace the inline `s.starts_with(...) || s.starts_with(...)` with the boundary-checked helper.
+2. Add a unit test (in `lib.rs` or a new `cors_origin.rs` helper module) covering:
+   - Allowed: `http://localhost`, `http://localhost:5173`, `http://localhost/`, `http://127.0.0.1`, `http://127.0.0.1:3000`, `http://127.0.0.1/foo`, `tauri://localhost`, `https://tauri.localhost`.
+   - Rejected: `http://localhost.evil.com`, `http://localhost.evil.com:443`, `http://127.0.0.1.evil.com`, `http://127.0.0.1XYZ`, `http://localhost@attacker.com/`, `https://localhost`, `http://example.com`, empty string.
+3. `cargo test -p actio-core --lib` passes (delta: at least one new test case set).
+4. `cargo clippy -p actio-core --all-targets` warning count: same or lower.
+
+**Out of scope:**
+- Tightening the `tauri://localhost` and `https://tauri.localhost` strings into their own boundary helper. They're already exact-equality, no boundary issue.
+- Auditing the `allow_methods` and `allow_headers` lists. Those look minimal and correct for current usage.
+- Verifying the listening side binds to `127.0.0.1` only (it does — `lib.rs:387` `format!("127.0.0.1:{}", port)`).
+
+---
+
 ### 86. `engine/audio_capture.rs` resampler + downmix helpers have zero unit tests despite carrying real edge cases
 
 **Status:** Resolved 2026-04-27 — added a `#[cfg(test)] mod tests` to `engine/audio_capture.rs` with 13 tests covering both pure helpers. `resample_linear`: identity-when-rates-match, empty-returns-empty, single-sample-no-panic, 48k→16k third-length, monotonicity preservation, 16k→48k upsampling triple-length, exact-multiple boundary clamp. `process_chunk`: mono passthrough, stereo pair-averaging, six-channel surround averaging, resample-skipped at native 16 kHz, full-channel drop-counter (which also pinned the current semantic that `frames_captured` increments on the failure path — counts processed not delivered), end-to-end 48 kHz stereo downmix + resample. Verification: `cargo test -p actio-core --lib` 210 → 223 (one more than the planned 12); `cargo clippy -p actio-core --all-targets` lib-test warnings unchanged at 37.
