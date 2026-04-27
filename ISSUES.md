@@ -1042,6 +1042,45 @@ The plan doc reference (`2026-04-07-frontend-polish.md`) is in `frontend/docs/` 
 
 ---
 
+### 74. More dead/over-exported exports across `frontend/src/api/` and `utils/`
+
+After ISS-073 cleaned up `utils/labels.ts`, a deeper sweep over `src/api/` + `src/utils/` (cross-file word-grep) turned up another batch:
+
+**(a) Truly dead — zero callers:**
+
+```
+src/utils/autostart.ts::isAutostartEnabled   only the export declaration matches
+src/api/speakers.ts::enrollSpeaker           "                                  "
+```
+
+`isAutostartEnabled` is interesting: the "Launch at login" preference is **write-only**. `setAutostart(true/false)` is called when the user flips the toggle, but the OS state is never read back. If the user enables launch-at-login and then revokes the autostart permission externally (Windows Task Manager, macOS System Settings), the UI keeps showing "on" — there's no consistency check at boot. Removing the unused export is fine; whether anyone wants to wire the read path is a separate UX call (filed inline below as out-of-scope).
+
+`enrollSpeaker` predates the live-enrollment flow. The current voice-enroll UX uses `startLiveEnrollment` / `consume_segment` (5 passages × ~5s each); the one-shot `enrollSpeaker(audio)` is a shape from the earliest enrollment design that's no longer wired to any UI.
+
+**(b) Over-exported (`export` leakage — used only inside the defining file):**
+
+```
+src/api/profile.ts::ProfileResponse          → used by fetchProfile / updateProfile internally
+src/api/profile.ts::UpdateProfileRequest     → used by updateProfile internally
+src/api/translate.ts::TranslateLineRequest   → used by translateLines internally
+src/api/translate.ts::TranslateLineResponse  → used by translateLines internally
+```
+
+External consumers import the *function* (`fetchProfile`, `translateLines`) and never the wire shapes. The `export` keyword here advertises an internal contract; downgrading to file-private (no `export`) tightens the surface and prevents drift if the wire shape ever needs to change.
+
+**Severity:** Low · **Platform:** All · **Type:** dead-code / refactor · **Scope:** small (delete 2 functions, drop 4 `export` keywords)
+
+**Acceptance:**
+1. Delete `isAutostartEnabled` from `utils/autostart.ts` and `enrollSpeaker` from `api/speakers.ts`.
+2. Drop `export` from `ProfileResponse`, `UpdateProfileRequest`, `TranslateLineRequest`, `TranslateLineResponse` (keep the type definitions; they're referenced internally).
+3. `pnpm tsc --noEmit` clean.
+4. `pnpm test` 214/214 unchanged.
+5. `pnpm build` — bundle should stay flat; tree-shaking already DCE'd the unused functions.
+
+**Out of scope (noted for visibility):** the write-only nature of `setAutostart` is itself a small UX gap — if anyone wants the toggle to reflect actual OS state on launch, that's a separate ticket (call `tauri-plugin-autostart`'s `is_enabled` at boot and reconcile against `preferences.launchAtLogin` in localStorage, with a one-time toast if they diverge). Out of scope for #74; flagged here so the inevitable "wait, isn't isAutostartEnabled supposed to be called?" question has an answer when this lands.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1451,3 +1490,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 74 | More dead exports — `isAutostartEnabled`, `enrollSpeaker`, types | Low | All | Open |
