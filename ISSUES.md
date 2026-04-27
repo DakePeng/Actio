@@ -396,6 +396,39 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 59. `applyPendingResolutions` has no regression test — "identifying forever" fix is unprotected
+
+`frontend/src/store/use-voice-store.ts:372-398` implements a non-trivial speaker-resolution buffering algorithm: when a `speaker_resolved` event arrives for a transcript line that hasn't finalized yet (or that finalizes later out of order), the resolution is parked in a module-level `pendingResolutions` array and replayed against future-finalizing lines whose midpoint falls within the resolution's `[start_ms, end_ms]` window.
+
+CLAUDE.md (line 105) explicitly calls this out as the **fix for the "identifying forever" bug on short utterances**:
+
+> Contains a module-level `pendingResolutions` buffer that replays `speaker_resolved` events against lines that finalize **after** the event arrives — fixes "identifying forever" on short utterances.
+
+But `frontend/src/store/__tests__/use-voice-store.test.ts` covers `pruneSegments`, `isMeaningfulFinal`, and `looksLikeTargetLang` — **none** of the four describe-blocks touches `applyPendingResolutions`, the `pendingResolutions` array, or the speaker-resolved → transcript merge flow. A grep for `pendingResolutions`, `applyPendingResolutions`, `speaker_resolved`, or `identifying` across the test directory returns zero hits.
+
+That means a refactor that broke this fix would land silently — typecheck and existing tests would all stay green while the "identifying forever" UX regression returns. The function has subtle behaviours that make this real:
+
+- Mid-point-in-window matching (line 379–383): change the mid formula or the inclusive bound and a class of resolutions stop applying.
+- Single-resolution-per-line semantics (`break` at line 387): if relaxed, multiple resolutions could compete and the last one wins non-deterministically.
+- Drain-after-apply with index compaction (lines 390–396): a refactor that drops the compaction step would leak applied resolutions into future calls.
+- The "skip already-resolved lines" check (line 378) — without it, a resolution would clobber an already-attributed line with whatever happens to fit its window.
+
+**Severity:** Low · **Platform:** All · **Type:** test (regression-protection gap on a flagged-critical fix) · **Scope:** small — `applyPendingResolutions` is exported-pure-function-shaped (it operates on its argument + the module-level array; no DI needed beyond resetting the array between cases)
+
+**Acceptance:**
+1. New unit tests in `use-voice-store.test.ts` (or a dedicated `use-voice-store.resolutions.test.ts`) covering at minimum:
+   - Resolution arrives **before** the matching line finalizes → next finalize-with-applyPendingResolutions stamps the speaker.
+   - Resolution arrives **after** the line finalizes → buffer holds it; applies on the next line whose midpoint falls in window.
+   - Already-resolved lines are not clobbered.
+   - Resolution outside any line's mid-window stays buffered until something matches (or never is).
+   - Multiple resolutions in the buffer are each consumed exactly once.
+2. Tests reset `pendingResolutions` between cases (the array is module-state). Either re-import the module per test, or expose a `__resetPendingResolutions()` test hook. The existing `use-voice-store.test.ts` setup pattern can be a model.
+3. Existing voice-store tests stay green.
+
+The `applyPendingResolutions` function is currently file-private (no `export`). Either export it, or test through `handleTranscriptMessage` / `handleSpeakerResolvedMessage` (the call sites) — the latter is closer to integration but exercises the same logic.
+
+---
+
 ### 58. Notifications preference is half-built — toggle persists but nothing fires alerts
 
 `frontend/src/components/settings/PreferencesSection.tsx` exposes a "Notifications — Show alerts for new reminders" toggle bound to `preferences.notifications` (`use-store.ts:71`). The preference round-trips through localStorage and the i18n strings exist in both en/zh-CN. But:
@@ -761,3 +794,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 59 | `applyPendingResolutions` has no regression test | Low | All | Open |
