@@ -409,6 +409,9 @@ export const zhCN: Translations = {
   'settings.labels.aria.delete': '删除 {name}',
   'settings.labels.aria.chooseColor': '选择颜色',
   'settings.labels.aria.pickColor': '选择颜色 {color}',
+  'settings.labels.delete': '删除',
+  'settings.labels.confirmDelete': '删除"{name}"标签？将从 {count} 个提醒中移除该标签。',
+  'settings.labels.confirmDeleteUnused': '删除"{name}"标签？',
 
   // Keyboard shortcuts
   'settings.shortcuts.title': '键盘快捷键',

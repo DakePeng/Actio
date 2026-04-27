@@ -410,6 +410,9 @@ export const en = {
   'settings.labels.aria.delete': 'Delete {name}',
   'settings.labels.aria.chooseColor': 'Choose color',
   'settings.labels.aria.pickColor': 'Pick color {color}',
+  'settings.labels.delete': 'Delete',
+  'settings.labels.confirmDelete': 'Delete the "{name}" label? It will be removed from {count} reminder(s).',
+  'settings.labels.confirmDeleteUnused': 'Delete the "{name}" label?',
 
   // Keyboard shortcuts
   'settings.shortcuts.title': 'Keyboard Shortcuts',

@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 82. `LabelManager` deletes labels with one click — silently cascades and untags every reminder using them
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — wired `useConfirm()` + `<ConfirmDialog>` (destructive tone) into `LabelManager.tsx`. Added a `requestDeleteLabel(id, displayName)` helper that derives the cascade count locally from the existing `reminders` selector — no new API endpoint needed — and picks between two messages: "Delete the X label?" when usage is 0, "Delete the X label? It will be removed from N reminder(s)." otherwise. Three new i18n keys (`settings.labels.delete`, `settings.labels.confirmDelete`, `settings.labels.confirmDeleteUnused`) landed in both `en.ts` and `zh-CN.ts` (parity test passes); reuses the existing `archive.cancel` for the cancel button. New `LabelManager.confirm.test.tsx` (4 tests) pins: cascade-count message accuracy, Cancel = no API call, Confirm = exactly one deleteLabel with the right id, unused-label uses the shorter copy. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 225 → 229, `pnpm build` succeeded.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/settings/LabelManager.tsx:86-93` renders the per-label delete affordance as a bare `×` button:
 
