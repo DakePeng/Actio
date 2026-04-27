@@ -1140,6 +1140,59 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 84. Legacy session-end reminder generator (`engine/todo_generator.rs`) is fully dead — never called
+
+**Status:** Open · **Found:** 2026-04-27
+
+`backend/actio-core/src/engine/todo_generator.rs` (141 lines + 4 tests) is the legacy session-end reminder generator. It was superseded by the rolling-window extractor (`engine/window_extractor.rs`) when ISS- … (the always-listening pipeline shipped, see commit `87dba83`). The module was never removed.
+
+**Verification — every public symbol is unused outside the file:**
+
+```
+$ grep -rE "generate_session_todos\b|todo_generator::" backend/actio-core/src --include="*.rs"
+backend/actio-core/src/engine/mod.rs:pub mod todo_generator;          ← only the registration
+backend/actio-core/src/engine/todo_generator.rs:pub async fn generate_session_todos(…)  ← definition
+```
+
+Zero external call sites. Same is true of `MAX_TRANSCRIPT_CHARS`, `build_transcript_string`, and `truncate_transcript` — all referenced only inside `todo_generator.rs` itself.
+
+**Verification — its repository dependencies are also dead.**
+
+`reminder_repo::has_reminders` and `reminder_repo::create_reminders_batch` (`backend/actio-core/src/repository/reminder.rs`) live under a `// ── todo_generator compat ────` comment header. Cross-file usage:
+
+```
+$ grep -rE "reminder_repo::has_reminders|reminder_repo::create_reminders_batch\b" backend/actio-core/src --include="*.rs"
+backend/actio-core/src/engine/todo_generator.rs:    if reminder_repo::has_reminders(pool, session_id).await? {
+backend/actio-core/src/engine/todo_generator.rs:    let inserted = reminder_repo::create_reminders_batch(pool, &new_reminders).await?;
+```
+
+Only `todo_generator` calls them. Removing `todo_generator` makes them dead too.
+
+(`create_reminders_batch_with_labels` — confusingly similar name — is *alive*, called by `window_extractor.rs` twice. Keep that one.)
+
+**Verification — `LlmRouter::generate_todos` survives.** `todo_generator` was one of two consumers of `router.generate_todos(...)`; the other is `api/reminder.rs` (the on-demand chat-composer extraction path used by the NewReminderBar). That stays.
+
+**Also check the references in docs.** All other mentions are in `.omc/plans/`, `.omc/specs/`, and `.worktrees/batch-clip-processing/` — old planning docs and stale worktrees, not active code.
+
+**Severity:** Low · **Platform:** All · **Type:** refactor / dead-code · **Scope:** small (3 files: delete `engine/todo_generator.rs`, drop one line from `engine/mod.rs`, drop two functions + one section comment from `repository/reminder.rs`)
+
+**Proposed direction:**
+1. `git rm backend/actio-core/src/engine/todo_generator.rs` (141 LoC + 4 tests gone).
+2. Remove `pub mod todo_generator;` from `engine/mod.rs`.
+3. Remove `has_reminders` and `create_reminders_batch` from `repository/reminder.rs`, plus the `// ── todo_generator compat ──` section header comment that frames them.
+4. If a unit test in `repository/reminder.rs` covers either of those (look for `has_reminders` / `create_reminders_batch` in `mod tests`), drop it too.
+
+**Acceptance:**
+1. The four files above are the only ones touched.
+2. `cargo build -p actio-core --tests` succeeds with no new unused-import warnings.
+3. `cargo test -p actio-core --lib` test count drops by however many tests `todo_generator` had (4 above) plus any orphan tests in `repository/reminder.rs`. Expected: 214 → 210 if no other tests reference the dropped helpers.
+4. `cargo clippy -p actio-core --all-targets` warning count: same or lower.
+5. `git grep -E "todo_generator|generate_session_todos|reminder_repo::has_reminders|reminder_repo::create_reminders_batch\b" -- '*.rs'` returns zero matches.
+
+**Out of scope:** the parallel `repository/todo.rs` (17 LoC) module — its sole function `get_todos_for_session` is still called from `api/session.rs` for the legacy session-trace alias route. Keep it. `domain::types::TodoItem` similarly stays — used by both `api/session.rs` and the `agent/tasks/todo.rs` agent framework.
+
+---
+
 ### 83. `NewReminderBar` LLM-config probe races against port discovery — falsely flips chat → form on slow first launches
 
 **Status:** Resolved 2026-04-27 — dropped the outer 800 ms `setTimeout` + `AbortController` from `NewReminderBar.tsx:54-72` and removed the now-unused `signal` parameter from `fetchLlmConfigured`. The existing `cancelled` flag still protects the no-op-after-unmount path; port discovery's per-port timeout in `backend-url.ts` provides the only timeout the probe actually needs. Added `NewReminderBar.probe-race.test.tsx` which simulates a `/settings` response that takes 1500 ms (well past the old deadline), waits for it, asserts chat mode persists and the misconfigured toast was *not* pushed. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 229 → 230, `pnpm build` succeeded.
