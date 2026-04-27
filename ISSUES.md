@@ -396,6 +396,39 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 58. Notifications preference is half-built — toggle persists but nothing fires alerts
+
+`frontend/src/components/settings/PreferencesSection.tsx` exposes a "Notifications — Show alerts for new reminders" toggle bound to `preferences.notifications` (`use-store.ts:71`). The preference round-trips through localStorage and the i18n strings exist in both en/zh-CN. But:
+
+- **Nothing reads `preferences.notifications`.** Grep across `frontend/src` finds no code that branches on the value.
+- **No code calls `new Notification(...)` or the Web Notifications API.**
+- **`backend/src-tauri/src/main.rs:?` initializes `tauri_plugin_notification`** and the `notification:default` permission is granted in `capabilities/default.json`, but no Rust code ever invokes the plugin (no `Notification::new`, no `notify`, no path in `api/` that emits an OS-level notification).
+- **`@tauri-apps/plugin-notification` is in `package.json` dependencies** but has zero static or dynamic imports anywhere in `frontend/src`.
+
+A user toggling "Show alerts for new reminders" gets nothing — the only effect is the bool flipping in localStorage. That's worse than not having the toggle: it makes a promise the app silently breaks.
+
+Two directions to resolve:
+
+**A. Build the feature.** Wire `Notification` (web API for browser dev mode) or `@tauri-apps/plugin-notification` (desktop) to fire on:
+- New high-confidence reminder arriving on the Board
+- Optionally: dictation-success paste, new candidate-speaker arrival, etc.
+
+This is the productive direction (the toggle was clearly added with a feature in mind) but is medium-large scope: needs brainstorming on which events warrant a notification, throttling, focus-aware suppression (don't notify if the app is foregrounded), permission-prompt UX, and the per-platform plumbing. Plus tests.
+
+**B. Remove the dead surface.** Drop the toggle from PreferencesSection, drop `notifications` from the Preferences type and default, remove the Cargo plugin registration + capability + frontend npm dep. Shrinks binary surface and removes the broken promise. ~6 files, mechanical.
+
+Direction A is the more product-aligned choice if anyone is planning to ship notifications soon; B is the right call if no one is. Either way leaving it in this state is a bug.
+
+**Severity:** Medium · **Platform:** All · **Type:** ui (broken promise) + feature (path A) or refactor (path B) · **Scope:** medium for A, small for B
+
+**Acceptance:**
+1. Decide A or B (NEEDS-REVIEW — this is directional).
+2. After implementation: toggling the setting either produces a visible behavior change (A) or the toggle no longer exists (B).
+3. No path through the codebase reads `preferences.notifications` without acting on it.
+4. (If B) `pnpm` and `cargo` build size + permission surface drop. Capture before/after sizes in the commit.
+
+---
+
 ### 57. Live transcript auto-scroll yanks the user back down while they're reading
 
 **Status:** Resolved 2026-04-26 — added a `wasAtBottomRef` + `onScroll` handler to `LiveTab.tsx`. The auto-scroll effect now runs only when the user was within `FOLLOW_THRESHOLD_PX` (64 px) of the bottom **before** the new content arrived. Three new vitest cases pin: at-bottom auto-scrolls; reading-mode does not; resuming-after-read re-engages follow. 188/188 frontend tests pass.
@@ -727,3 +760,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
