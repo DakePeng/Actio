@@ -911,6 +911,14 @@ These are the AGENTS.md analogue of ISS-049 (CLAUDE.md) and ISS-069 (README) —
 
 ### 72. `formatTimeShort` has time-vs-calendar bucketing bugs the tests now pin
 
+**Status:** Resolved 2026-04-27 — `formatTimeShort` rewritten to use a calendar-aware day diff (`startOfDay(target) - startOfDay(now)` rounded to days) instead of `floor(diffMin / 1440)`, and the "Due {dayName}" path now uses `dayNames[d.getDay()]` directly. All three bugs fixed:
+
+(a) Next-calendar-day < 24h ahead now correctly says "Tomorrow at h:mm AM/PM" (previously said "h:mm AM/PM today").
+(b) Weekday name now matches the actual target day (`dayNames[d.getDay()]`) instead of the time-bucket-derived `(now.getDay() + diffDays) % 7`. Sunday +6 cal days correctly renders "Sunday" (previously rendered "Saturday").
+(c) Past dates within the last week now render "Due Friday" / "Due Sunday" / etc. instead of the previous "Due undefined" (the negative-modulo bug is gone — using `target.getDay()` sidesteps it entirely).
+
+Test file updated to assert the corrected behaviour. 215 → 214 tests overall (consolidated two "current-behaviour" tests into single corrected assertions). tsc clean; full suite green.
+
 Two real UX bugs surfaced while writing the ISS-071 tests for `formatTimeShort`:
 
 **(a) "today" label leaks into next-calendar-day times under 24h ahead.** The function uses `diffMin = (target - now) / 60000` and `diffDays = floor(diffMin / 1440)` for time-bucket arithmetic, *not* calendar-day boundaries. So:
@@ -1408,4 +1416,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 72 | `formatTimeShort` time-vs-calendar bucketing bugs | Low | All | Open |

@@ -10,23 +10,24 @@ export function formatTimeShort(dateStr: string): string {
   const timeStr = `${h}:${mins} ${ampm}`;
 
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const diffDays = Math.floor(diffMin / 1440);
 
-  const dayLabel = () => {
-    if (diffDays === 0 || diffDays === 1) return '';
-    if (diffDays <= 6) return dayNames[(now.getDay() + diffDays) % 7];
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
+  // Calendar-day diff (positive = future, negative = past). Computing
+  // it from local-midnight anchors of each side avoids the time-bucket
+  // pitfalls of `floor(diffMin/1440)` — see ISSUES.md #72 for context.
+  const startOfDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const calDiffDays = Math.round(
+    (startOfDay(d) - startOfDay(now)) / 86_400_000,
+  );
 
   if (diffMin < 0) {
-    const absDiffMin = Math.abs(diffMin);
-    if (absDiffMin < 1440) return timeStr;
-    return `Due ${dayLabel()}`;
+    if (calDiffDays === 0) return timeStr;
+    if (calDiffDays >= -6) return `Due ${dayNames[d.getDay()]}`;
+    return `Due ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   }
   if (diffMin < 60) return `In ${diffMin} min`;
-  if (diffMin < 1440) return `${timeStr} today`;
-
-  if (diffDays === 1) return `Tomorrow at ${timeStr}`;
-  if (diffDays <= 6) return `${dayLabel()} at ${timeStr}`;
+  if (calDiffDays === 0) return `${timeStr} today`;
+  if (calDiffDays === 1) return `Tomorrow at ${timeStr}`;
+  if (calDiffDays <= 6) return `${dayNames[d.getDay()]} at ${timeStr}`;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
