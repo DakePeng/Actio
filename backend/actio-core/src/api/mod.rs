@@ -65,6 +65,10 @@ use std::sync::atomic::Ordering;
         reminder::delete_reminder,
         reminder::extract_reminders,
         reminder::get_reminder_trace,
+        label::list_labels,
+        label::create_label,
+        label::patch_label,
+        label::delete_label,
     ),
     components(schemas(
         CreateSessionRequest,

@@ -16,6 +16,14 @@ fn tenant_id_from_headers(headers: &HeaderMap) -> Uuid {
         .unwrap_or(Uuid::nil())
 }
 
+#[utoipa::path(
+    get,
+    path = "/labels",
+    tag = "labels",
+    responses(
+        (status = 200, description = "All labels for the tenant", body = Vec<Label>),
+    ),
+)]
 pub async fn list_labels(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -27,6 +35,16 @@ pub async fn list_labels(
     Ok(Json(labels))
 }
 
+#[utoipa::path(
+    post,
+    path = "/labels",
+    tag = "labels",
+    request_body = CreateLabelRequest,
+    responses(
+        (status = 201, description = "Label created", body = Label),
+        (status = 400, description = "Label name already exists for this tenant", body = AppApiError),
+    ),
+)]
 pub async fn create_label(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -45,6 +63,17 @@ pub async fn create_label(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/labels/{id}",
+    tag = "labels",
+    params(("id" = Uuid, Path, description = "Label ID")),
+    request_body = PatchLabelRequest,
+    responses(
+        (status = 200, description = "Updated label", body = Label),
+        (status = 404, description = "Label not found", body = AppApiError),
+    ),
+)]
 pub async fn patch_label(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -59,6 +88,16 @@ pub async fn patch_label(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/labels/{id}",
+    tag = "labels",
+    params(("id" = Uuid, Path, description = "Label ID")),
+    responses(
+        (status = 204, description = "Label deleted"),
+        (status = 404, description = "Label not found", body = AppApiError),
+    ),
+)]
 pub async fn delete_label(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
