@@ -117,12 +117,17 @@ pub fn build_window_messages(
         Some(p) => render_profiled_prompt(p),
     };
 
-    let system = format!(
-        "Window date (local): {window_local_date}\nLabels: [{labels_str}]\n\n{body}"
-    );
+    let system =
+        format!("Window date (local): {window_local_date}\nLabels: [{labels_str}]\n\n{body}");
     vec![
-        ChatMessage { role: "system".into(), content: system },
-        ChatMessage { role: "user".into(),   content: attributed_transcript.to_string() },
+        ChatMessage {
+            role: "system".into(),
+            content: system,
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: attributed_transcript.to_string(),
+        },
     ]
 }
 
@@ -131,9 +136,17 @@ fn render_profiled_prompt(profile: &crate::domain::types::TenantProfile) -> Stri
     let aliases_line = if profile.aliases.is_empty() {
         String::new()
     } else {
-        format!("They may also be addressed as: {}.\n", profile.aliases.join(", "))
+        format!(
+            "They may also be addressed as: {}.\n",
+            profile.aliases.join(", ")
+        )
     };
-    let bio_block = match profile.bio.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let bio_block = match profile
+        .bio
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(b) => format!("About them:\n{b}\n"),
         None => String::new(),
     };
@@ -231,7 +244,10 @@ mod tests {
         p.bio = Some("   ".into());
         let msgs = build_window_messages("hi", &[], "2026-04-26 Sunday", Some(&p));
         let sys = &msgs[0].content;
-        assert!(!sys.contains("About them:"), "should not render the About them: header for blank bio");
+        assert!(
+            !sys.contains("About them:"),
+            "should not render the About them: header for blank bio"
+        );
     }
 
     #[test]
@@ -240,6 +256,9 @@ mod tests {
         p.aliases.clear();
         let msgs = build_window_messages("hi", &[], "2026-04-26 Sunday", Some(&p));
         let sys = &msgs[0].content;
-        assert!(!sys.contains("They may also be addressed as"), "no alias line when list empty");
+        assert!(
+            !sys.contains("They may also be addressed as"),
+            "no alias line when list empty"
+        );
     }
 }

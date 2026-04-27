@@ -25,23 +25,22 @@ pub struct ClusterAssignment {
 /// Cluster indices in the returned vector are compact (`0..k`) and in
 /// first-seen order — the segment with the smallest input index inside
 /// cluster id `c` is the one whose own cluster_idx ≤ all later c-members.
-pub fn ahc(
-    inputs: &[(Uuid, Vec<f32>)],
-    cosine_distance_threshold: f32,
-) -> Vec<ClusterAssignment> {
+pub fn ahc(inputs: &[(Uuid, Vec<f32>)], cosine_distance_threshold: f32) -> Vec<ClusterAssignment> {
     if inputs.is_empty() {
         return Vec::new();
     }
     if inputs.len() == 1 {
-        return vec![ClusterAssignment { segment_id: inputs[0].0, cluster_idx: 0 }];
+        return vec![ClusterAssignment {
+            segment_id: inputs[0].0,
+            cluster_idx: 0,
+        }];
     }
 
     let n = inputs.len();
     let mut membership: Vec<usize> = (0..n).collect();
     let mut active: std::collections::BTreeSet<usize> = (0..n).collect();
     let mut sizes: Vec<usize> = vec![1; n];
-    let mut centroids: Vec<Vec<f32>> =
-        inputs.iter().map(|(_, v)| normalized(v)).collect();
+    let mut centroids: Vec<Vec<f32>> = inputs.iter().map(|(_, v)| normalized(v)).collect();
 
     loop {
         let actives: Vec<usize> = active.iter().copied().collect();
@@ -58,10 +57,7 @@ pub fn ahc(
         }
         match best {
             Some((d, a, b)) if d <= cosine_distance_threshold => {
-                let new_centroid = weighted_mean(
-                    &centroids[a], sizes[a],
-                    &centroids[b], sizes[b],
-                );
+                let new_centroid = weighted_mean(&centroids[a], sizes[a], &centroids[b], sizes[b]);
                 centroids[a] = normalized(&new_centroid);
                 sizes[a] += sizes[b];
                 for m in membership.iter_mut() {
@@ -159,10 +155,10 @@ mod tests {
     fn three_speakers_two_clusters_each_resolves_correctly() {
         let inputs = vec![
             (id(1), vec![1.0, 0.0, 0.0]),
-            (id(2), vec![0.99, 0.14, 0.0]),    // A
+            (id(2), vec![0.99, 0.14, 0.0]), // A
             (id(3), vec![0.0, 1.0, 0.0]),
-            (id(4), vec![0.14, 0.99, 0.0]),    // B
-            (id(5), vec![0.0, 0.0, 1.0]),       // C
+            (id(4), vec![0.14, 0.99, 0.0]), // B
+            (id(5), vec![0.0, 0.0, 1.0]),   // C
         ];
         let out = ahc(&inputs, 0.4);
         assert_eq!(out[0].cluster_idx, out[1].cluster_idx);
@@ -182,8 +178,7 @@ mod tests {
         let out = ahc(&inputs, 0.4);
         let max_idx = out.iter().map(|a| a.cluster_idx).max().unwrap();
         assert!(max_idx < out.len());
-        let used: std::collections::BTreeSet<_> =
-            out.iter().map(|a| a.cluster_idx).collect();
+        let used: std::collections::BTreeSet<_> = out.iter().map(|a| a.cluster_idx).collect();
         assert_eq!(used.len(), max_idx + 1);
     }
 
@@ -195,6 +190,9 @@ mod tests {
             (id(3), vec![0.99, 0.14]),
         ];
         let out = ahc(&inputs, 0.4);
-        assert_eq!(out[0].cluster_idx, 0, "first input should land in cluster 0");
+        assert_eq!(
+            out[0].cluster_idx, 0,
+            "first input should land in cluster 0"
+        );
     }
 }

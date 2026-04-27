@@ -1,7 +1,8 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 import { useFilteredReminders, useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
 import { Card } from './Card';
+import { CardSkeleton } from './CardSkeleton';
 import { EmptyState } from './EmptyState';
 import { AnimatePresence } from 'framer-motion';
 import { useT, type TKey } from '../i18n';
@@ -56,7 +57,10 @@ export function Board() {
     }
   }, [focusedCardIndex]);
 
-  const sorted = [...filtered].sort(sortByPriority);
+  // Memoize the priority sort so unrelated Board re-renders (e.g. j/k
+  // keyboard nav bumping `focusedCardIndex`) don't rebuild the array
+  // on every keystroke (ISSUES.md #88).
+  const sorted = useMemo(() => [...filtered].sort(sortByPriority), [filtered]);
   const hasActiveFilters = Boolean(filter.priority || filter.label || filter.search);
 
   return (
@@ -145,6 +149,9 @@ export function Board() {
           <AnimatePresence mode="popLayout">
             {sorted.map((reminder, index) => {
               const isFocused = focusedCardIndex === index;
+              if (reminder.isExtracting) {
+                return <CardSkeleton key={reminder.id} />;
+              }
               return (
                 <Card
                   key={reminder.id}

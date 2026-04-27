@@ -8,6 +8,7 @@ use tracing::{info, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api::error::AppApiError;
 use crate::domain::types::{AudioSession, ListSessionsParams, Speaker, TodoItem, Transcript};
 use crate::repository::{session, speaker, todo, transcript};
 use crate::AppState;
@@ -563,41 +564,6 @@ pub async fn enroll_speaker(
             warnings,
         }),
     ))
-}
-
-// --- Error ---
-
-#[derive(Debug, ToSchema)]
-#[allow(dead_code)]
-pub enum AppApiError {
-    Internal(String),
-    BadRequest(String),
-    Conflict(String),
-}
-
-impl axum::response::IntoResponse for AppApiError {
-    fn into_response(self) -> axum::response::Response {
-        match self {
-            Self::Internal(msg) => {
-                tracing::error!(error = %msg, "Internal server error");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": msg})),
-                )
-                    .into_response()
-            }
-            Self::BadRequest(msg) => (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": msg})),
-            )
-                .into_response(),
-            Self::Conflict(msg) => (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": msg})),
-            )
-                .into_response(),
-        }
-    }
 }
 
 pub fn tenant_id_from_headers(headers: &HeaderMap) -> Result<Uuid, AppApiError> {

@@ -34,12 +34,12 @@ A single Axum service provides:
 - Embedded inference:
   - **VAD** — Silero (via `sherpa-onnx::VoiceActivityDetector`)
   - **ASR** — Zipformer (streaming), Whisper, SenseVoice, FunASR Nano, Moonshine — selected per-session
-  - **Speaker embedding** — 3D-Speaker (512-dim) via `sherpa-onnx::SpeakerEmbeddingExtractor`
-  - **Diarization** — pyannote segmentation + 3D-Speaker clustering
+  - **Speaker embedding** — 3D-Speaker family via `sherpa-onnx::SpeakerEmbeddingExtractor` (vector dim is per-model: CAM++ family + ERes2Net v2 + TitaNet emit 192-dim, ERes2Net Base emits 512-dim — the DB tracks `embedding_dimension` per row and matching joins on the active dim)
+  - **Diarization** — cosine clustering of per-segment 3D-Speaker embeddings (pyannote model files are still bundled for an alternate segmentation path; the production batch pipeline does AHC over embeddings)
 - SQLite persistence via SQLx
 - Optional LLM-powered reminder extraction (local llama.cpp or OpenAI-compatible HTTP)
 
-Default HTTP port: **3000**.
+Default HTTP port: **3000**, with the frontend's `getApiBaseUrl()` probe falling back through 3001–3009 if 3000 is held.
 
 ### Frontend (React + Tauri)
 
@@ -84,20 +84,23 @@ From `backend/`:
 cargo run --bin actio-asr
 ```
 
-On startup, the backend creates a local SQLite database, runs migrations, loads any already-downloaded models, and serves on `http://localhost:3000`. Download ASR/speaker models via the frontend settings UI or the `/settings/models/download` API.
+On startup, the backend creates a local SQLite database, runs migrations, loads any already-downloaded models, and serves on `http://localhost:3000` (with fallback to 3001–3009 if the default port is held — the frontend's `getApiBaseUrl()` discovery probe handles the lookup). Download ASR/speaker models via the frontend settings UI or the `/settings/models/download` API.
 
-Optional `.env` in `backend/`:
+Most config lives in `<config.data_dir>/settings.json` and is round-tripped through the GUI; `PATCH /settings` hot-reloads the running pipeline. The few env vars that *do* exist are bootstrap-only — see `backend/.env.example` for the canonical list. Highlights:
 
 ```env
-HTTP_PORT=3000
+# Logging filter
+RUST_LOG=actio_core=info
 
-# Optional: enables reminder extraction on session end via an OpenAI-compatible endpoint
+# Optional: seed the Remote LLM router on first launch (replaced by
+# settings.json once the user opens Settings → AI). Both are required
+# to activate; leave unset to start with LLM disabled.
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=sk-...
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-4o-mini      # default: gpt-4o-mini
 ```
 
-Leaving the LLM vars unset disables remote reminder extraction gracefully; the local llama.cpp path is available via the `local-llm` feature (enabled by default) and the `/settings/llm/*` endpoints.
+The local llama.cpp path is available via the `local-llm` feature (enabled by default) and the `/settings/llm/*` endpoints — no env var seed.
 
 ### 2. Start the frontend (web dev)
 

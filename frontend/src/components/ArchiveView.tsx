@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { useVoiceStore } from '../store/use-voice-store';
 import { EmptyState } from './EmptyState';
+import { ConfirmDialog, useConfirm } from './ConfirmDialog';
 import { useLanguage, useT, type TKey } from '../i18n';
 
 type ArchiveSection = 'tasks' | 'clips';
@@ -95,6 +96,22 @@ export function ArchiveView() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
 
+  const { confirm, dialogProps } = useConfirm();
+  const requestDelete = useCallback(
+    (count: number) =>
+      confirm(
+        count === 1
+          ? t('archive.confirmDeleteOne')
+          : t('archive.confirmDeleteBulk', { count }),
+        {
+          confirmLabel: t('archive.action.delete'),
+          cancelLabel: t('archive.cancel'),
+          tone: 'destructive',
+        },
+      ),
+    [confirm, t],
+  );
+
   const archived = [...reminders]
     .filter((r) => r.archivedAt !== null)
     .sort((a, b) => new Date(b.archivedAt!).getTime() - new Date(a.archivedAt!).getTime());
@@ -124,9 +141,16 @@ export function ArchiveView() {
     selectedTaskIds.forEach((id) => void restoreReminder(id));
     setSelectedTaskIds(new Set());
   };
-  const bulkDeleteTasks = () => {
-    selectedTaskIds.forEach((id) => void deleteReminder(id));
+  const bulkDeleteTasks = async () => {
+    const ids = [...selectedTaskIds];
+    if (ids.length === 0) return;
+    if (!(await requestDelete(ids.length))) return;
+    ids.forEach((id) => void deleteReminder(id));
     setSelectedTaskIds(new Set());
+  };
+  const requestDeleteTask = async (id: string) => {
+    if (!(await requestDelete(1))) return;
+    void deleteReminder(id);
   };
 
   // ── Clip multi-select ────────────────────────────────────────────────
@@ -155,9 +179,16 @@ export function ArchiveView() {
     });
     setSelectedClipIds(new Set());
   };
-  const bulkDeleteClips = () => {
-    selectedClipIds.forEach((id) => deleteSegment(id));
+  const bulkDeleteClips = async () => {
+    const ids = [...selectedClipIds];
+    if (ids.length === 0) return;
+    if (!(await requestDelete(ids.length))) return;
+    ids.forEach((id) => deleteSegment(id));
     setSelectedClipIds(new Set());
+  };
+  const requestDeleteClip = async (id: string) => {
+    if (!(await requestDelete(1))) return;
+    deleteSegment(id);
   };
 
   const handleClipFilterChange = (f: ClipFilter) => {
@@ -299,7 +330,7 @@ export function ArchiveView() {
                               className="ghost-button archive-row__delete"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void deleteReminder(reminder.id);
+                                void requestDeleteTask(reminder.id);
                               }}
                             >
                               {t('archive.action.delete')}
@@ -440,7 +471,7 @@ export function ArchiveView() {
                                 className="clip-delete-btn"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  deleteSegment(segment.id);
+                                  void requestDeleteClip(segment.id);
                                 }}
                                 aria-label={t('archive.clip.aria.delete')}
                                 whileHover={{ scale: 1.15 }}
@@ -477,6 +508,7 @@ export function ArchiveView() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }

@@ -120,8 +120,15 @@ impl LiveStreamingService {
         let chosen = live_asr_model.unwrap_or_else(|| "sense_voice_multi".to_string());
 
         tokio::spawn(async move {
-            run_streaming_loop(session_id, &chosen, &model_paths, events, aggregator, cancel_rx)
-                .await;
+            run_streaming_loop(
+                session_id,
+                &chosen,
+                &model_paths,
+                events,
+                aggregator,
+                cancel_rx,
+            )
+            .await;
         });
 
         Ok(())
@@ -325,9 +332,7 @@ async fn run_offline_segment_loop(
                         break; // ASR consumer dropped
                     }
                 }
-                Ok(CaptureEvent::Pcm(_))
-                | Ok(CaptureEvent::Muted)
-                | Ok(CaptureEvent::Unmuted) => {}
+                Ok(CaptureEvent::Pcm(_)) | Ok(CaptureEvent::Muted) | Ok(CaptureEvent::Unmuted) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     warn!(skipped = n, "LiveStreaming lagged on capture broadcast");
                 }

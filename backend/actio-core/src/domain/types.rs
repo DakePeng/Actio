@@ -17,19 +17,6 @@ pub struct Speaker {
     pub is_self: bool,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct SpeakerEmbedding {
-    pub id: String,
-    pub speaker_id: String,
-    pub model_name: String,
-    pub model_version: String,
-    pub duration_ms: f64,
-    pub quality_score: Option<f64>,
-    pub is_primary: bool,
-    pub embedding_dimension: i32,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AudioSession {
     pub id: String,
@@ -40,20 +27,6 @@ pub struct AudioSession {
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub metadata: serde_json::Value,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct AudioSegment {
-    pub id: String,
-    pub session_id: String,
-    pub start_ms: i64,
-    pub end_ms: i64,
-    pub speaker_id: Option<String>,
-    pub speaker_score: Option<f64>,
-    pub audio_ref: Option<String>,
-    pub quality_score: Option<f64>,
-    pub vad_confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
@@ -104,17 +77,6 @@ pub struct TodoItem {
     pub source_time: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-/// Input struct for inserts (no id/created_at/updated_at — DB generates them)
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct NewTodo {
-    pub session_id: Uuid,
-    pub speaker_id: Option<Uuid>,
-    pub assigned_to: Option<String>,
-    pub description: String,
-    pub priority: Option<TodoPriority>,
 }
 
 // ── Reminder ─────────────────────────────────────────────────────────────

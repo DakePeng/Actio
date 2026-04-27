@@ -17,13 +17,8 @@ export const en = {
   'board.action.captureNote': 'Capture note',
 
   // Recording tab
-  'recording.tapToTranscribe': 'Tap to transcribe',
-  'recording.loadingModel': 'Loading model',
-  'recording.modelLoadFailed': 'Model load failed — tap to try anyway',
   'recording.startingUp': 'Starting up',
   'recording.listening': 'Listening…',
-  'recording.aria.startTranscribing': 'Start transcribing',
-  'recording.aria.stopTranscribing': 'Stop transcribing',
 
   // Live transcript
   'transcript.identifying': 'Identifying…',
@@ -34,8 +29,6 @@ export const en = {
   // Live tab — translation controls
   'live.translate.toggle': 'Translate',
   'live.translate.targetLabel': 'Target language',
-  'live.translate.disabledTooltip': 'Enable an LLM in Settings → AI to use translation.',
-  'live.translate.pausedToast': 'Translation paused — LLM is disabled.',
   'live.translate.lang.en': 'English',
   'live.translate.lang.zh-CN': '简体中文',
   'live.translate.lang.ja': '日本語',
@@ -99,6 +92,7 @@ export const en = {
     'Delete {name}? The files will be removed from disk. You can re-download later.',
   'settings.models.switchEmbeddingConfirm':
     'Switching embedding models will invalidate previously-enrolled voiceprints. Continue?',
+  'settings.models.switchEmbeddingConfirmAction': 'Switch model',
   'settings.models.downloading': 'Downloading: {label} — {file}',
   'settings.models.preparing': 'Preparing...',
   'settings.models.cancel': 'Cancel',
@@ -156,16 +150,10 @@ export const en = {
   'feedback.extractedSingle': 'Extracted 1 reminder',
   'feedback.extractedMany': 'Extracted {count} reminders',
   'feedback.extractFailed': "Couldn't extract reminders",
-  'feedback.modelSwitched': 'Switched model to {model} for the new language',
   'feedback.llmNotConfiguredFormMode': 'Language model is not configured, so quick capture opened in form mode',
   'feedback.listeningOn': 'Listening on',
   'feedback.listeningOff': 'Listening off',
   'feedback.listeningToggleFailed': "Couldn't change listening state",
-
-  // Priority values (for interpolation)
-  'priority.low': 'low',
-  'priority.medium': 'medium',
-  'priority.high': 'high',
 
   // Standby tray (collapsed + expanded)
   'tray.aria.drag': 'Drag to reposition',
@@ -178,22 +166,9 @@ export const en = {
   'tray.tooltip.muted': 'Muted',
   'tray.status.transcribing': 'Transcribing...',
   'tray.status.listening': 'Listening...',
-  'tray.status.freshCapturesOne': '1 fresh capture waiting',
-  'tray.status.freshCapturesMany': '{count} fresh captures waiting',
-  'tray.status.quiet': 'Quiet queue, board ready',
   'tray.viewFullBoard': 'View full board',
   'tray.swipe.done': 'Done',
   'tray.swipe.confirm': 'Confirm',
-
-  // State descriptors shown beneath the wordmark — they mirror the active
-  // wordmark state so the mark and the text always agree on what Actio is
-  // currently doing.
-  'tray.state.standby': 'standby, at rest',
-  'tray.state.listening': 'listening, actively',
-  'tray.state.transcribing': 'transcribing, in flow',
-  'tray.state.processing': 'processing, reducing',
-  'tray.state.success': 'success, resolved',
-  'tray.state.error': 'error, try again',
 
   // Top-level tab bar
   'tab.people': 'People',
@@ -207,8 +182,9 @@ export const en = {
   'live.header.on': 'Listening',
   'live.header.off': 'Muted',
   'live.listeningSince': 'Listening since {time} • {duration}',
+  'live.aria.listeningStarted': 'Listening started at {time}',
+  'live.aria.listeningStopped': 'Listening stopped',
   'live.pausedHint': 'Listening is paused. Turn it on in the tray or here to start capturing.',
-  'live.aria.toggleListening': 'Toggle listening',
 
   // Needs-review queue (medium-confidence auto-extracted items)
   'needsReview.empty.title': 'Nothing to review',
@@ -220,6 +196,7 @@ export const en = {
   'needsReview.sourceSpeaker': 'From {name}',
   'feedback.reminderConfirmed': 'Moved to Board',
   'feedback.reminderDismissed': 'Dismissed',
+  'feedback.undo': 'Undo',
 
   // Trace inspector (provenance for auto-extracted cards)
   'card.trace.show': 'Show context',
@@ -262,6 +239,12 @@ export const en = {
   'settings.audio.offlineTag': 'offline',
   'settings.audio.clipTarget': 'Clip target length',
   'settings.audio.clusterThreshold': 'Voice clustering threshold',
+  'settings.audio.clusterMinSegments': 'Provisional speaker — min segments',
+  'settings.audio.clusterMinSegmentsHint':
+    'Voice clusters below this many VAD segments will not promote to a provisional speaker — short bursts of cross-talk or mic blips stay unattributed instead of flooding the Candidate Speakers panel.',
+  'settings.audio.clusterMinDuration': 'Provisional speaker — min duration',
+  'settings.audio.clusterMinDurationHint':
+    'AND-gated with the segment-count floor. A cluster must also accumulate at least this much speech across its segments before a provisional speaker row is minted.',
   'settings.audio.audioRetention': 'Audio retention',
   'settings.audio.provisionalGc': 'Drop unmatched voices after',
 
@@ -336,6 +319,9 @@ export const en = {
   'archive.clip.aria.star': 'Star clip',
   'archive.clip.aria.unstar': 'Unstar clip',
   'archive.clip.aria.delete': 'Delete clip',
+  'archive.confirmDeleteOne': 'Permanently delete this item? This cannot be undone.',
+  'archive.confirmDeleteBulk': 'Permanently delete {count} items? This cannot be undone.',
+  'archive.cancel': 'Cancel',
 
   // People / speakers
   'people.addPerson': 'Add person',
@@ -424,6 +410,9 @@ export const en = {
   'settings.labels.aria.delete': 'Delete {name}',
   'settings.labels.aria.chooseColor': 'Choose color',
   'settings.labels.aria.pickColor': 'Pick color {color}',
+  'settings.labels.delete': 'Delete',
+  'settings.labels.confirmDelete': 'Delete the "{name}" label? It will be removed from {count} reminder(s).',
+  'settings.labels.confirmDeleteUnused': 'Delete the "{name}" label?',
 
   // Keyboard shortcuts
   'settings.shortcuts.title': 'Keyboard Shortcuts',

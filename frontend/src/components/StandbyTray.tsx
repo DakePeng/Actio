@@ -1,7 +1,5 @@
 import { createContext, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
 import { formatTimeShort } from '../utils/time';
@@ -83,6 +81,29 @@ export function StandbyTray() {
   // and avoiding a jump). Subsequent user toggles animate.
   const mountedRef = useRef(false);
   const prevShowBoardRef = useRef(showBoardWindow);
+  // `@tauri-apps/api` is dynamic-imported (ISSUES.md #51) so it splits
+  // out of the main bundle. `appWindowRef` caches the result of
+  // `getCurrentWindow()` at mount so `handleDragStart` can call
+  // `startDragging()` synchronously during mousedown — Tauri requires
+  // that for native OS drag, and a dynamic import inside the handler
+  // would race against the event.
+  const appWindowRef = useRef<Awaited<
+    ReturnType<typeof import('@tauri-apps/api/window').getCurrentWindow>
+  > | null>(null);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let cancelled = false;
+    (async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      if (cancelled) return;
+      appWindowRef.current = getCurrentWindow();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTauri]);
+
   useEffect(() => {
     const wasBoardMode = prevShowBoardRef.current;
     prevShowBoardRef.current = showBoardWindow;
@@ -94,18 +115,21 @@ export function StandbyTray() {
     const isMount = !mountedRef.current;
     mountedRef.current = true;
 
-    invoke('sync_window_mode', {
-      showBoard: false,
-      trayExpanded: expanded,
-      reminderCount: topReminders.length,
-      skipAnimation: isMount,
-    }).catch((e) => console.warn('[Actio] tray sync_window_mode failed', e));
+    (async () => {
+      const { invoke } = await import('@tauri-apps/api/core');
+      invoke('sync_window_mode', {
+        showBoard: false,
+        trayExpanded: expanded,
+        reminderCount: topReminders.length,
+        skipAnimation: isMount,
+      }).catch((e) => console.warn('[Actio] tray sync_window_mode failed', e));
+    })();
   }, [expanded, topReminders.length, isTauri, showBoardWindow]);
 
   function handleDragStart() {
     if (!isTauri) return;
-
-    const appWindow = getCurrentWindow();
+    const appWindow = appWindowRef.current;
+    if (!appWindow) return; // dynamic import hasn't resolved yet (drag before mount settled)
 
     // Native OS drag — must be called synchronously during mousedown
     appWindow.startDragging();
@@ -117,7 +141,10 @@ export function StandbyTray() {
     appWindow.onMoved(() => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
-        invoke('save_tray_position');
+        void (async () => {
+          const { invoke } = await import('@tauri-apps/api/core');
+          invoke('save_tray_position');
+        })();
         if (unlistenFn) unlistenFn();
       }, 200);
     }).then((fn) => { unlistenFn = fn; });
@@ -171,18 +198,24 @@ export function StandbyTray() {
           {showLiveTranscript && (
             <div
               className={`tray-transcript${transcriptText ? '' : ' tray-transcript--empty'}`}
-              role="status"
-              aria-live="polite"
-              aria-label={
-                isDictationTranscribing
-                  ? t('tray.aria.transcribing')
-                  : t('tray.aria.listening')
-              }
             >
-              <span className="tray-transcript__label">
+              {/* Live region narrowed to the phase label — it changes
+                  exactly once per dictation cycle (Listening → Transcribing).
+                  The streaming viewport below is aria-hidden because its
+                  partials mutate ~10×/sec; the final transcript is announced
+                  by the consuming input element after paste (ISSUES.md #80). */}
+              <span
+                className="tray-transcript__label"
+                role="status"
+                aria-live="polite"
+              >
                 {isDictationTranscribing ? t('tray.status.transcribing') : t('tray.status.listening')}
               </span>
-              <div ref={transcriptViewportRef} className="tray-transcript__viewport">
+              <div
+                ref={transcriptViewportRef}
+                className="tray-transcript__viewport"
+                aria-hidden="true"
+              >
                 {transcriptText || t('tray.status.listening')}
               </div>
             </div>

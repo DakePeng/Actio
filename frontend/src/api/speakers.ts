@@ -1,11 +1,9 @@
 import type {
-  EnrollResponse,
   LiveEnrollmentState,
   Speaker,
   VoiceprintCandidate,
 } from '../types/speaker';
 import { getApiUrl } from './backend-url';
-import { DEV_TENANT_ID } from './actio-api';
 import { requestJson } from './http';
 
 export async function listSpeakers(): Promise<Speaker[]> {
@@ -74,30 +72,6 @@ export async function clipSegmentAudioUrl(
 ): Promise<string | null> {
   if (!clipId || !segmentId) return null;
   return await getApiUrl(`/clips/${clipId}/segments/${segmentId}/audio`);
-}
-
-/**
- * Upload 1-N WAV clips and extract/store voiceprints. `mode=replace` deletes
- * any prior embeddings for this speaker before inserting the new ones.
- */
-export async function enrollSpeaker(
-  id: string,
-  clips: Blob[],
-): Promise<EnrollResponse> {
-  const form = new FormData();
-  clips.forEach((blob, i) => form.append(`clip_${i}`, blob, `clip_${i}.wav`));
-  const response = await fetch(await getApiUrl(`/speakers/${id}/enroll?mode=replace`), {
-    method: 'POST',
-    // Let the browser set multipart Content-Type with boundary — do NOT
-    // override it here.
-    headers: { 'x-tenant-id': DEV_TENANT_ID },
-    body: form,
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Enroll failed (${response.status}): ${text || response.statusText}`);
-  }
-  return (await response.json()) as EnrollResponse;
 }
 
 /** Phase-C: clusters of retained unknown-voice clips ready to be named. */

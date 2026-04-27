@@ -22,6 +22,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::api::error::AppApiError;
 use crate::domain::types::ClipManifest;
 use crate::repository::audio_clip;
 use crate::AppState;
@@ -29,7 +30,7 @@ use crate::AppState;
 /// Frontend-shaped clip — matches the `Segment` type in
 /// `frontend/src/types/index.ts` so the Archive view can render backend
 /// clips with the same component used for live-flushed segments.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ClipResponse {
     pub id: String,
     #[serde(rename = "sessionId")]
@@ -47,7 +48,7 @@ pub struct ClipResponse {
     pub duration_ms: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct ListClipsQuery {
     /// Cap returned rows. Default 50; max 500 to bound response size.
     #[serde(default = "default_limit")]
@@ -63,6 +64,16 @@ fn default_limit() -> i64 {
 /// Returns up to `?limit` clips ordered newest-first. Each clip's `text`
 /// is the concatenation of every final transcript across its VAD segments;
 /// empty for clips that ended up containing no speech.
+#[utoipa::path(
+    get,
+    path = "/clips",
+    tag = "clips",
+    params(ListClipsQuery),
+    responses(
+        (status = 200, description = "Recent processed clips", body = Vec<ClipResponse>),
+        (status = 500, description = "Database error", body = AppApiError),
+    ),
+)]
 pub async fn list_clips(
     State(state): State<AppState>,
     Query(q): Query<ListClipsQuery>,
@@ -88,6 +99,22 @@ pub async fn list_clips(
     (StatusCode::OK, Json(body)).into_response()
 }
 
+/// `GET /clips/{clip_id}/segments/{segment_id}/audio` — returns the per-VAD
+/// segment WAV from the batch pipeline so the trace inspector can play it.
+#[utoipa::path(
+    get,
+    path = "/clips/{clip_id}/segments/{segment_id}/audio",
+    tag = "clips",
+    params(
+        ("clip_id" = Uuid, Path, description = "Audio clip ID"),
+        ("segment_id" = Uuid, Path, description = "VAD segment ID inside the clip"),
+    ),
+    responses(
+        (status = 200, description = "audio/wav body", content_type = "audio/wav"),
+        (status = 404, description = "Clip / segment / WAV missing", body = AppApiError),
+        (status = 500, description = "Filesystem error", body = AppApiError),
+    ),
+)]
 pub async fn get_clip_segment_audio(
     State(state): State<AppState>,
     Path((clip_id, segment_id)): Path<(Uuid, Uuid)>,
@@ -110,11 +137,7 @@ pub async fn get_clip_segment_audio(
         Err(e) => return internal(format!("manifest parse failed: {e}")),
     };
 
-    let seg = match manifest
-        .segments
-        .iter()
-        .find(|s| s.id == segment_id)
-    {
+    let seg = match manifest.segments.iter().find(|s| s.id == segment_id) {
         Some(s) => s,
         None => return not_found("segment not in this clip's manifest"),
     };
@@ -146,9 +169,10 @@ pub async fn get_clip_segment_audio(
     // inside the manifest's parent directory. canonicalize() requires
     // the file to exist; if it doesn't, fall through to the read below
     // which 404s with a clean message.
-    if let (Ok(canon_wav), Ok(canon_dir)) =
-        (std::fs::canonicalize(&wav_path), std::fs::canonicalize(manifest_dir))
-    {
+    if let (Ok(canon_wav), Ok(canon_dir)) = (
+        std::fs::canonicalize(&wav_path),
+        std::fs::canonicalize(manifest_dir),
+    ) {
         if !canon_wav.starts_with(&canon_dir) {
             return not_found("segment WAV escapes the clip directory");
         }
@@ -163,10 +187,7 @@ pub async fn get_clip_segment_audio(
     };
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("audio/wav"),
-    );
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("audio/wav"));
     // Long cache because (clip_id, segment_id) is content-addressed —
     // the file never changes for a given pair, only retention can
     // delete it.
@@ -200,23 +221,10 @@ mod tests {
     use crate::domain::types::{ClipManifest, ClipManifestSegment};
     use crate::engine::clip_writer::{write_manifest, write_segment_wav};
     use crate::repository::audio_clip;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::SqlitePool;
     use tempfile::tempdir;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();
@@ -298,10 +306,17 @@ mod tests {
         // The handler only touches state.pool, so we sidestep the rest of
         // AppState by calling get_clip_segment_audio's logic via a
         // direct repository + filesystem check instead.
-        let clip = audio_clip::get_by_id(&pool, clip_id).await.unwrap().unwrap();
+        let clip = audio_clip::get_by_id(&pool, clip_id)
+            .await
+            .unwrap()
+            .unwrap();
         let body = std::fs::read_to_string(&clip.manifest_path).unwrap();
         let manifest: ClipManifest = serde_json::from_str(&body).unwrap();
-        let seg = manifest.segments.iter().find(|s| s.id == segment_id).unwrap();
+        let seg = manifest
+            .segments
+            .iter()
+            .find(|s| s.id == segment_id)
+            .unwrap();
         let manifest_dir = std::path::Path::new(&clip.manifest_path).parent().unwrap();
         let wav_path = manifest_dir.join(&seg.file);
         let bytes = std::fs::read(&wav_path).unwrap();
@@ -315,7 +330,10 @@ mod tests {
     async fn missing_clip_id_resolves_to_404_via_repo_lookup() {
         let pool = fresh_pool().await;
         let absent = Uuid::new_v4();
-        assert!(audio_clip::get_by_id(&pool, absent).await.unwrap().is_none());
+        assert!(audio_clip::get_by_id(&pool, absent)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -323,7 +341,10 @@ mod tests {
         let pool = fresh_pool().await;
         let session_id = mk_session(&pool).await;
         let (clip_id, _real_seg, _tmp) = seed_clip(&pool, session_id, "seg_0001.wav").await;
-        let clip = audio_clip::get_by_id(&pool, clip_id).await.unwrap().unwrap();
+        let clip = audio_clip::get_by_id(&pool, clip_id)
+            .await
+            .unwrap()
+            .unwrap();
         let body = std::fs::read_to_string(&clip.manifest_path).unwrap();
         let manifest: ClipManifest = serde_json::from_str(&body).unwrap();
 

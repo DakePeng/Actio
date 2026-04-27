@@ -6,6 +6,7 @@ import {
   dismissCandidateSpeaker,
   type CandidateSpeaker,
 } from '../api/speakers';
+import { ConfirmDialog, useConfirm } from './ConfirmDialog';
 
 function formatRelative(iso: string | null, lastHeardUnknown: string): string {
   if (!iso) return lastHeardUnknown;
@@ -22,9 +23,15 @@ interface RowProps {
   candidate: CandidateSpeaker;
   onPromoted: () => void;
   onDismissed: () => void;
+  requestDismissConfirmation: () => Promise<boolean>;
 }
 
-function CandidateRow({ candidate, onPromoted, onDismissed }: RowProps) {
+function CandidateRow({
+  candidate,
+  onPromoted,
+  onDismissed,
+  requestDismissConfirmation,
+}: RowProps) {
   const t = useT();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
@@ -46,7 +53,8 @@ function CandidateRow({ candidate, onPromoted, onDismissed }: RowProps) {
   }
 
   async function handleDismiss() {
-    if (!window.confirm(t('candidates.confirmDismiss'))) return;
+    const ok = await requestDismissConfirmation();
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -140,6 +148,7 @@ export function CandidateSpeakersPanel() {
   const t = useT();
   const [items, setItems] = useState<CandidateSpeaker[]>([]);
   const [loading, setLoading] = useState(true);
+  const { confirm, dialogProps } = useConfirm();
 
   const refresh = useCallback(async () => {
     try {
@@ -156,6 +165,16 @@ export function CandidateSpeakersPanel() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const requestDismissConfirmation = useCallback(
+    () =>
+      confirm(t('candidates.confirmDismiss'), {
+        confirmLabel: t('candidates.dismiss'),
+        cancelLabel: t('candidates.cancel'),
+        tone: 'destructive',
+      }),
+    [confirm, t],
+  );
 
   if (loading) return null;
   if (items.length === 0) {
@@ -183,10 +202,12 @@ export function CandidateSpeakersPanel() {
               candidate={c}
               onPromoted={refresh}
               onDismissed={refresh}
+              requestDismissConfirmation={requestDismissConfirmation}
             />
           </li>
         ))}
       </ul>
+      <ConfirmDialog {...dialogProps} />
     </section>
   );
 }

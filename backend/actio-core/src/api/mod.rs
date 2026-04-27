@@ -1,5 +1,6 @@
 pub mod candidate_speaker;
 pub mod clip;
+pub mod error;
 pub mod label;
 pub mod llm;
 pub mod profile;
@@ -17,6 +18,7 @@ use axum::Router;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::api::error::AppApiError;
 use crate::api::segment::{
     AssignSegmentRequest, AssignSegmentResponse, ConfirmCandidateRequest, DismissCandidateRequest,
     NewSpeakerSpec, UnknownSegmentResponse, VoiceprintCandidateResponse,
@@ -58,6 +60,38 @@ use std::sync::atomic::Ordering;
         candidate_speaker::dismiss,
         profile::get_profile,
         profile::put_profile,
+        reminder::list_reminders,
+        reminder::create_reminder,
+        reminder::get_reminder,
+        reminder::patch_reminder,
+        reminder::delete_reminder,
+        reminder::extract_reminders,
+        reminder::get_reminder_trace,
+        label::list_labels,
+        label::create_label,
+        label::patch_label,
+        label::delete_label,
+        settings::get_settings,
+        settings::patch_settings,
+        settings::test_llm,
+        settings::get_model_status,
+        settings::get_available_models,
+        settings::get_available_embedding_models,
+        settings::list_audio_devices,
+        settings::start_model_download,
+        settings::cancel_model_download,
+        settings::warmup_models,
+        settings::delete_model,
+        llm::list_local_llms,
+        llm::start_llm_load,
+        llm::cancel_llm_load,
+        llm::llm_load_status,
+        llm::delete_local_llm,
+        llm::openai_list_models,
+        llm::openai_chat_completions,
+        translate::translate_lines,
+        clip::list_clips,
+        clip::get_clip_segment_audio,
     ),
     components(schemas(
         CreateSessionRequest,
@@ -90,6 +124,24 @@ use std::sync::atomic::Ordering;
         CreateLabelRequest,
         PatchLabelRequest,
         PatchReminderRequest,
+        ReminderTrace,
+        ReminderTraceLine,
+        reminder::CreateReminderRequest,
+        reminder::ExtractRemindersRequest,
+        reminder::ImageInput,
+        crate::engine::audio_capture::AudioDeviceInfo,
+        crate::engine::model_manager::DownloadTarget,
+        settings::DownloadRequest,
+        settings::WarmupRequest,
+        settings::DeleteModelResult,
+        settings::LlmTestResult,
+        llm::LoadLlmRequest,
+        llm::DeleteLlmResult,
+        translate::TranslateRequest,
+        translate::TranslateLineRequestWire,
+        translate::TranslateResponse,
+        translate::TranslateLineWire,
+        clip::ClipResponse,
         AppApiError,
         profile::ProfileResponse,
         profile::UpdateProfileRequest,
@@ -122,7 +174,10 @@ pub fn router(state: AppState) -> Router {
         .route("/labels/:id", patch(label::patch_label))
         .route("/labels/:id", delete(label::delete_label))
         // profile
-        .route("/profile", get(profile::get_profile).put(profile::put_profile))
+        .route(
+            "/profile",
+            get(profile::get_profile).put(profile::put_profile),
+        )
         // speakers
         .route("/speakers", post(session::create_speaker))
         .route("/speakers", get(session::list_speakers))

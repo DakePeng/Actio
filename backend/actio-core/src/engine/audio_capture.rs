@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 /// Audio device info for API response
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct AudioDeviceInfo {
     pub name: String,
     pub is_default: bool,
@@ -282,4 +282,168 @@ pub fn start_capture(
     };
 
     Ok((handle, rx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_metrics() -> Arc<AudioCaptureMetrics> {
+        Arc::new(AudioCaptureMetrics {
+            frames_captured: AtomicU64::new(0),
+            frames_dropped: AtomicU64::new(0),
+        })
+    }
+
+    // ── resample_linear ─────────────────────────────────────────────
+
+    #[test]
+    fn resample_identity_when_rates_match() {
+        let input: Vec<f32> = (0..1024).map(|i| i as f32 * 0.001).collect();
+        let out = resample_linear(&input, 16_000, 16_000);
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn resample_empty_returns_empty() {
+        let out = resample_linear(&[], 48_000, 16_000);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn resample_single_sample_does_not_panic() {
+        // The clamp `idx.min(input.len() - 1)` is the only thing keeping
+        // this from OOB-indexing on the second neighbour. Pin the path.
+        let out = resample_linear(&[0.42], 48_000, 16_000);
+        assert!(!out.is_empty(), "single-sample input still produced output");
+        assert!(out.iter().all(|&v| (v - 0.42).abs() < 1e-6));
+    }
+
+    #[test]
+    fn resample_48k_to_16k_outputs_third_length() {
+        // Production path: 48 kHz → 16 kHz, ratio 3.0. Output length is
+        // `ceil(input_len / 3)`. A 30-sample input produces 10 samples.
+        let input: Vec<f32> = (0..30).map(|i| i as f32).collect();
+        let out = resample_linear(&input, 48_000, 16_000);
+        assert_eq!(out.len(), 10);
+    }
+
+    #[test]
+    fn resample_48k_to_16k_is_monotonic_for_monotonic_input() {
+        // A linearly-increasing input must remain monotonically
+        // non-decreasing after linear interpolation downsampling — any
+        // off-by-one would shuffle samples and break this.
+        let input: Vec<f32> = (0..300).map(|i| i as f32).collect();
+        let out = resample_linear(&input, 48_000, 16_000);
+        for w in out.windows(2) {
+            assert!(w[1] >= w[0], "monotonicity violated: {} -> {}", w[0], w[1]);
+        }
+    }
+
+    #[test]
+    fn resample_16k_to_48k_outputs_triple_length() {
+        // Upsampling direction. Same code path; verifies the ratio < 1
+        // case doesn't truncate.
+        let input: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        let out = resample_linear(&input, 16_000, 48_000);
+        assert_eq!(out.len(), 30);
+    }
+
+    #[test]
+    fn resample_last_sample_no_oob() {
+        // An exact-multiple input length tests the boundary clamp on the
+        // last interpolation pair (idx + 1 would otherwise == len).
+        let input = vec![1.0_f32; 6];
+        let out = resample_linear(&input, 48_000, 16_000);
+        // 2 samples after 3:1 downsample, all should be the constant 1.0.
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|&v| (v - 1.0).abs() < 1e-6));
+    }
+
+    // ── process_chunk ───────────────────────────────────────────────
+
+    #[test]
+    fn process_chunk_mono_passthrough() {
+        let (tx, rx) = bounded::<Vec<f32>>(8);
+        let metrics = fresh_metrics();
+        let input = vec![0.5_f32; 100];
+        process_chunk(&input, 1, 16_000, &tx, &metrics);
+        let received = rx.try_recv().expect("chunk should be forwarded");
+        assert_eq!(received, input);
+        assert_eq!(metrics.frames_captured.load(Ordering::Relaxed), 100);
+        assert_eq!(metrics.frames_dropped.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn process_chunk_stereo_averages_pairs() {
+        // Stereo frame: [L0, R0, L1, R1, …] → mono averages
+        // (L+R)/2 per frame.
+        let (tx, rx) = bounded::<Vec<f32>>(8);
+        let metrics = fresh_metrics();
+        let interleaved = vec![1.0, 0.0, 0.5, 0.5, 0.0, 1.0]; // 3 stereo frames
+        process_chunk(&interleaved, 2, 16_000, &tx, &metrics);
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received, vec![0.5, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn process_chunk_six_channel_averages_to_mono() {
+        let (tx, rx) = bounded::<Vec<f32>>(8);
+        let metrics = fresh_metrics();
+        // Two 6-channel frames; per-frame sum is 6.0 → mono 1.0 each.
+        let interleaved = vec![1.0_f32; 12];
+        process_chunk(&interleaved, 6, 16_000, &tx, &metrics);
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received.len(), 2);
+        assert!(received.iter().all(|&v| (v - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn process_chunk_resample_skipped_at_16k() {
+        // At native 16 kHz the resampler must not run — output length
+        // equals mono length, with no interpolation noise. Use a non-
+        // multiple length to be sure.
+        let (tx, rx) = bounded::<Vec<f32>>(8);
+        let metrics = fresh_metrics();
+        let input = vec![0.25_f32; 97];
+        process_chunk(&input, 1, 16_000, &tx, &metrics);
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received.len(), 97);
+        // Counter should reflect the post-resample length (i.e., 97), so
+        // it'd be wrong if a no-op resample silently produced 96 or 98.
+        assert_eq!(metrics.frames_captured.load(Ordering::Relaxed), 97);
+    }
+
+    #[test]
+    fn process_chunk_full_channel_increments_dropped_counter() {
+        // bounded(0) is rendezvous-only; with no receiver waiting,
+        // try_send returns Err and the drop counter increments. Note
+        // the production code increments `frames_captured` *before*
+        // attempting the send, so it counts processed (not delivered)
+        // frames — both counters should advance on the failure path.
+        let (tx, _rx) = bounded::<Vec<f32>>(0);
+        drop(_rx);
+        let metrics = fresh_metrics();
+        process_chunk(&[0.5_f32; 50], 1, 16_000, &tx, &metrics);
+        assert_eq!(metrics.frames_dropped.load(Ordering::Relaxed), 1);
+        // `frames_captured` reflects total frames seen by the callback,
+        // even if delivery to the consumer failed. Pin the current
+        // semantic so a future "fix" doesn't silently flip it.
+        assert_eq!(metrics.frames_captured.load(Ordering::Relaxed), 50);
+    }
+
+    #[test]
+    fn process_chunk_48k_stereo_downmix_then_resample() {
+        // End-to-end: 6 stereo frames at 48 kHz → 6 mono samples at
+        // 48 kHz → 2 mono samples at 16 kHz (ceil(6/3) under the
+        // resampler's output-length formula).
+        let (tx, rx) = bounded::<Vec<f32>>(8);
+        let metrics = fresh_metrics();
+        let interleaved = vec![0.4_f32; 12]; // 6 stereo frames, all 0.4
+        process_chunk(&interleaved, 2, 48_000, &tx, &metrics);
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received.len(), 2);
+        assert!(received.iter().all(|&v| (v - 0.4).abs() < 1e-6));
+        assert_eq!(metrics.frames_captured.load(Ordering::Relaxed), 2);
+    }
 }

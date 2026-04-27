@@ -282,14 +282,9 @@ async fn process_window_with(
         .await
         .map_err(|e| ProcessError::Permanent(format!("session lookup: {e}")))?;
 
-    let lines = fetch_attributed_lines(
-        pool,
-        window.session_id,
-        window.start_ms,
-        window.end_ms,
-    )
-    .await
-    .map_err(|e| ProcessError::Permanent(format!("transcript fetch: {e}")))?;
+    let lines = fetch_attributed_lines(pool, window.session_id, window.start_ms, window.end_ms)
+        .await
+        .map_err(|e| ProcessError::Permanent(format!("transcript fetch: {e}")))?;
 
     let total_chars: usize = lines.iter().map(|l| l.text.len()).sum();
     if total_chars < MIN_EXTRACTABLE_CHARS {
@@ -299,10 +294,9 @@ async fn process_window_with(
     let attributed = format_attributed_transcript(&lines);
     let window_local_date = chrono::Local::now().format("%Y-%m-%d %A").to_string();
 
-    let labels =
-        crate::repository::label::list_labels(pool, resolve_tenant(&session_started_at))
-            .await
-            .unwrap_or_default();
+    let labels = crate::repository::label::list_labels(pool, resolve_tenant(&session_started_at))
+        .await
+        .unwrap_or_default();
     let label_names: Vec<String> = labels.iter().map(|l| l.name.clone()).collect();
     let label_lookup: HashMap<String, Uuid> = labels
         .iter()
@@ -313,12 +307,18 @@ async fn process_window_with(
         })
         .collect();
 
-    let profile = crate::repository::tenant_profile::get_for_tenant(pool, session_started_at.tenant_id)
-        .await
-        .map_err(|e| ProcessError::Permanent(format!("profile lookup: {e}")))?;
+    let profile =
+        crate::repository::tenant_profile::get_for_tenant(pool, session_started_at.tenant_id)
+            .await
+            .map_err(|e| ProcessError::Permanent(format!("profile lookup: {e}")))?;
 
     let items = match router
-        .generate_action_items_with_refs(&attributed, &label_names, &window_local_date, profile.as_ref())
+        .generate_action_items_with_refs(
+            &attributed,
+            &label_names,
+            &window_local_date,
+            profile.as_ref(),
+        )
         .await
     {
         Ok(items) => items,
@@ -638,7 +638,12 @@ pub async fn extract_for_clip(
         .flatten();
 
     let items = match router
-        .generate_action_items_with_refs(&attributed, &label_names, &window_local_date, profile.as_ref())
+        .generate_action_items_with_refs(
+            &attributed,
+            &label_names,
+            &window_local_date,
+            profile.as_ref(),
+        )
         .await
     {
         Ok(items) => items,
@@ -742,22 +747,8 @@ async fn fetch_attributed_lines_for_clip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::db::run_migrations;
-    use chrono::SecondsFormat;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();
@@ -1098,12 +1089,6 @@ mod tests {
         assert!(s.contains("hello there"));
     }
 
-    // Unused import silencer for the parse path.
-    #[allow(dead_code)]
-    fn _force_use_secs_format() -> SecondsFormat {
-        SecondsFormat::Secs
-    }
-
     // ───────────────────────────────────────────────────────────────────
     // Integration tests for the full claim → fetch → route → gate → persist
     // pipeline using the cfg-test LlmRouter::Stub variant. These cover the
@@ -1141,7 +1126,10 @@ mod tests {
         window_repo::upsert_pending_window(pool, session_id, start_ms, end_ms)
             .await
             .unwrap();
-        window_repo::claim_next_pending(pool).await.unwrap().unwrap()
+        window_repo::claim_next_pending(pool)
+            .await
+            .unwrap()
+            .unwrap()
     }
 
     #[tokio::test]
@@ -1271,12 +1259,7 @@ mod tests {
 
     // ── Clip-driven extraction tests ─────────────────────────────────
 
-    async fn mk_clip(
-        pool: &SqlitePool,
-        session_id: Uuid,
-        started_ms: i64,
-        ended_ms: i64,
-    ) -> Uuid {
+    async fn mk_clip(pool: &SqlitePool, session_id: Uuid, started_ms: i64, ended_ms: i64) -> Uuid {
         crate::repository::audio_clip::insert_pending(
             pool,
             session_id,
@@ -1340,13 +1323,12 @@ mod tests {
 
         extract_for_clip(&pool, &router, clip_id).await.unwrap();
 
-        let row: (String, Option<String>) = sqlx::query_as(
-            "SELECT status, source_window_id FROM reminders WHERE description = ?1",
-        )
-        .bind("Draft design review summary")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let row: (String, Option<String>) =
+            sqlx::query_as("SELECT status, source_window_id FROM reminders WHERE description = ?1")
+                .bind("Draft design review summary")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(row.0, "open");
         assert_eq!(row.1.as_deref(), Some(clip_id.to_string().as_str()));
     }
@@ -1388,25 +1370,38 @@ mod tests {
         let alice = mk_speaker(&pool, "Alice").await;
         let seg = mk_segment(&pool, sid, alice, 1_000, 30_000).await;
         mk_final_transcript_for_segment(
-            &pool, sid, seg,
+            &pool,
+            sid,
+            seg,
             "Please draft the design review summary by Thursday morning so the team can read it.",
-            1_000, 30_000,
-        ).await;
+            1_000,
+            30_000,
+        )
+        .await;
 
-        let tenant_row: (String,) = sqlx::query_as(
-            "SELECT tenant_id FROM audio_sessions WHERE id = ?1"
-        ).bind(sid.to_string()).fetch_one(&pool).await.unwrap();
+        let tenant_row: (String,) =
+            sqlx::query_as("SELECT tenant_id FROM audio_sessions WHERE id = ?1")
+                .bind(sid.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         let tenant_id = Uuid::parse_str(&tenant_row.0).unwrap();
-        crate::repository::tenant_profile::upsert(&pool, &TenantProfile {
-            tenant_id,
-            display_name: Some("Alice".into()),
-            aliases: vec!["A".into()],
-            bio: Some("Engineer.".into()),
-        }).await.unwrap();
+        crate::repository::tenant_profile::upsert(
+            &pool,
+            &TenantProfile {
+                tenant_id,
+                display_name: Some("Alice".into()),
+                aliases: vec!["A".into()],
+                bio: Some("Engineer.".into()),
+            },
+        )
+        .await
+        .unwrap();
 
         let window = upsert_test_window(&pool, sid, 0, 300_000).await;
         let router = LlmRouter::stub(vec![stub_item(
-            "Draft summary", "high",
+            "Draft summary",
+            "high",
             "draft the design review summary by Thursday morning",
             Some("Alice"),
         )]);
@@ -1425,33 +1420,48 @@ mod tests {
         let clip_id = mk_clip(&pool, sid, 0, 300_000).await;
         let seg = mk_clip_segment(&pool, sid, clip_id, alice, 1_000, 30_000).await;
         mk_final_transcript_for_segment(
-            &pool, sid, seg,
+            &pool,
+            sid,
+            seg,
             "Please draft the design review summary by Thursday morning so the team can read it.",
-            1_000, 30_000,
-        ).await;
+            1_000,
+            30_000,
+        )
+        .await;
 
-        let tenant_row: (String,) = sqlx::query_as(
-            "SELECT tenant_id FROM audio_sessions WHERE id = ?1"
-        ).bind(sid.to_string()).fetch_one(&pool).await.unwrap();
+        let tenant_row: (String,) =
+            sqlx::query_as("SELECT tenant_id FROM audio_sessions WHERE id = ?1")
+                .bind(sid.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         let tenant_id = Uuid::parse_str(&tenant_row.0).unwrap();
-        crate::repository::tenant_profile::upsert(&pool, &TenantProfile {
-            tenant_id,
-            display_name: Some("Alice".into()),
-            aliases: vec![],
-            bio: None,
-        }).await.unwrap();
+        crate::repository::tenant_profile::upsert(
+            &pool,
+            &TenantProfile {
+                tenant_id,
+                display_name: Some("Alice".into()),
+                aliases: vec![],
+                bio: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let router = LlmRouter::stub(vec![stub_item(
-            "Draft summary", "high",
+            "Draft summary",
+            "high",
             "draft the design review summary by Thursday morning",
             Some("Alice"),
         )]);
 
         extract_for_clip(&pool, &router, clip_id).await.unwrap();
 
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM reminders WHERE session_id = ?1"
-        ).bind(sid.to_string()).fetch_one(&pool).await.unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM reminders WHERE session_id = ?1")
+            .bind(sid.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count.0, 1);
     }
 

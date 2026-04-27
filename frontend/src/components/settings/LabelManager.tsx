@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '../../store/use-store';
 import { useT } from '../../i18n';
 import { translateLabelName } from '../../i18n/label-names';
+import { ConfirmDialog, useConfirm } from '../ConfirmDialog';
 
 const PALETTE = [
   { c: '#6366F1', b: '#EEF2FF' },
@@ -21,9 +22,31 @@ const PALETTE = [
 
 export function LabelManager() {
   const labels = useStore((s) => s.labels);
+  const reminders = useStore((s) => s.reminders);
   const addLabel = useStore((s) => s.addLabel);
   const deleteLabel = useStore((s) => s.deleteLabel);
   const t = useT();
+  const { confirm, dialogProps } = useConfirm();
+
+  // The `reminder_labels.label_id` FK has ON DELETE CASCADE — deleting a
+  // label silently strips it from every reminder using it. Show the
+  // cascade count up front so the user can decide (ISSUES.md #82).
+  const requestDeleteLabel = async (labelId: string, displayName: string) => {
+    const usage = reminders.filter((r) => r.labels.includes(labelId)).length;
+    const message =
+      usage === 0
+        ? t('settings.labels.confirmDeleteUnused', { name: displayName })
+        : t('settings.labels.confirmDelete', { name: displayName, count: usage });
+    if (
+      !(await confirm(message, {
+        confirmLabel: t('settings.labels.delete'),
+        cancelLabel: t('archive.cancel'),
+        tone: 'destructive',
+      }))
+    )
+      return;
+    void deleteLabel(labelId);
+  };
 
   const [newLabelText, setNewLabelText] = useState('');
   const [newLabelColor, setNewLabelColor] = useState<{ c: string; b: string } | null>(null);
@@ -86,7 +109,7 @@ export function LabelManager() {
             <button
               type="button"
               aria-label={t('settings.labels.aria.delete', { name: displayName })}
-              onClick={() => void deleteLabel(label.id)}
+              onClick={() => void requestDeleteLabel(label.id, displayName)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', marginLeft: '2px', lineHeight: 1, fontSize: '14px', color: 'inherit', opacity: 0.7, display: 'inline-flex', alignItems: 'center' }}
             >
               ×
@@ -206,6 +229,7 @@ export function LabelManager() {
           </span>
         )}
       </form>
+      <ConfirmDialog {...dialogProps} />
     </section>
   );
 }

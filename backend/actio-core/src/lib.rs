@@ -2,8 +2,10 @@ pub mod api;
 pub mod config;
 pub mod domain;
 pub mod engine;
-pub mod error;
 pub mod repository;
+
+#[cfg(test)]
+pub mod testing;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -94,6 +96,34 @@ pub struct AppState {
     pub llm_endpoint: Arc<tokio::sync::Mutex<LocalLlmEndpoint>>,
 }
 
+/// Match `origin` against `prefix` only if `prefix` is followed by a
+/// hostname/origin boundary (end of string, `:` for port, or `/` for path).
+/// A bare `starts_with` would accept `http://localhost.evil.com` and
+/// `http://127.0.0.1.evil.com` because the suffix is unconstrained — see
+/// ISSUES.md #87 for the original CORS bypass.
+fn origin_starts_with_at_boundary(origin: &str, prefix: &str) -> bool {
+    if !origin.starts_with(prefix) {
+        return false;
+    }
+    match origin.as_bytes().get(prefix.len()) {
+        None => true,           // exact match: "http://localhost"
+        Some(b':') => true,     // port follows: "http://localhost:5173"
+        Some(b'/') => true,     // path follows: "http://localhost/foo"
+        _ => false,             // any other char (".", letter, digit) is a different host
+    }
+}
+
+/// Permission gate for the CORS layer's `AllowOrigin::predicate`. Allows
+/// the two Tauri WebView schemes plus any loopback HTTP origin, with strict
+/// boundary checks so look-alike hostnames (`localhost.evil.com`,
+/// `127.0.0.1.evil.com`) don't match.
+fn is_allowed_actio_origin(origin: &str) -> bool {
+    origin == "tauri://localhost"
+        || origin == "https://tauri.localhost"
+        || origin_starts_with_at_boundary(origin, "http://localhost")
+        || origin_starts_with_at_boundary(origin, "http://127.0.0.1")
+}
+
 /// Initialize tracing with two writers: stderr (visible in dev) and a
 /// rolling daily log file under `<data_dir>/logs/actio.log`. The file writer
 /// is what keeps logs alive for bundled `.exe` / `.app` / AppImage launches —
@@ -163,8 +193,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     // constructed unconditionally so the API and supervisor have stable
     // references; whether they actually run is decided each tick by the
     // batch supervisor below based on `always_listening`.
-    let batch_processor =
-        Arc::new(crate::engine::batch_processor::BatchProcessorHandle::new());
+    let batch_processor = Arc::new(crate::engine::batch_processor::BatchProcessorHandle::new());
     let capture_daemon = {
         // Default device for now — when audio.device_name is wired through
         // settings updates, the daemon's start() will pick it up via the
@@ -177,12 +206,10 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
             vad_path,
         ))
     };
-    let live_streaming = Arc::new(
-        crate::engine::live_streaming::LiveStreamingService::new(
-            capture_daemon.clone(),
-            aggregator.clone(),
-        ),
-    );
+    let live_streaming = Arc::new(crate::engine::live_streaming::LiveStreamingService::new(
+        capture_daemon.clone(),
+        aggregator.clone(),
+    ));
 
     // Phase-A voiceprint-candidate retention: clips land in <data_dir>/audio_clips/
     // and get swept hourly per the user's `audio.clip_retention_days` setting.
@@ -274,12 +301,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
 
     // Pick the always-on pipeline based on the user's opt-in. The two paths
     // are mutually exclusive — both would try to grab the microphone.
-    let use_batch_pipeline = state
-        .settings_manager
-        .get()
-        .await
-        .audio
-        .use_batch_pipeline;
+    let use_batch_pipeline = state.settings_manager.get().await.audio.use_batch_pipeline;
     if use_batch_pipeline {
         info!("Always-on pipeline: batch clip processing (new)");
         let state_clone = state.clone();
@@ -370,14 +392,10 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     // can otherwise reject as invalid.
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _req| {
-            let s = match origin.to_str() {
-                Ok(s) => s,
-                Err(_) => return false,
-            };
-            s == "tauri://localhost"
-                || s == "https://tauri.localhost"
-                || s.starts_with("http://localhost")
-                || s.starts_with("http://127.0.0.1")
+            origin
+                .to_str()
+                .map(is_allowed_actio_origin)
+                .unwrap_or(false)
         }))
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([
@@ -496,9 +514,7 @@ async fn start_always_on_capture(state: &AppState) -> anyhow::Result<()> {
 /// caller already holds `state`. Used by start_server so the cleanup task
 /// can read its retention setting once at spawn time without forcing the
 /// caller to await inside the spawn block.
-fn settings_manager_ref(
-    state: &AppState,
-) -> crate::engine::app_settings::AppSettings {
+fn settings_manager_ref(state: &AppState) -> crate::engine::app_settings::AppSettings {
     // settings_manager.get() is async; we use try_read on the inner RwLock
     // when we know the caller is in startup (no contention). Falling back
     // to defaults is harmless — the user can always patch settings later.
@@ -518,13 +534,12 @@ async fn batch_pipeline_supervisor(state: AppState) {
     // Construct the ProductionClipRunner once. It re-reads settings each
     // run_clip call so model selection + thresholds can change without a
     // restart.
-    let runner: Arc<crate::engine::batch_processor::ProductionClipRunner> = Arc::new(
-        crate::engine::batch_processor::ProductionClipRunner {
+    let runner: Arc<crate::engine::batch_processor::ProductionClipRunner> =
+        Arc::new(crate::engine::batch_processor::ProductionClipRunner {
             settings_manager: state.settings_manager.clone(),
             model_manager: state.model_manager.clone(),
             router: state.router.clone(),
-        },
-    );
+        });
 
     loop {
         interval.tick().await;
@@ -789,6 +804,71 @@ async fn pipeline_supervisor(state: AppState) {
                     warn!(error = %e, "Failed to restart pipeline after model change");
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod cors_origin_tests {
+    use super::is_allowed_actio_origin;
+
+    /// Pins ISS-087: the CORS predicate must accept Tauri WebView schemes
+    /// and any loopback HTTP origin, but reject look-alike hostnames that
+    /// would have slipped through a bare `starts_with` check.
+    #[test]
+    fn allowed_origins() {
+        for origin in [
+            // Tauri scheme (macOS / Linux WebKitGTK)
+            "tauri://localhost",
+            // Tauri scheme (Windows WebView2)
+            "https://tauri.localhost",
+            // Bare host
+            "http://localhost",
+            "http://127.0.0.1",
+            // With port (Vite dev server, port-discovery fallback range)
+            "http://localhost:5173",
+            "http://localhost:1420",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3009",
+            // With trailing path
+            "http://localhost/foo",
+            "http://127.0.0.1/health",
+        ] {
+            assert!(
+                is_allowed_actio_origin(origin),
+                "expected `{origin}` to be allowed",
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_origins() {
+        for origin in [
+            // Look-alike hostnames that bare `starts_with` would have
+            // accepted — the boundary check must reject them.
+            "http://localhost.evil.com",
+            "http://localhost.evil.com:443",
+            "http://127.0.0.1.evil.com",
+            "http://127.0.0.1.evil.com/",
+            "http://localhostXYZ",
+            "http://127.0.0.1XYZ",
+            // userinfo-style trick (some agents accept; we should not)
+            "http://localhost@attacker.com/",
+            "http://127.0.0.1@attacker.com/",
+            // Wrong scheme
+            "https://localhost",
+            "https://127.0.0.1",
+            "ws://localhost",
+            // Unrelated origins
+            "http://example.com",
+            "https://tauri.localhost.evil.com",
+            "tauri://localhost.evil.com",
+            "",
+        ] {
+            assert!(
+                !is_allowed_actio_origin(origin),
+                "expected `{origin}` to be rejected",
+            );
         }
     }
 }

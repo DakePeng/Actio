@@ -4,6 +4,7 @@ import { useT, type TKey } from '../i18n';
 
 export function FeedbackToast() {
   const feedback = useStore((s) => s.ui.feedback);
+  const clearFeedback = useStore((s) => s.clearFeedback);
   const t = useT();
 
   return (
@@ -18,6 +19,18 @@ export function FeedbackToast() {
         >
           <span className="feedback-toast__dot" aria-hidden="true" />
           <span>{t(feedback.message as TKey, feedback.vars)}</span>
+          {feedback.action && (
+            <button
+              type="button"
+              className="feedback-toast__action"
+              onClick={() => {
+                feedback.action?.onAction();
+                clearFeedback();
+              }}
+            >
+              {t(feedback.action.labelKey as TKey)}
+            </button>
+          )}
         </motion.div>
       )}
     </AnimatePresence>

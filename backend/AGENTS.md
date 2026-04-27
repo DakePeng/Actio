@@ -1,10 +1,10 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-04-10 | Updated: 2026-04-17 -->
+<!-- Generated: 2026-04-10 | Updated: 2026-04-27 -->
 
 # backend
 
 ## Purpose
-The Rust backend is the core server for Actio. It exposes a REST + WebSocket API on port 3000, manages SQLite persistence via SQLx, runs all ML inference in-process via `sherpa-onnx` (VAD, ASR, speaker embedding, diarization), and optionally generates reminders from transcripts using a local (llama.cpp) or remote (OpenAI-compatible) LLM at session end. There is no Python worker and no gRPC.
+The Rust backend is the core server for Actio. It exposes a REST + WebSocket API on port 3000 (with frontend-side fallback to 3001–3009), manages SQLite persistence via SQLx, runs all ML inference in-process via `sherpa-onnx` (VAD, ASR, speaker embedding, diarization), and generates reminders from transcripts on a rolling-window cadence — `engine::window_extractor` slices the active session into 5-min windows (4-min step), routes each to an LLM (local llama.cpp or remote OpenAI-compatible), and confidence-gates the items into either the Board (`status='open'`) or the Needs-Review queue (`status='pending'`). There is no Python worker and no gRPC.
 
 ## Key Files
 
@@ -24,7 +24,6 @@ The Rust backend is the core server for Actio. It exposes a REST + WebSocket API
 | `actio-core/` | Main library crate: api, engine, repository, domain (binary: `actio-asr`) |
 | `src-tauri/` | Tauri desktop shell crate (see `src-tauri/AGENTS.md`) |
 | `migrations/` | Ordered SQL schema migrations applied at startup (see `migrations/AGENTS.md`) |
-| `tests/` | Rust integration tests (see `tests/AGENTS.md`) |
 | `docs/` | Planning documents and historical design specs |
 
 ## For AI Agents
@@ -45,7 +44,7 @@ The Rust backend is the core server for Actio. It exposes a REST + WebSocket API
 - Axum handlers receive `State<AppState>` — never pass mutable state via function arguments.
 - All DB operations go through `repository/` using a `SqlitePool` stored in `AppState`.
 - `sherpa-onnx` types like `OnlineRecognizer` and `VoiceActivityDetector` hold raw pointers and are `!Send` — wrap their entire lifecycle in a single `tokio::task::spawn_blocking` and bridge with `crossbeam_channel`.
-- Speaker embeddings are 512-dim (3D-Speaker). Any hardcoded `192` in the code is stale from the earlier CAM++ design and should be fixed as you encounter it.
+- **Speaker embedding dimension is per-model, not a single repo-wide constant.** CAM++ family + ERes2Net v2 + TitaNet (5 of 6 catalog models) emit **192-dim** vectors; only ERes2Net Base emits **512-dim**. The `speaker_embeddings` table stores `embedding_dimension` per row and `speaker_matcher` filters joins on the active dim, so cross-dim rows are silently ignored. Production INSERT sites already pass `embedding.len()` — never hardcode either number outside test fixtures.
 
 ## Dependencies
 

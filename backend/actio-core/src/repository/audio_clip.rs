@@ -80,9 +80,7 @@ pub async fn insert_pending(
 
 /// Atomically promote the oldest pending clip to `running` and return it.
 /// Skips clips that have already failed `attempts >= 3` times.
-pub async fn claim_next_pending(
-    pool: &SqlitePool,
-) -> Result<Option<AudioClip>, sqlx::Error> {
+pub async fn claim_next_pending(pool: &SqlitePool) -> Result<Option<AudioClip>, sqlx::Error> {
     let row: Option<AudioClipRow> = sqlx::query_as(
         r#"UPDATE audio_clips
            SET status = 'running', attempts = attempts + 1
@@ -163,16 +161,11 @@ pub async fn mark_failed(pool: &SqlitePool, id: Uuid, err: &str) -> Result<(), s
     Ok(())
 }
 
-pub async fn get_by_id(
-    pool: &SqlitePool,
-    id: Uuid,
-) -> Result<Option<AudioClip>, sqlx::Error> {
-    let row: Option<AudioClipRow> = sqlx::query_as(
-        r#"SELECT * FROM audio_clips WHERE id = ?1"#,
-    )
-    .bind(id.to_string())
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_by_id(pool: &SqlitePool, id: Uuid) -> Result<Option<AudioClip>, sqlx::Error> {
+    let row: Option<AudioClipRow> = sqlx::query_as(r#"SELECT * FROM audio_clips WHERE id = ?1"#)
+        .bind(id.to_string())
+        .fetch_optional(pool)
+        .await?;
     Ok(row.map(AudioClipRow::into_clip))
 }
 
@@ -229,21 +222,8 @@ pub async fn list_recent_with_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();
@@ -263,9 +243,16 @@ mod tests {
         let pool = fresh_pool().await;
         let session_id = mk_session(&pool).await;
 
-        let id = insert_pending(&pool, session_id, 1_000, 301_000, 5, "/tmp/foo/manifest.json")
-            .await
-            .unwrap();
+        let id = insert_pending(
+            &pool,
+            session_id,
+            1_000,
+            301_000,
+            5,
+            "/tmp/foo/manifest.json",
+        )
+        .await
+        .unwrap();
 
         let claimed = claim_next_pending(&pool).await.unwrap().unwrap();
         assert_eq!(claimed.id, id);
@@ -299,7 +286,9 @@ mod tests {
             .await
             .unwrap();
         let _ = claim_next_pending(&pool).await.unwrap();
-        mark_processed(&pool, id, Some("whisper-medium")).await.unwrap();
+        mark_processed(&pool, id, Some("whisper-medium"))
+            .await
+            .unwrap();
         let clip = get_by_id(&pool, id).await.unwrap().unwrap();
         assert_eq!(clip.status, "processed");
         assert!(clip.finished_at.is_some());
@@ -316,11 +305,17 @@ mod tests {
         // attempt 1 → fail → reverted to pending
         let _ = claim_next_pending(&pool).await.unwrap();
         mark_failed(&pool, id, "boom").await.unwrap();
-        assert_eq!(get_by_id(&pool, id).await.unwrap().unwrap().status, "pending");
+        assert_eq!(
+            get_by_id(&pool, id).await.unwrap().unwrap().status,
+            "pending"
+        );
         // attempt 2 → fail → still pending
         let _ = claim_next_pending(&pool).await.unwrap();
         mark_failed(&pool, id, "boom2").await.unwrap();
-        assert_eq!(get_by_id(&pool, id).await.unwrap().unwrap().status, "pending");
+        assert_eq!(
+            get_by_id(&pool, id).await.unwrap().unwrap().status,
+            "pending"
+        );
         // attempt 3 → fail → terminal failed
         let _ = claim_next_pending(&pool).await.unwrap();
         mark_failed(&pool, id, "boom3").await.unwrap();
@@ -337,12 +332,15 @@ mod tests {
 
         // 3 clips: pending, processed, empty. Only the latter two should
         // appear in the archive list.
-        let pending_id =
-            insert_pending(&pool, session_id, 0, 1_000, 0, "/tmp/p.json").await.unwrap();
-        let processed_id =
-            insert_pending(&pool, session_id, 1_000, 2_000, 1, "/tmp/q.json").await.unwrap();
-        let empty_id =
-            insert_pending(&pool, session_id, 2_000, 3_000, 0, "/tmp/r.json").await.unwrap();
+        let pending_id = insert_pending(&pool, session_id, 0, 1_000, 0, "/tmp/p.json")
+            .await
+            .unwrap();
+        let processed_id = insert_pending(&pool, session_id, 1_000, 2_000, 1, "/tmp/q.json")
+            .await
+            .unwrap();
+        let empty_id = insert_pending(&pool, session_id, 2_000, 3_000, 0, "/tmp/r.json")
+            .await
+            .unwrap();
 
         // Promote and terminalize the latter two.
         let _ = claim_next_pending(&pool).await.unwrap();

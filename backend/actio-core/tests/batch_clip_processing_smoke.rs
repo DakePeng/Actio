@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 use actio_core::domain::types::{ClipManifest, ClipManifestSegment};
 use actio_core::engine::batch_processor::{
-    process_clip_with_clustering, ArchiveAsr, ArchiveTranscript, ClusteringConfig,
-    SegmentEmbedder,
+    process_clip_with_clustering, ArchiveAsr, ArchiveTranscript, ClusteringConfig, SegmentEmbedder,
 };
 use actio_core::engine::clip_writer::write_manifest;
 use actio_core::repository::{audio_clip, db, segment, speaker};
@@ -92,6 +91,7 @@ fn cfg() -> ClusteringConfig {
     ClusteringConfig {
         cosine_threshold: 0.4,
         min_segments_per_cluster: 1,
+        min_duration_ms: 0,
         confirm_threshold: 0.55,
     }
 }
@@ -117,14 +117,27 @@ async fn two_clips_with_same_speaker_link_via_provisional() {
         }],
     };
     let p1 = write_manifest(tmp1.path(), &m1).unwrap();
-    audio_clip::insert_pending(&pool, session_id, 0, 300_000, 1, p1.to_string_lossy().as_ref())
+    audio_clip::insert_pending(
+        &pool,
+        session_id,
+        0,
+        300_000,
+        1,
+        p1.to_string_lossy().as_ref(),
+    )
+    .await
+    .unwrap();
+    let c1 = audio_clip::claim_next_pending(&pool)
         .await
+        .unwrap()
         .unwrap();
-    let c1 = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
     process_clip_with_clustering(
         &pool,
         Arc::new(StubAsr),
-        Arc::new(StubEmbedder { vecs: vec![vec![1.0, 0.0]], dim: 2 }),
+        Arc::new(StubEmbedder {
+            vecs: vec![vec![1.0, 0.0]],
+            dim: 2,
+        }),
         &c1,
         &cfg(),
         None,
@@ -159,11 +172,17 @@ async fn two_clips_with_same_speaker_link_via_provisional() {
     )
     .await
     .unwrap();
-    let c2 = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
+    let c2 = audio_clip::claim_next_pending(&pool)
+        .await
+        .unwrap()
+        .unwrap();
     process_clip_with_clustering(
         &pool,
         Arc::new(StubAsr),
-        Arc::new(StubEmbedder { vecs: vec![vec![0.99, 0.14]], dim: 2 }),
+        Arc::new(StubEmbedder {
+            vecs: vec![vec![0.99, 0.14]],
+            dim: 2,
+        }),
         &c2,
         &cfg(),
         None,
@@ -215,14 +234,27 @@ async fn promote_provisional_after_clip_makes_it_indistinguishable_from_enrolled
         }],
     };
     let p = write_manifest(tmp.path(), &m).unwrap();
-    audio_clip::insert_pending(&pool, session_id, 0, 300_000, 1, p.to_string_lossy().as_ref())
+    audio_clip::insert_pending(
+        &pool,
+        session_id,
+        0,
+        300_000,
+        1,
+        p.to_string_lossy().as_ref(),
+    )
+    .await
+    .unwrap();
+    let c = audio_clip::claim_next_pending(&pool)
         .await
+        .unwrap()
         .unwrap();
-    let c = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
     process_clip_with_clustering(
         &pool,
         Arc::new(StubAsr),
-        Arc::new(StubEmbedder { vecs: vec![vec![1.0, 0.0]], dim: 2 }),
+        Arc::new(StubEmbedder {
+            vecs: vec![vec![1.0, 0.0]],
+            dim: 2,
+        }),
         &c,
         &cfg(),
         None,
@@ -243,7 +275,10 @@ async fn promote_provisional_after_clip_makes_it_indistinguishable_from_enrolled
 
     // Provisional list is empty; the speaker survives as enrolled with the new name.
     let after = speaker::list_provisional(&pool).await.unwrap();
-    assert!(after.is_empty(), "promoted row should leave the provisional pool");
+    assert!(
+        after.is_empty(),
+        "promoted row should leave the provisional pool"
+    );
     let row: (String, String) =
         sqlx::query_as("SELECT display_name, kind FROM speakers WHERE id = ?1")
             .bind(provisional_id.to_string())

@@ -292,9 +292,8 @@ fn run_inference(
         let chat_messages: Vec<LlamaChatMessage> = messages
             .iter()
             .map(|m| {
-                LlamaChatMessage::new(m.role.clone(), m.content.clone()).map_err(|e| {
-                    LocalLlmError::InferenceFailed(format!("chat message error: {e}"))
-                })
+                LlamaChatMessage::new(m.role.clone(), m.content.clone())
+                    .map_err(|e| LocalLlmError::InferenceFailed(format!("chat message error: {e}")))
             })
             .collect::<Result<Vec<_>, _>>()?;
 

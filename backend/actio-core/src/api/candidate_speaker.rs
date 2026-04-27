@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::repository::speaker as speaker_repo;
 use crate::AppState;
 
@@ -124,23 +124,9 @@ pub async fn dismiss(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::db::run_migrations;
     use crate::repository::speaker::insert_provisional;
-    use sqlx::sqlite::SqlitePoolOptions;
-    use sqlx::SqlitePool;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     #[tokio::test]
     async fn promote_renames_and_clears_provisional_state() {

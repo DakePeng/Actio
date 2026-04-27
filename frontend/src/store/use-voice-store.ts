@@ -366,10 +366,37 @@ function clearPendingResolutionsForSession() {
   pendingResolutions.length = 0;
 }
 
+/** Test-only helpers. The `pendingResolutions` array is module-state, so
+ *  unit tests need a way to seed it (without going through the WebSocket /
+ *  speaker_resolved handler) and to reset it between cases. Marked with
+ *  `__` so consumers know not to depend on these. */
+export function __pushPendingResolutionForTest(p: {
+  start_ms: number;
+  end_ms: number;
+  speaker_id: string | null;
+  received_at?: number;
+}): void {
+  pendingResolutions.push({
+    start_ms: p.start_ms,
+    end_ms: p.end_ms,
+    speaker_id: p.speaker_id,
+    received_at: p.received_at ?? Date.now(),
+  });
+}
+export function __resetPendingResolutionsForTest(): void {
+  pendingResolutions.length = 0;
+}
+export function __pendingResolutionsCountForTest(): number {
+  return pendingResolutions.length;
+}
+
 /** Apply any buffered `speaker_resolved` events whose range now covers a
  *  newly-finalized line's midpoint. Mutates the input array of lines and
- *  returns a fresh array if anything changed, else the original. */
-function applyPendingResolutions(lines: TranscriptLine[]): TranscriptLine[] {
+ *  returns a fresh array if anything changed, else the original.
+ *
+ *  Exported for test use (see `use-voice-store.resolutions.test.ts`); the
+ *  production call site is inside `handleTranscriptMessage`. */
+export function applyPendingResolutions(lines: TranscriptLine[]): TranscriptLine[] {
   if (pendingResolutions.length === 0) return lines;
   let next: TranscriptLine[] | null = null;
   const consumedIndices = new Set<number>();

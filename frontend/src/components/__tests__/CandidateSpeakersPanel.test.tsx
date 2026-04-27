@@ -127,6 +127,71 @@ describe('CandidateSpeakersPanel', () => {
     expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
   });
 
+  it('dismiss button opens an in-app confirm modal (no native window.confirm)', async () => {
+    const dismissCalls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      makeFetchMock({
+        '/candidate-speakers/55555555-5555-5555-5555-555555555555': () => {
+          dismissCalls.push('hit');
+          return ok({});
+        },
+        '/candidate-speakers': () =>
+          new Response(
+            JSON.stringify([
+              {
+                id: '55555555-5555-5555-5555-555555555555',
+                display_name: 'Unknown',
+                color: '#9E9E9E',
+                last_matched_at: null,
+              },
+            ]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+      }),
+    );
+    // If the implementation regressed back to window.confirm, this would
+    // synchronously be called with the dismiss prompt — the spy lets us
+    // assert it stays untouched.
+    const confirmSpy = vi.spyOn(window, 'confirm');
+
+    renderPanel();
+    const dismissBtn = await screen.findByRole('button', {
+      name: /^dismiss/i,
+    });
+    fireEvent.click(dismissBtn);
+
+    // The modal renders with the prompt, so role=dialog is now in the DOM.
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(/dismiss this suggestion/i);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(dismissCalls).toEqual([]); // no API hit until the user confirms
+
+    // Cancel → modal closes, no API call.
+    fireEvent.click(screen.getByRole('button', { name: /^cancel/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(dismissCalls).toEqual([]);
+
+    // Reopen and confirm → API fires.
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^dismiss/i }),
+    );
+    const confirmBtn = await screen.findAllByRole('button', {
+      name: /^dismiss/i,
+    });
+    // The last "Dismiss" button is the modal's confirm action (rendered
+    // after the row-level button in the DOM).
+    fireEvent.click(confirmBtn[confirmBtn.length - 1]);
+
+    await waitFor(() => {
+      expect(dismissCalls).toEqual(['hit']);
+    });
+
+    confirmSpy.mockRestore();
+  });
+
   it('cancel from edit mode returns to the promote/dismiss view', async () => {
     vi.stubGlobal(
       'fetch',

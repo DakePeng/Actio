@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createActioApiClient } from '../api/actio-api';
 import { fetchSettings, patchSettings } from '../api/settings-client';
@@ -54,6 +55,7 @@ interface AppState {
     message: string,
     tone?: 'neutral' | 'success',
     vars?: Record<string, string | number>,
+    action?: { labelKey: string; onAction: () => void },
   ) => void;
   clearFeedback: () => void;
   clearNewFlag: (id: string) => void;
@@ -130,13 +132,19 @@ function pushFeedback(
   message: string,
   tone: 'neutral' | 'success' = 'neutral',
   vars?: Record<string, string | number>,
+  action?: { labelKey: string; onAction: () => void },
 ) {
   if (feedbackTimer) window.clearTimeout(feedbackTimer);
-  set((state) => ({ ui: { ...state.ui, feedback: { message, vars, tone } } }));
+  set((state) => ({
+    ui: { ...state.ui, feedback: { message, vars, tone, action } },
+  }));
+  // Actionable toasts get a longer grace period so users have time to hit
+  // Undo / Retry. Plain toasts stay at 2.2s.
+  const lifetimeMs = action ? 5000 : 2200;
   feedbackTimer = window.setTimeout(() => {
     set((state) => ({ ui: { ...state.ui, feedback: null } }));
     feedbackTimer = null;
-  }, 2200);
+  }, lifetimeMs);
 }
 
 function upsertReminder(reminders: Reminder[], next: Reminder) {
@@ -417,8 +425,8 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({ ui: { ...state.ui, hasSeenOnboarding: seen } }));
   },
 
-  setFeedback: (message, tone = 'neutral', vars) => {
-    pushFeedback(set, message, tone, vars);
+  setFeedback: (message, tone = 'neutral', vars, action) => {
+    pushFeedback(set, message, tone, vars, action);
   },
 
   clearFeedback: () => {
@@ -529,5 +537,8 @@ export const useStore = create<AppState>((set) => ({
 export function useFilteredReminders() {
   const reminders = useStore((state) => state.reminders);
   const filter = useStore((state) => state.filter);
-  return filterReminders(reminders, filter);
+  // Memoize so the O(N) filter doesn't rerun for unrelated re-renders
+  // (ISSUES.md #88) — the worst offender being focusedCardIndex changes
+  // from j/k keyboard nav, which can fire many times per second.
+  return useMemo(() => filterReminders(reminders, filter), [reminders, filter]);
 }

@@ -123,7 +123,10 @@ mod tests {
     #[test]
     fn closes_after_target_plus_long_silence() {
         let mut w = BoundaryWatcher::new(cfg());
-        w.observe(BoundaryEvent::Speech { start_ms: 0, end_ms: 2_000 });
+        w.observe(BoundaryEvent::Speech {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
         // Speech ending at 4:50 (290_000), silence tick at 5:01.5 (301_500)
         // → elapsed 301.5s ≥ target 300s, silence 11.5s ≥ 1.5s.
         w.observe(BoundaryEvent::Speech {
@@ -139,7 +142,10 @@ mod tests {
     #[test]
     fn does_not_close_at_target_when_speech_is_continuing() {
         let mut w = BoundaryWatcher::new(cfg());
-        w.observe(BoundaryEvent::Speech { start_ms: 0, end_ms: 2_000 });
+        w.observe(BoundaryEvent::Speech {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
         w.observe(BoundaryEvent::Speech {
             start_ms: 295_000,
             end_ms: 300_500,
@@ -153,7 +159,10 @@ mod tests {
     #[test]
     fn force_closes_at_max_when_speech_runs_through() {
         let mut w = BoundaryWatcher::new(cfg());
-        w.observe(BoundaryEvent::Speech { start_ms: 0, end_ms: 2_000 });
+        w.observe(BoundaryEvent::Speech {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
         let d = w.observe(BoundaryEvent::Speech {
             start_ms: 300_000,
             end_ms: 360_500,
@@ -164,7 +173,10 @@ mod tests {
     #[test]
     fn mute_closes_immediately_if_clip_open() {
         let mut w = BoundaryWatcher::new(cfg());
-        w.observe(BoundaryEvent::Speech { start_ms: 0, end_ms: 1_000 });
+        w.observe(BoundaryEvent::Speech {
+            start_ms: 0,
+            end_ms: 1_000,
+        });
         assert_eq!(w.observe(BoundaryEvent::Mute), Decision::CloseClip);
     }
 
@@ -177,7 +189,10 @@ mod tests {
     #[test]
     fn reset_after_close_starts_fresh_clip_on_next_speech() {
         let mut w = BoundaryWatcher::new(cfg());
-        w.observe(BoundaryEvent::Speech { start_ms: 0, end_ms: 2_000 });
+        w.observe(BoundaryEvent::Speech {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
         w.observe(BoundaryEvent::Mute);
         w.reset_after_close();
 
@@ -192,7 +207,10 @@ mod tests {
     #[test]
     fn silence_window_resets_when_new_speech_arrives() {
         let mut w = BoundaryWatcher::new(cfg());
-        w.observe(BoundaryEvent::Speech { start_ms: 0, end_ms: 2_000 });
+        w.observe(BoundaryEvent::Speech {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
         // At 5:00, would-have-closed silence window starts.
         w.observe(BoundaryEvent::Speech {
             start_ms: 200_000,

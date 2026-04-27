@@ -51,48 +51,6 @@ interface CardProps {
 export function Card({ reminder, isExpanded, onToggle, isFocused, focusedRef }: CardProps) {
   const t = useT();
 
-  // Skeleton variant — mirrors the collapsed-card structure so the layout
-  // doesn't jump when the real content arrives. Every piece shimmers in unison.
-  if (reminder.isExtracting) {
-    return (
-      <motion.div
-        layout
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
-      >
-        <article
-          className="reminder-card card--skeleton"
-          aria-busy="true"
-          aria-label={t('card.aria.extracting')}
-        >
-          <div className="reminder-accent" />
-          <div className="card-shell">
-            <div className="card-head">
-              <span className="skeleton-badge" />
-              <span className="mini-badge mini-badge--ai skeleton-ai-badge">{t('card.aiBadge')}</span>
-            </div>
-            <div className="skeleton-line skeleton-line--title" />
-            <div className="skeleton-line skeleton-line--desc" />
-            <div className="skeleton-line skeleton-line--desc-short" />
-            <div className="card-meta">
-              <div className="card-meta__item">
-                <span className="skeleton-dot" />
-                <span className="skeleton-line skeleton-line--meta" />
-              </div>
-              <span className="skeleton-line skeleton-line--meta-short" />
-            </div>
-            <div className="label-row">
-              <span className="skeleton-chip" style={{ width: 48 }} />
-              <span className="skeleton-chip" style={{ width: 64 }} />
-              <span className="skeleton-chip" style={{ width: 40 }} />
-            </div>
-          </div>
-        </article>
-      </motion.div>
-    );
-  }
-
   const setFilter = useStore((s) => s.setFilter);
   const archiveReminder = useStore((s) => s.archiveReminder);
   const setPriority = useStore((s) => s.setPriority);

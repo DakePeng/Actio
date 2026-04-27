@@ -4,18 +4,24 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::engine::app_settings::{AppSettings, SettingsPatch};
 use crate::engine::audio_capture::{self, AudioDeviceInfo};
 use crate::engine::model_manager::{AsrModelInfo, DownloadTarget, ModelStatus};
 use crate::AppState;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct DownloadRequest {
     pub target: DownloadTarget,
 }
 
 /// GET /settings/models — returns current ModelStatus as JSON.
+#[utoipa::path(
+    get,
+    path = "/settings/models",
+    tag = "settings",
+    responses((status = 200, description = "Current model download/load state")),
+)]
 pub async fn get_model_status(
     State(state): State<AppState>,
 ) -> Result<Json<ModelStatus>, AppApiError> {
@@ -24,12 +30,24 @@ pub async fn get_model_status(
 }
 
 /// GET /settings/models/available — lists ASR models and their download status.
+#[utoipa::path(
+    get,
+    path = "/settings/models/available",
+    tag = "settings",
+    responses((status = 200, description = "ASR catalog with download status")),
+)]
 pub async fn get_available_models(State(state): State<AppState>) -> Json<Vec<AsrModelInfo>> {
     Json(state.model_manager.available_asr_models())
 }
 
 /// GET /settings/models/embeddings — lists speaker-embedding models (the
 /// Common Models section of Settings → Models).
+#[utoipa::path(
+    get,
+    path = "/settings/models/embeddings",
+    tag = "settings",
+    responses((status = 200, description = "Speaker-embedding model catalog")),
+)]
 pub async fn get_available_embedding_models(
     State(state): State<AppState>,
 ) -> Json<Vec<crate::engine::model_manager::SpeakerEmbeddingModelInfo>> {
@@ -37,11 +55,27 @@ pub async fn get_available_embedding_models(
 }
 
 /// GET /settings/audio-devices — lists available audio input devices.
+#[utoipa::path(
+    get,
+    path = "/settings/audio-devices",
+    tag = "settings",
+    responses((status = 200, description = "Available audio input devices", body = Vec<AudioDeviceInfo>)),
+)]
 pub async fn list_audio_devices() -> Json<Vec<AudioDeviceInfo>> {
     Json(audio_capture::list_devices())
 }
 
 /// POST /settings/models/download — starts background download, returns 202.
+#[utoipa::path(
+    post,
+    path = "/settings/models/download",
+    tag = "settings",
+    request_body = DownloadRequest,
+    responses(
+        (status = 202, description = "Download accepted; poll /settings/models for progress"),
+        (status = 500, description = "Download could not be started", body = AppApiError),
+    ),
+)]
 pub async fn start_model_download(
     State(state): State<AppState>,
     Json(req): Json<DownloadRequest>,
@@ -57,23 +91,39 @@ pub async fn start_model_download(
 }
 
 /// POST /settings/models/cancel-download — abort a running ASR model download.
+#[utoipa::path(
+    post,
+    path = "/settings/models/cancel-download",
+    tag = "settings",
+    responses((status = 200, description = "Cancel signal sent")),
+)]
 pub async fn cancel_model_download(State(state): State<AppState>) -> StatusCode {
     state.model_manager.cancel_download().await;
     StatusCode::OK
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct WarmupRequest {
     pub asr_model: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct DeleteModelResult {
     pub deleted: u32,
 }
 
 /// DELETE /settings/models/:id — remove all files for a model (or "shared"
 /// for the Silero VAD tier). Returns the number of files deleted.
+#[utoipa::path(
+    delete,
+    path = "/settings/models/{id}",
+    tag = "settings",
+    params(("id" = String, Path, description = "Model id, or `shared` for VAD")),
+    responses(
+        (status = 200, description = "File-count deleted", body = DeleteModelResult),
+        (status = 500, description = "Filesystem error", body = AppApiError),
+    ),
+)]
 pub async fn delete_model(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -92,6 +142,16 @@ pub async fn delete_model(
 /// offline models) and reads each one in a background task. Returns only
 /// after the files are fully resident in the OS page cache so the client can
 /// accurately reflect load progress in the UI.
+#[utoipa::path(
+    post,
+    path = "/settings/models/warmup",
+    tag = "settings",
+    request_body = WarmupRequest,
+    responses(
+        (status = 200, description = "Files resident in OS page cache"),
+        (status = 500, description = "Warmup failed", body = AppApiError),
+    ),
+)]
 pub async fn warmup_models(
     State(state): State<AppState>,
     Json(req): Json<WarmupRequest>,
@@ -140,11 +200,23 @@ pub async fn warmup_models(
 }
 
 /// GET /settings — returns current AppSettings as JSON.
+#[utoipa::path(
+    get,
+    path = "/settings",
+    tag = "settings",
+    responses((status = 200, description = "Current AppSettings")),
+)]
 pub async fn get_settings(State(state): State<AppState>) -> Json<AppSettings> {
     Json(state.settings_manager.get().await)
 }
 
 /// PATCH /settings — partial update of AppSettings.
+#[utoipa::path(
+    patch,
+    path = "/settings",
+    tag = "settings",
+    responses((status = 200, description = "Updated AppSettings")),
+)]
 pub async fn patch_settings(
     State(state): State<AppState>,
     Json(patch): Json<SettingsPatch>,
@@ -212,13 +284,22 @@ pub async fn patch_settings(
     Json(new_settings)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LlmTestResult {
     pub success: bool,
     pub message: String,
 }
 
 /// POST /settings/llm/test — test the active LLM backend with a tiny prompt.
+#[utoipa::path(
+    post,
+    path = "/settings/llm/test",
+    tag = "settings",
+    responses(
+        (status = 200, description = "Test result", body = LlmTestResult),
+        (status = 500, description = "Internal LLM error"),
+    ),
+)]
 pub async fn test_llm(State(state): State<AppState>) -> Result<Json<LlmTestResult>, StatusCode> {
     use crate::engine::llm_prompt::ChatMessage;
     use crate::engine::llm_router::LlmSelection;

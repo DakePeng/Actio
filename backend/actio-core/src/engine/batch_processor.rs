@@ -128,7 +128,39 @@ pub trait SegmentEmbedder: Send + Sync + 'static {
 pub struct ClusteringConfig {
     pub cosine_threshold: f32,
     pub min_segments_per_cluster: usize,
+    /// Minimum total segment duration (sum of `end_ms - start_ms`) across a
+    /// cluster, in milliseconds. AND'd with `min_segments_per_cluster` —
+    /// both gates must pass to mint a provisional speaker.
+    pub min_duration_ms: u64,
     pub confirm_threshold: f32,
+}
+
+/// AND-gate the per-cluster floors: a cluster has to clear both the
+/// segment-count floor and the summed-duration floor before its centroid
+/// is allowed to mint a provisional speaker. Used by both
+/// `process_clip_with_clustering` (test path) and
+/// `process_clip_production` (sherpa path) so semantics stay aligned.
+fn cluster_passes_gate(
+    member_seg_ids: &[Uuid],
+    manifest: &ClipManifest,
+    min_segments: usize,
+    min_duration_ms: u64,
+) -> bool {
+    if member_seg_ids.len() < min_segments {
+        return false;
+    }
+    let total_ms: u64 = member_seg_ids
+        .iter()
+        .map(|seg_id| {
+            manifest
+                .segments
+                .iter()
+                .find(|s| s.id == *seg_id)
+                .map(|s| s.end_ms.saturating_sub(s.start_ms) as u64)
+                .unwrap_or(0)
+        })
+        .sum();
+    total_ms >= min_duration_ms
 }
 
 /// Process a clip with the full pipeline: ASR + embedding + clustering +
@@ -219,7 +251,13 @@ pub async fn process_clip_with_clustering<A: ArchiveAsr, E: SegmentEmbedder>(
     //    create provisional → write speaker_id + clip_local_speaker_idx.
     let tenant_id = Uuid::nil();
     for (cluster_idx, members) in clusters {
-        if members.len() < cfg.min_segments_per_cluster {
+        let seg_ids: Vec<Uuid> = members.iter().map(|(id, _)| *id).collect();
+        if !cluster_passes_gate(
+            &seg_ids,
+            &manifest,
+            cfg.min_segments_per_cluster,
+            cfg.min_duration_ms,
+        ) {
             continue;
         }
         let centroid = mean_unit(members.iter().map(|(_, e)| e.as_slice()));
@@ -318,6 +356,7 @@ fn load_manifest(manifest_path: &str) -> anyhow::Result<ClipManifest> {
 /// offline helpers and engine::diarization::extract_embedding directly
 /// — those are async and can't be used from a sync trait method without
 /// awkward runtime gymnastics.
+#[allow(clippy::too_many_arguments)]
 pub async fn process_clip_production(
     pool: &SqlitePool,
     clip: &AudioClip,
@@ -326,6 +365,8 @@ pub async fn process_clip_production(
     model_paths: &crate::engine::model_manager::ModelPaths,
     cluster_cosine_threshold: f32,
     confirm_threshold: f32,
+    cluster_min_segments: u32,
+    cluster_min_duration_ms: u32,
     router: Option<&crate::engine::llm_router::LlmRouter>,
 ) -> anyhow::Result<()> {
     let manifest = load_manifest(&clip.manifest_path)?;
@@ -352,22 +393,18 @@ pub async fn process_clip_production(
     // 2) Run ASR against every segment by feeding them through one of the
     //    engine::asr offline helpers. We collect transcripts indexed by
     //    segment_id so order doesn't matter.
-    let (seg_tx, seg_rx) =
-        tokio::sync::mpsc::channel::<crate::engine::vad::SpeechSegment>(32);
-    let mut transcript_rx = match start_offline_asr_for_archive(
-        archive_model_id,
-        model_paths,
-        seg_rx,
-    ) {
-        Ok(rx) => rx,
-        Err(e) => {
-            return Err(anyhow::anyhow!(
-                "archive ASR start failed for model {}: {}",
-                archive_model_id,
-                e
-            ));
-        }
-    };
+    let (seg_tx, seg_rx) = tokio::sync::mpsc::channel::<crate::engine::vad::SpeechSegment>(32);
+    let mut transcript_rx =
+        match start_offline_asr_for_archive(archive_model_id, model_paths, seg_rx) {
+            Ok(rx) => rx,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "archive ASR start failed for model {}: {}",
+                    archive_model_id,
+                    e
+                ));
+            }
+        };
 
     // Read every WAV ONCE and stash the samples — both ASR (here) and
     // embedding (below) use them. Without this we'd re-decode the same
@@ -486,8 +523,7 @@ pub async fn process_clip_production(
 
         // 4) Cluster + 5) Match / insert provisional / assign segments.
         if !embeddings.is_empty() && dim > 0 {
-            let assignments =
-                crate::engine::cluster::ahc(&embeddings, cluster_cosine_threshold);
+            let assignments = crate::engine::cluster::ahc(&embeddings, cluster_cosine_threshold);
             let mut clusters: std::collections::BTreeMap<usize, Vec<(Uuid, &Vec<f32>)>> =
                 Default::default();
             for (i, a) in assignments.iter().enumerate() {
@@ -498,6 +534,15 @@ pub async fn process_clip_production(
             }
             let tenant_id = Uuid::nil();
             for (cluster_idx, members) in clusters {
+                let seg_ids: Vec<Uuid> = members.iter().map(|(id, _)| *id).collect();
+                if !cluster_passes_gate(
+                    &seg_ids,
+                    &manifest,
+                    cluster_min_segments as usize,
+                    cluster_min_duration_ms as u64,
+                ) {
+                    continue;
+                }
                 let centroid = mean_unit(members.iter().map(|(_, e)| e.as_slice()));
                 let speaker_id = match crate::repository::speaker::find_match_by_centroid(
                     pool,
@@ -642,8 +687,7 @@ impl ClipRunner for ProductionClipRunner {
         &'a self,
         pool: &'a sqlx::SqlitePool,
         clip: &'a AudioClip,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>>
-    {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
         Box::pin(async move {
             let settings = self.settings_manager.get().await;
             let resolved = settings.audio.resolved_asr_models();
@@ -671,6 +715,8 @@ impl ClipRunner for ProductionClipRunner {
                 &model_paths,
                 settings.audio.cluster_cosine_threshold,
                 settings.audio.speaker_confirm_threshold,
+                settings.audio.cluster_min_segments,
+                settings.audio.cluster_min_duration_ms,
                 router_ref,
             )
             .await
@@ -845,22 +891,9 @@ mod tests {
     use super::*;
     use crate::domain::types::ClipManifestSegment;
     use crate::engine::clip_writer::write_manifest;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
     use tempfile::tempdir;
 
-    pub(super) async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    pub(super) use crate::testing::fresh_pool;
 
     pub(super) async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();
@@ -933,12 +966,20 @@ mod tests {
         .await
         .unwrap();
 
-        let claimed = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
+        let claimed = audio_clip::claim_next_pending(&pool)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(claimed.id, clip_id);
 
-        process_clip(&pool, Arc::new(StubAsr), &claimed).await.unwrap();
+        process_clip(&pool, Arc::new(StubAsr), &claimed)
+            .await
+            .unwrap();
 
-        let after = audio_clip::get_by_id(&pool, clip_id).await.unwrap().unwrap();
+        let after = audio_clip::get_by_id(&pool, clip_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(after.status, "processed");
 
         let transcripts = transcript::get_final_transcripts_for_session(&pool, session_id)
@@ -972,11 +1013,19 @@ mod tests {
         )
         .await
         .unwrap();
-        let claimed = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
+        let claimed = audio_clip::claim_next_pending(&pool)
+            .await
+            .unwrap()
+            .unwrap();
 
-        process_clip(&pool, Arc::new(StubAsr), &claimed).await.unwrap();
+        process_clip(&pool, Arc::new(StubAsr), &claimed)
+            .await
+            .unwrap();
 
-        let after = audio_clip::get_by_id(&pool, clip_id).await.unwrap().unwrap();
+        let after = audio_clip::get_by_id(&pool, clip_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(after.status, "empty");
         let transcripts = transcript::get_final_transcripts_for_session(&pool, session_id)
             .await
@@ -1010,6 +1059,7 @@ mod tests {
         ClusteringConfig {
             cosine_threshold: 0.4,
             min_segments_per_cluster: 1,
+            min_duration_ms: 0,
             confirm_threshold: 0.55,
         }
     }
@@ -1057,36 +1107,54 @@ mod tests {
         )
         .await
         .unwrap();
-        let claimed = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
+        let claimed = audio_clip::claim_next_pending(&pool)
+            .await
+            .unwrap()
+            .unwrap();
 
         // Two collinear vectors (one cluster) + one orthogonal (another cluster).
         let embedder = Arc::new(StubEmbedder {
-            vecs: vec![
-                vec![1.0, 0.0],
-                vec![0.99, 0.14],
-                vec![0.0, 1.0],
-            ],
+            vecs: vec![vec![1.0, 0.0], vec![0.99, 0.14], vec![0.0, 1.0]],
             dim: 2,
         });
 
-        process_clip_with_clustering(&pool, Arc::new(StubAsr), embedder, &claimed, &cluster_cfg(), None)
+        process_clip_with_clustering(
+            &pool,
+            Arc::new(StubAsr),
+            embedder,
+            &claimed,
+            &cluster_cfg(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let provisional = crate::repository::speaker::list_provisional(&pool)
             .await
             .unwrap();
-
-        let provisional =
-            crate::repository::speaker::list_provisional(&pool).await.unwrap();
         assert_eq!(provisional.len(), 2, "expected two provisional speakers");
 
-        let segs = crate::repository::segment::list_for_clip(&pool, claimed.id).await.unwrap();
+        let segs = crate::repository::segment::list_for_clip(&pool, claimed.id)
+            .await
+            .unwrap();
         assert_eq!(segs.len(), 3);
         // First two segments share a cluster index; third differs.
-        assert_eq!(segs[0].clip_local_speaker_idx, segs[1].clip_local_speaker_idx);
-        assert_ne!(segs[0].clip_local_speaker_idx, segs[2].clip_local_speaker_idx);
+        assert_eq!(
+            segs[0].clip_local_speaker_idx,
+            segs[1].clip_local_speaker_idx
+        );
+        assert_ne!(
+            segs[0].clip_local_speaker_idx,
+            segs[2].clip_local_speaker_idx
+        );
         assert!(segs.iter().all(|s| s.speaker_id.is_some()));
         assert_eq!(segs[0].speaker_id, segs[1].speaker_id);
         assert_ne!(segs[0].speaker_id, segs[2].speaker_id);
 
-        let after = audio_clip::get_by_id(&pool, claimed.id).await.unwrap().unwrap();
+        let after = audio_clip::get_by_id(&pool, claimed.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(after.status, "processed");
     }
 
@@ -1111,12 +1179,27 @@ mod tests {
             }],
         };
         let p1 = write_manifest(tmp.path(), &m1).unwrap();
-        audio_clip::insert_pending(&pool, session_id, 0, 300_000, 1, p1.to_string_lossy().as_ref())
+        audio_clip::insert_pending(
+            &pool,
+            session_id,
+            0,
+            300_000,
+            1,
+            p1.to_string_lossy().as_ref(),
+        )
+        .await
+        .unwrap();
+        let c1 = audio_clip::claim_next_pending(&pool)
+            .await
+            .unwrap()
+            .unwrap();
+        let e1 = Arc::new(StubEmbedder {
+            vecs: vec![vec![1.0, 0.0]],
+            dim: 2,
+        });
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), e1, &c1, &cfg, None)
             .await
             .unwrap();
-        let c1 = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
-        let e1 = Arc::new(StubEmbedder { vecs: vec![vec![1.0, 0.0]], dim: 2 });
-        process_clip_with_clustering(&pool, Arc::new(StubAsr), e1, &c1, &cfg, None).await.unwrap();
 
         // Clip 2: single segment, near-collinear embedding [0.99, 0.14].
         let tmp2 = tempdir().unwrap();
@@ -1143,21 +1226,179 @@ mod tests {
         )
         .await
         .unwrap();
-        let c2 = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
-        let e2 = Arc::new(StubEmbedder { vecs: vec![vec![0.99, 0.14]], dim: 2 });
-        process_clip_with_clustering(&pool, Arc::new(StubAsr), e2, &c2, &cfg, None).await.unwrap();
+        let c2 = audio_clip::claim_next_pending(&pool)
+            .await
+            .unwrap()
+            .unwrap();
+        let e2 = Arc::new(StubEmbedder {
+            vecs: vec![vec![0.99, 0.14]],
+            dim: 2,
+        });
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), e2, &c2, &cfg, None)
+            .await
+            .unwrap();
 
-        let provisional =
-            crate::repository::speaker::list_provisional(&pool).await.unwrap();
+        let provisional = crate::repository::speaker::list_provisional(&pool)
+            .await
+            .unwrap();
         assert_eq!(
             provisional.len(),
             1,
             "second clip should reuse the first's provisional row"
         );
 
-        let segs1 = crate::repository::segment::list_for_clip(&pool, c1.id).await.unwrap();
-        let segs2 = crate::repository::segment::list_for_clip(&pool, c2.id).await.unwrap();
+        let segs1 = crate::repository::segment::list_for_clip(&pool, c1.id)
+            .await
+            .unwrap();
+        let segs2 = crate::repository::segment::list_for_clip(&pool, c2.id)
+            .await
+            .unwrap();
         assert_eq!(segs1[0].speaker_id, segs2[0].speaker_id);
+    }
+
+    /// Helper: build + claim a clip with N collinear-vector segments of the
+    /// given duration (start_ms = idx * dur, end_ms = (idx + 1) * dur).
+    async fn mk_collinear_clip(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        n: usize,
+        seg_duration_ms: i64,
+    ) -> (AudioClip, Arc<StubEmbedder>, tempfile::TempDir) {
+        let tmp = tempdir().unwrap();
+        let segments: Vec<ClipManifestSegment> = (0..n)
+            .map(|i| ClipManifestSegment {
+                id: Uuid::new_v4(),
+                start_ms: (i as i64) * seg_duration_ms,
+                end_ms: ((i as i64) + 1) * seg_duration_ms,
+                file: format!("{}.wav", i),
+            })
+            .collect();
+        let manifest = ClipManifest {
+            clip_id: Uuid::new_v4(),
+            session_id,
+            started_at_ms: 0,
+            ended_at_ms: (n as i64) * seg_duration_ms,
+            segments,
+        };
+        let p = write_manifest(tmp.path(), &manifest).unwrap();
+        audio_clip::insert_pending(
+            pool,
+            session_id,
+            0,
+            (n as i64) * seg_duration_ms,
+            n as i64,
+            p.to_string_lossy().as_ref(),
+        )
+        .await
+        .unwrap();
+        let claimed = audio_clip::claim_next_pending(pool).await.unwrap().unwrap();
+        // Slightly perturbed but collinear vectors so AHC merges them all
+        // into one cluster regardless of n.
+        let vecs: Vec<Vec<f32>> = (0..n).map(|i| vec![1.0, (i as f32) * 0.001]).collect();
+        let embedder = Arc::new(StubEmbedder { vecs, dim: 2 });
+        (claimed, embedder, tmp)
+    }
+
+    #[tokio::test]
+    async fn cluster_below_min_segments_is_dropped() {
+        let pool = fresh_pool().await;
+        let session_id = mk_session(&pool).await;
+
+        // Two segments, gate requires ≥3 → no provisional should be minted.
+        let (clip, embedder, _tmp) = mk_collinear_clip(&pool, session_id, 2, 3_000).await;
+        let cfg = ClusteringConfig {
+            cosine_threshold: 0.4,
+            min_segments_per_cluster: 3,
+            min_duration_ms: 0,
+            confirm_threshold: 0.55,
+        };
+
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), embedder, &clip, &cfg, None)
+            .await
+            .unwrap();
+
+        let provisional = crate::repository::speaker::list_provisional(&pool)
+            .await
+            .unwrap();
+        assert!(
+            provisional.is_empty(),
+            "expected no provisional speakers, got {:?}",
+            provisional
+        );
+        let segs = crate::repository::segment::list_for_clip(&pool, clip.id)
+            .await
+            .unwrap();
+        assert!(
+            segs.iter().all(|s| s.speaker_id.is_none()),
+            "filtered segments should have NULL speaker_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn cluster_below_min_duration_is_dropped() {
+        let pool = fresh_pool().await;
+        let session_id = mk_session(&pool).await;
+
+        // Three short segments (500 ms each → 1500 ms total). Duration gate
+        // is 8 000 ms → no provisional minted even though count clears.
+        let (clip, embedder, _tmp) = mk_collinear_clip(&pool, session_id, 3, 500).await;
+        let cfg = ClusteringConfig {
+            cosine_threshold: 0.4,
+            min_segments_per_cluster: 3,
+            min_duration_ms: 8_000,
+            confirm_threshold: 0.55,
+        };
+
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), embedder, &clip, &cfg, None)
+            .await
+            .unwrap();
+
+        let provisional = crate::repository::speaker::list_provisional(&pool)
+            .await
+            .unwrap();
+        assert!(
+            provisional.is_empty(),
+            "duration gate should have dropped the cluster"
+        );
+        let segs = crate::repository::segment::list_for_clip(&pool, clip.id)
+            .await
+            .unwrap();
+        assert!(segs.iter().all(|s| s.speaker_id.is_none()));
+    }
+
+    #[tokio::test]
+    async fn cluster_meeting_both_floors_is_kept_and_minted() {
+        let pool = fresh_pool().await;
+        let session_id = mk_session(&pool).await;
+
+        // Three segments × 3 000 ms = 9 000 ms total, both floors clear.
+        let (clip, embedder, _tmp) = mk_collinear_clip(&pool, session_id, 3, 3_000).await;
+        let cfg = ClusteringConfig {
+            cosine_threshold: 0.4,
+            min_segments_per_cluster: 3,
+            min_duration_ms: 8_000,
+            confirm_threshold: 0.55,
+        };
+
+        process_clip_with_clustering(&pool, Arc::new(StubAsr), embedder, &clip, &cfg, None)
+            .await
+            .unwrap();
+
+        let provisional = crate::repository::speaker::list_provisional(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            provisional.len(),
+            1,
+            "expected exactly one provisional speaker"
+        );
+        let segs = crate::repository::segment::list_for_clip(&pool, clip.id)
+            .await
+            .unwrap();
+        assert!(
+            segs.iter().all(|s| s.speaker_id.is_some()),
+            "all segments should be attributed"
+        );
     }
 
     /// process_clip_production with an archive_model_id that points at no
@@ -1187,12 +1428,8 @@ mod tests {
         // Write a placeholder WAV so manifest decoding can read it before
         // the ASR start path fails (so the failure is specifically the
         // missing model file, not a missing audio file).
-        crate::engine::clip_writer::write_segment_wav(
-            tmp.path(),
-            "a.wav",
-            &[0.0_f32; 16_000],
-        )
-        .unwrap();
+        crate::engine::clip_writer::write_segment_wav(tmp.path(), "a.wav", &[0.0_f32; 16_000])
+            .unwrap();
 
         audio_clip::insert_pending(
             &pool,
@@ -1204,7 +1441,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let clip = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
+        let clip = audio_clip::claim_next_pending(&pool)
+            .await
+            .unwrap()
+            .unwrap();
 
         // ModelPaths with no downloaded archive model — start_offline_asr
         // should bail with a clear error.
@@ -1230,6 +1470,8 @@ mod tests {
             &model_paths,
             0.4,
             0.55,
+            3,
+            8_000,
             None,
         )
         .await;
@@ -1283,11 +1525,17 @@ mod tests {
         )
         .await
         .unwrap();
-        let claimed = audio_clip::claim_next_pending(&pool).await.unwrap().unwrap();
+        let claimed = audio_clip::claim_next_pending(&pool)
+            .await
+            .unwrap()
+            .unwrap();
 
         let err = process_clip(&pool, Arc::new(FailingAsr), &claimed).await;
         assert!(err.is_err());
-        let after = audio_clip::get_by_id(&pool, claimed.id).await.unwrap().unwrap();
+        let after = audio_clip::get_by_id(&pool, claimed.id)
+            .await
+            .unwrap()
+            .unwrap();
         // process_clip itself does not flip status — that's mark_failed's
         // job at the caller layer. We just confirm we didn't accidentally
         // mark it processed on a failed run.

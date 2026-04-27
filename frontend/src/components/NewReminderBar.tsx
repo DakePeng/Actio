@@ -3,19 +3,19 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { ChatComposer } from './ChatComposer';
 import { useT } from '../i18n';
+import { getApiUrl } from '../api/backend-url';
 
 type CaptureMode = 'chat' | 'form';
 const MODE_STORAGE_KEY = 'actio-capture-mode';
-const SETTINGS_API_URL = `${(import.meta.env.VITE_ACTIO_API_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '')}/settings`;
 
 function isLlmConfigured(settings: unknown): boolean {
   const selection = (settings as { llm?: { selection?: { kind?: string } } })?.llm?.selection;
   return Boolean(selection?.kind && selection.kind !== 'disabled');
 }
 
-async function fetchLlmConfigured(signal: AbortSignal): Promise<boolean> {
+async function fetchLlmConfigured(): Promise<boolean> {
   try {
-    const response = await fetch(SETTINGS_API_URL, { signal });
+    const response = await fetch(await getApiUrl('/settings'));
     if (!response.ok) return false;
     return isLlmConfigured(await response.json());
   } catch {
@@ -54,11 +54,13 @@ export function NewReminderBar() {
   useEffect(() => {
     if (!show || mode !== 'chat') return;
 
+    // Background probe — let it run to completion. Port discovery in
+    // `getApiUrl` has its own per-port timeout, so a hard outer deadline
+    // here just races with that and silently misclassifies a properly
+    // configured LLM as "not configured" (ISSUES.md #83). The `cancelled`
+    // flag still protects the no-op-after-unmount path.
     let cancelled = false;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 800);
-
-    void fetchLlmConfigured(controller.signal).then((configured) => {
+    void fetchLlmConfigured().then((configured) => {
       if (cancelled || configured) return;
       setMode('form');
       setFeedback('feedback.llmNotConfiguredFormMode');
@@ -66,8 +68,6 @@ export function NewReminderBar() {
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timeout);
-      controller.abort();
     };
   }, [show, mode, setFeedback]);
 

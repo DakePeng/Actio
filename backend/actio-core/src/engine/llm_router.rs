@@ -203,8 +203,12 @@ impl LlmRouter {
                     thinking_budget: None,
                     suppress_thinking: true,
                 };
-                let messages =
-                    build_window_messages(attributed_transcript, label_names, window_local_date, profile);
+                let messages = build_window_messages(
+                    attributed_transcript,
+                    label_names,
+                    window_local_date,
+                    profile,
+                );
                 let json = engine
                     .chat_completion(messages, params, EnginePriority::Internal)
                     .await
@@ -235,7 +239,9 @@ impl LlmRouter {
         match self {
             LlmRouter::Disabled => Err(LlmRouterError::Disabled),
             #[cfg(test)]
-            LlmRouter::Stub { translation_suffix, .. } => Ok(lines
+            LlmRouter::Stub {
+                translation_suffix, ..
+            } => Ok(lines
                 .into_iter()
                 .map(|l| crate::engine::llm_translate::TranslateLineResponse {
                     id: l.id,
@@ -603,8 +609,14 @@ mod tests {
     async fn translate_lines_stub_appends_suffix_in_order() {
         let router = LlmRouter::stub_with_translation_suffix(" [zh]");
         let lines = vec![
-            TranslateLineRequest { id: "line-1".into(), text: "first".into() },
-            TranslateLineRequest { id: "line-2".into(), text: "second".into() },
+            TranslateLineRequest {
+                id: "line-1".into(),
+                text: "first".into(),
+            },
+            TranslateLineRequest {
+                id: "line-2".into(),
+                text: "second".into(),
+            },
         ];
         let out = router.translate_lines("zh-CN", lines).await.unwrap();
         assert_eq!(out.len(), 2);

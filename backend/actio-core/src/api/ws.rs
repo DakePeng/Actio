@@ -90,19 +90,17 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: Uuid) {
 
     let (mut sender, mut receiver) = socket.split();
 
-    // TODO(Phase 3-4): Wire cpal audio capture → VAD → ASR pipeline here.
-    // For now, accept messages but don't process audio — the inference pipeline
-    // doesn't exist yet. Transcript events will be pushed once ASR is integrated.
-
+    // /ws is broadcast-out only — capture comes from CaptureDaemon (always-on
+    // batch path) or LiveStreamingService (dictation/translation), and the
+    // aggregator fans transcripts + speaker-resolved frames back here. Inbound
+    // binary frames from clients are intentionally ignored.
     let aggregator_rx = state.aggregator.subscribe();
     let speaker_rx = state.aggregator.subscribe_speaker();
     let audio_level_rx = state.audio_levels.subscribe();
     let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
-                Message::Binary(_) => {
-                    // Audio chunks received but inference pipeline not yet connected
-                }
+                Message::Binary(_) => {}
                 Message::Close(_) => break,
                 _ => {}
             }

@@ -4,29 +4,29 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::engine::llm_router::LlmRouterError;
 use crate::engine::llm_translate::TranslateLineRequest;
 use crate::AppState;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct TranslateRequest {
     pub target_lang: String,
     pub lines: Vec<TranslateLineRequestWire>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct TranslateLineRequestWire {
     pub id: String,
     pub text: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TranslateResponse {
     pub translations: Vec<TranslateLineWire>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TranslateLineWire {
     pub id: String,
     pub text: String,
@@ -36,6 +36,17 @@ pub struct TranslateLineWire {
 ///
 /// Returns 503 with `{"error":"llm_disabled"}` when the router is in
 /// `Disabled` mode so the frontend can surface a precise toast.
+#[utoipa::path(
+    post,
+    path = "/llm/translate",
+    tag = "llm",
+    request_body = TranslateRequest,
+    responses(
+        (status = 200, description = "Translations (preserves request order via line ids)", body = TranslateResponse),
+        (status = 503, description = "Router disabled — pick Local or Remote in Settings → AI"),
+        (status = 500, description = "Translation failed", body = AppApiError),
+    ),
+)]
 pub async fn translate_lines(
     State(state): State<AppState>,
     Json(req): Json<TranslateRequest>,
@@ -135,9 +146,7 @@ mod tests {
             metrics: Arc::new(Metrics::new()),
             model_manager: Arc::new(ModelManager::new(model_dir.clone())),
             inference_pipeline: Arc::new(tokio::sync::Mutex::new(InferencePipeline::new())),
-            batch_processor: Arc::new(
-                crate::engine::batch_processor::BatchProcessorHandle::new(),
-            ),
+            batch_processor: Arc::new(crate::engine::batch_processor::BatchProcessorHandle::new()),
             capture_daemon: Arc::new(crate::engine::capture_daemon::CaptureDaemon::new(
                 None,
                 model_dir.join("silero_vad.onnx"),
@@ -207,8 +216,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_translations_for_stub_router() {
-        let (state, _tmp) =
-            make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
+        let (state, _tmp) = make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
         let body = serde_json::json!({
             "target_lang": "zh-CN",
             "lines": [
@@ -237,8 +245,7 @@ mod tests {
     async fn accepts_non_uuid_ids() {
         // Defensive — keeps this endpoint usable even if a caller sends
         // a synthetic id like `local-…` from `appendLiveTranscript`.
-        let (state, _tmp) =
-            make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
+        let (state, _tmp) = make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
         let body = serde_json::json!({
             "target_lang": "zh-CN",
             "lines": [{"id": "local-not-a-uuid", "text": "hello"}],

@@ -272,33 +272,10 @@ pub async fn delete_reminder(pool: &SqlitePool, id: Uuid) -> Result<bool, sqlx::
     Ok(result.rows_affected() > 0)
 }
 
-// ── todo_generator compat ─────────────────────────────────────────────────
-
-/// Idempotency check used by todo_generator.
-pub async fn has_reminders(pool: &SqlitePool, session_id: Uuid) -> Result<bool, sqlx::Error> {
-    let row: (bool,) =
-        sqlx::query_as("SELECT EXISTS(SELECT 1 FROM reminders WHERE session_id = ?1)")
-            .bind(session_id.to_string())
-            .fetch_one(pool)
-            .await?;
-    Ok(row.0)
-}
-
-/// Batch insert reminders from LLM output (no labels, idempotent via ON CONFLICT).
+/// Batch insert reminders from LLM output (idempotent via ON CONFLICT).
 /// Honors `NewReminder.status` (default 'open') and `source_window_id`, so
 /// the window extractor can park medium-confidence items with status 'pending'
 /// and record their originating window for the trace inspector.
-pub async fn create_reminders_batch(
-    pool: &SqlitePool,
-    items: &[NewReminder],
-) -> Result<Vec<Reminder>, sqlx::Error> {
-    let labeled: Vec<(NewReminder, Vec<Uuid>)> = items
-        .iter()
-        .map(|item| (clone_new_reminder(item), vec![]))
-        .collect();
-    create_reminders_batch_with_labels(pool, &labeled).await
-}
-
 pub async fn create_reminders_batch_with_labels(
     pool: &SqlitePool,
     items: &[(NewReminder, Vec<Uuid>)],
@@ -344,42 +321,11 @@ pub async fn create_reminders_batch_with_labels(
     Ok(results)
 }
 
-fn clone_new_reminder(item: &NewReminder) -> NewReminder {
-    NewReminder {
-        session_id: item.session_id,
-        tenant_id: item.tenant_id,
-        speaker_id: item.speaker_id,
-        assigned_to: item.assigned_to.clone(),
-        title: item.title.clone(),
-        description: item.description.clone(),
-        priority: item.priority.clone(),
-        due_time: item.due_time,
-        transcript_excerpt: item.transcript_excerpt.clone(),
-        context: item.context.clone(),
-        source_time: item.source_time,
-        status: item.status.clone(),
-        source_window_id: item.source_window_id,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     #[test]
     fn open_to_archived_sets_timestamp() {

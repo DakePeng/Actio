@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::engine::llm_catalog::LocalLlmInfo;
 use crate::engine::local_llm_engine::LoadStatus;
 use crate::AppState;
@@ -13,16 +13,32 @@ use crate::AppState;
 // ---------------------------------------------------------------------------
 
 /// GET /settings/llm/models — model catalog.
+#[utoipa::path(
+    get,
+    path = "/settings/llm/models",
+    tag = "settings",
+    responses((status = 200, description = "Local-LLM catalog with download/load state")),
+)]
 pub async fn list_local_llms(State(state): State<AppState>) -> Json<Vec<LocalLlmInfo>> {
     Json(state.llm_downloader.catalog())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct LoadLlmRequest {
     pub llm_id: String,
 }
 
 /// POST /settings/llm/load — start loading a model in the background.
+#[utoipa::path(
+    post,
+    path = "/settings/llm/load",
+    tag = "settings",
+    request_body = LoadLlmRequest,
+    responses(
+        (status = 202, description = "Load accepted; poll /settings/llm/load-status"),
+        (status = 500, description = "Load could not be started", body = AppApiError),
+    ),
+)]
 pub async fn start_llm_load(
     State(state): State<AppState>,
     Json(req): Json<LoadLlmRequest>,
@@ -36,22 +52,44 @@ pub async fn start_llm_load(
 }
 
 /// POST /settings/llm/cancel-load — cancel an in-progress load.
+#[utoipa::path(
+    post,
+    path = "/settings/llm/cancel-load",
+    tag = "settings",
+    responses((status = 200, description = "Cancel signal sent")),
+)]
 pub async fn cancel_llm_load(State(state): State<AppState>) -> StatusCode {
     state.engine_slot.cancel_load().await;
     StatusCode::OK
 }
 
 /// GET /settings/llm/load-status — current loading state.
+#[utoipa::path(
+    get,
+    path = "/settings/llm/load-status",
+    tag = "settings",
+    responses((status = 200, description = "Engine load state (idle / downloading / quantizing / loading / loaded / error)")),
+)]
 pub async fn llm_load_status(State(state): State<AppState>) -> Json<LoadStatus> {
     Json(state.engine_slot.load_status().await)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct DeleteLlmResult {
     pub deleted: bool,
 }
 
 /// DELETE /settings/llm/models/:id — atomic: unload engine, clear selection, delete files.
+#[utoipa::path(
+    delete,
+    path = "/settings/llm/models/{id}",
+    tag = "settings",
+    params(("id" = String, Path, description = "Local-LLM model id")),
+    responses(
+        (status = 200, description = "Model deleted (and unloaded if active)", body = DeleteLlmResult),
+        (status = 500, description = "Filesystem error", body = AppApiError),
+    ),
+)]
 pub async fn delete_local_llm(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -175,6 +213,12 @@ pub struct OpenAiModelEntry {
 }
 
 /// GET /v1/models — lists only the currently-loaded model.
+#[utoipa::path(
+    get,
+    path = "/v1/models",
+    tag = "openai-shim",
+    responses((status = 200, description = "OpenAI-compatible model list (loaded model only)")),
+)]
 pub async fn openai_list_models(State(state): State<AppState>) -> Json<OpenAiModelList> {
     let loaded = state.engine_slot.loaded_id().await;
     let data = match loaded {
@@ -194,6 +238,15 @@ pub async fn openai_list_models(State(state): State<AppState>) -> Json<OpenAiMod
 
 /// POST /v1/chat/completions — OpenAI-compat completion against the local model.
 /// Triggers lazy cold-start if a model is selected but not loaded.
+#[utoipa::path(
+    post,
+    path = "/v1/chat/completions",
+    tag = "openai-shim",
+    responses(
+        (status = 200, description = "Chat completion (or SSE stream when stream=true)"),
+        (status = 503, description = "Local LLM not loaded / not selected"),
+    ),
+)]
 pub async fn openai_chat_completions(
     State(state): State<AppState>,
     Json(req): Json<OpenAiChatRequest>,

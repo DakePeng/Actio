@@ -18,13 +18,8 @@ export const zhCN: Translations = {
   'board.action.captureNote': '记录想法',
 
   // Recording tab
-  'recording.tapToTranscribe': '点击开始转写',
-  'recording.loadingModel': '正在加载模型',
-  'recording.modelLoadFailed': '模型加载失败 — 点击仍可尝试',
   'recording.startingUp': '正在启动',
   'recording.listening': '正在聆听…',
-  'recording.aria.startTranscribing': '开始转写',
-  'recording.aria.stopTranscribing': '停止转写',
 
   // Live transcript
   'transcript.identifying': '识别中…',
@@ -35,8 +30,6 @@ export const zhCN: Translations = {
   // Live tab — translation controls
   'live.translate.toggle': '翻译',
   'live.translate.targetLabel': '目标语言',
-  'live.translate.disabledTooltip': '请在设置 → AI 中启用大语言模型后再使用翻译。',
-  'live.translate.pausedToast': '翻译已暂停 — 大语言模型已禁用。',
   'live.translate.lang.en': 'English',
   'live.translate.lang.zh-CN': '简体中文',
   'live.translate.lang.ja': '日本語',
@@ -100,6 +93,7 @@ export const zhCN: Translations = {
     '删除 {name}？模型文件会从磁盘移除，之后可重新下载。',
   'settings.models.switchEmbeddingConfirm':
     '切换嵌入模型会使之前录制的声纹失效。是否继续？',
+  'settings.models.switchEmbeddingConfirmAction': '切换模型',
   'settings.models.downloading': '正在下载：{label} — {file}',
   'settings.models.preparing': '准备中...',
   'settings.models.cancel': '取消',
@@ -156,16 +150,10 @@ export const zhCN: Translations = {
   'feedback.extractedSingle': '已提取 1 条提醒',
   'feedback.extractedMany': '已提取 {count} 条提醒',
   'feedback.extractFailed': '无法提取提醒',
-  'feedback.modelSwitched': '已为新语言切换模型：{model}',
   'feedback.llmNotConfiguredFormMode': '尚未配置大语言模型，已切换到表单模式',
   'feedback.listeningOn': '已开启聆听',
   'feedback.listeningOff': '已关闭聆听',
   'feedback.listeningToggleFailed': '无法切换聆听状态',
-
-  // Priority values (for interpolation)
-  'priority.low': '低',
-  'priority.medium': '中',
-  'priority.high': '高',
 
   // 托盘（收起 + 展开）
   'tray.aria.drag': '拖动调整位置',
@@ -178,20 +166,9 @@ export const zhCN: Translations = {
   'tray.tooltip.muted': '已静音',
   'tray.status.transcribing': '转写中...',
   'tray.status.listening': '聆听中...',
-  'tray.status.freshCapturesOne': '有 1 条新记录',
-  'tray.status.freshCapturesMany': '有 {count} 条新记录',
-  'tray.status.quiet': '暂无新内容，看板就绪',
   'tray.viewFullBoard': '查看完整看板',
   'tray.swipe.done': '完成',
   'tray.swipe.confirm': '确认',
-
-  // 状态描述：与 wordmark 的当前状态保持一致。
-  'tray.state.standby': '待机中，静待',
-  'tray.state.listening': '聆听中，专注',
-  'tray.state.transcribing': '转写中，行云流水',
-  'tray.state.processing': '处理中，归纳',
-  'tray.state.success': '已完成，就绪',
-  'tray.state.error': '出错，请重试',
 
   // Top-level tab bar
   'tab.people': '人员',
@@ -205,8 +182,9 @@ export const zhCN: Translations = {
   'live.header.on': '聆听中',
   'live.header.off': '已静音',
   'live.listeningSince': '从 {time} 开始 • 已运行 {duration}',
+  'live.aria.listeningStarted': '已于 {time} 开始聆听',
+  'live.aria.listeningStopped': '聆听已停止',
   'live.pausedHint': '聆听已暂停。在托盘或此处开启以开始捕捉。',
-  'live.aria.toggleListening': '切换聆听',
 
   // Needs-review queue (medium-confidence auto-extracted items)
   'needsReview.empty.title': '暂无待审核事项',
@@ -218,6 +196,7 @@ export const zhCN: Translations = {
   'needsReview.sourceSpeaker': '来自 {name}',
   'feedback.reminderConfirmed': '已移至看板',
   'feedback.reminderDismissed': '已忽略',
+  'feedback.undo': '撤销',
 
   // Trace inspector (provenance for auto-extracted cards)
   'card.trace.show': '查看上下文',
@@ -260,6 +239,12 @@ export const zhCN: Translations = {
   'settings.audio.offlineTag': '离线',
   'settings.audio.clipTarget': '目标片段时长',
   'settings.audio.clusterThreshold': '声音聚类阈值',
+  'settings.audio.clusterMinSegments': '建议说话人 — 最少片段数',
+  'settings.audio.clusterMinSegmentsHint':
+    '低于此片段数的声音聚类不会被提升为建议的说话人 — 短促的交叉对话或麦克风噪声会保持未归属状态,避免在「建议添加的人」面板中产生大量噪声。',
+  'settings.audio.clusterMinDuration': '建议说话人 — 最短时长',
+  'settings.audio.clusterMinDurationHint':
+    '与片段数门槛同时生效(AND)。聚类还需累积至少这么长的有效语音才会创建建议的说话人。',
   'settings.audio.audioRetention': '音频保留',
   'settings.audio.provisionalGc': '未匹配的声音保留时长',
 
@@ -334,6 +319,9 @@ export const zhCN: Translations = {
   'archive.clip.aria.star': '收藏片段',
   'archive.clip.aria.unstar': '取消收藏',
   'archive.clip.aria.delete': '删除片段',
+  'archive.confirmDeleteOne': '永久删除此项？此操作无法撤销。',
+  'archive.confirmDeleteBulk': '永久删除 {count} 项？此操作无法撤销。',
+  'archive.cancel': '取消',
 
   // People / speakers
   'people.addPerson': '添加成员',
@@ -421,6 +409,9 @@ export const zhCN: Translations = {
   'settings.labels.aria.delete': '删除 {name}',
   'settings.labels.aria.chooseColor': '选择颜色',
   'settings.labels.aria.pickColor': '选择颜色 {color}',
+  'settings.labels.delete': '删除',
+  'settings.labels.confirmDelete': '删除"{name}"标签？将从 {count} 个提醒中移除该标签。',
+  'settings.labels.confirmDeleteUnused': '删除"{name}"标签？',
 
   // Keyboard shortcuts
   'settings.shortcuts.title': '键盘快捷键',

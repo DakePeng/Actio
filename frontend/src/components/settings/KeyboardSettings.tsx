@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { useT, type TKey } from '../../i18n';
 import { primaryMod } from '../../utils/platform';
-
-const API_BASE = 'http://127.0.0.1:3000';
+import { getApiUrl } from '../../api/backend-url';
 
 type ShortcutMap = Record<string, string>;
 
@@ -53,14 +51,14 @@ function isTauri(): boolean {
 }
 
 async function fetchShortcuts(): Promise<ShortcutMap> {
-  const res = await fetch(`${API_BASE}/settings`);
+  const res = await fetch(await getApiUrl('/settings'));
   if (!res.ok) throw new Error('Failed to fetch settings');
   const data = await res.json();
   return { ...DEFAULT_SHORTCUTS, ...(data.keyboard?.shortcuts ?? {}) };
 }
 
 async function patchShortcut(action: string, combo: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings`, {
+  const res = await fetch(await getApiUrl('/settings'), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keyboard: { shortcuts: { [action]: combo } } }),
@@ -69,7 +67,7 @@ async function patchShortcut(action: string, combo: string): Promise<void> {
 }
 
 async function patchAllShortcuts(shortcuts: ShortcutMap): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings`, {
+  const res = await fetch(await getApiUrl('/settings'), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keyboard: { shortcuts } }),
@@ -98,6 +96,7 @@ export function KeyboardSettings() {
       setShortcuts(newShortcuts);
       setEditing(null);
       if (isTauri()) {
+        const { invoke } = await import('@tauri-apps/api/core');
         invoke('reregister_shortcuts', { shortcuts: newShortcuts }).catch(console.error);
       }
     } catch (e) {
@@ -112,6 +111,7 @@ export function KeyboardSettings() {
       setShortcuts(DEFAULT_SHORTCUTS);
       setEditing(null);
       if (isTauri()) {
+        const { invoke } = await import('@tauri-apps/api/core');
         invoke('reregister_shortcuts', { shortcuts: DEFAULT_SHORTCUTS }).catch(console.error);
       }
     } catch (e) {

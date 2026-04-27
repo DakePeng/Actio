@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useT, useTMaybe } from '../../i18n';
-
-const API_BASE = 'http://127.0.0.1:3000';
+import { getApiUrl } from '../../api/backend-url';
 
 // --- Types ---
 
@@ -52,13 +51,13 @@ interface LlmTestResult {
 // --- API helpers ---
 
 async function fetchSettings(): Promise<{ llm: LlmSettingsData }> {
-  const res = await fetch(`${API_BASE}/settings`);
+  const res = await fetch(await getApiUrl('/settings'));
   if (!res.ok) throw new Error('Failed to fetch settings');
   return res.json();
 }
 
 async function patchLlmSettings(patch: Record<string, unknown>): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings`, {
+  const res = await fetch(await getApiUrl('/settings'), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ llm: patch }),
@@ -67,13 +66,13 @@ async function patchLlmSettings(patch: Record<string, unknown>): Promise<void> {
 }
 
 async function listLocalLlms(): Promise<LocalLlmInfo[]> {
-  const res = await fetch(`${API_BASE}/settings/llm/models`);
+  const res = await fetch(await getApiUrl('/settings/llm/models'));
   if (!res.ok) throw new Error('Failed to list models');
   return res.json();
 }
 
 async function startLlmLoad(llmId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings/llm/load`, {
+  const res = await fetch(await getApiUrl('/settings/llm/load'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ llm_id: llmId }),
@@ -82,17 +81,17 @@ async function startLlmLoad(llmId: string): Promise<void> {
 }
 
 async function cancelLlmLoad(): Promise<void> {
-  await fetch(`${API_BASE}/settings/llm/cancel-load`, { method: 'POST' });
+  await fetch(await getApiUrl('/settings/llm/cancel-load'), { method: 'POST' });
 }
 
 async function fetchLoadStatus(): Promise<LoadStatus> {
-  const res = await fetch(`${API_BASE}/settings/llm/load-status`);
+  const res = await fetch(await getApiUrl('/settings/llm/load-status'));
   if (!res.ok) throw new Error('Failed to fetch status');
   return res.json();
 }
 
 async function testLlm(): Promise<LlmTestResult> {
-  const res = await fetch(`${API_BASE}/settings/llm/test`, { method: 'POST' });
+  const res = await fetch(await getApiUrl('/settings/llm/test'), { method: 'POST' });
   if (!res.ok) throw new Error('Failed to test connection');
   return res.json();
 }
@@ -239,10 +238,7 @@ export function LlmSettings() {
           <input
             type="radio"
             checked={selection.kind === 'local'}
-            onChange={() => {
-              setSelection({ kind: 'local', id: '' });
-              patchLlmSettings({ selection: { kind: 'local', id: '' } }).catch(() => {});
-            }}
+            onChange={() => handleSelectionChange({ kind: 'local', id: '' })}
           />
           <span>{t('settings.llm.local')}</span>
           <span className="settings-row__sublabel">{t('settings.llm.local.sub')}</span>
@@ -297,7 +293,11 @@ export function LlmSettings() {
                 setLoadStatus({ state: 'idle' });
                 const cleared: LlmSelection = { kind: 'local', id: '' };
                 setSelection(cleared);
-                patchLlmSettings({ selection: cleared }).catch(() => {});
+                try {
+                  await patchLlmSettings({ selection: cleared });
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : t('settings.llm.saveFailed'));
+                }
               };
 
               return (

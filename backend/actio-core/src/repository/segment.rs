@@ -342,22 +342,9 @@ pub async fn upsert_segment_for_clip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::db::run_migrations;
     use crate::repository::speaker::create_speaker;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     async fn insert_session(pool: &SqlitePool) -> String {
         let id = Uuid::new_v4().to_string();
@@ -447,10 +434,23 @@ mod tests {
         let session_uuid = Uuid::parse_str(&sid).unwrap();
         let segment_id = Uuid::new_v4();
 
-        let returned = insert_segment(&pool, segment_id, session_uuid, 0, 1000, None, None, None, None)
-            .await
-            .unwrap();
-        assert_eq!(returned, segment_id, "insert_segment must echo the caller's id");
+        let returned = insert_segment(
+            &pool,
+            segment_id,
+            session_uuid,
+            0,
+            1000,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            returned, segment_id,
+            "insert_segment must echo the caller's id"
+        );
 
         // Transcript referencing the same segment_id must FK-resolve.
         let transcript_id = Uuid::new_v4().to_string();

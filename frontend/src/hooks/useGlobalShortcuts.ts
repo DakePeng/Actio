@@ -1,10 +1,20 @@
 import { useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/use-store';
-import { getWsUrl } from '../api/backend-url';
+import { getApiUrl, getWsUrl } from '../api/backend-url';
 import { primaryMod } from '../utils/platform';
 import { flashWordmark } from './useWordmarkFlash';
+
+// `@tauri-apps/api` is imported dynamically so the Tauri runtime surface
+// code-splits out of the main bundle (see ISSUES.md #51). The module-scope
+// promise cache means each submodule resolves at most once across the whole
+// hook — multiple useEffects that need `listen` or `invoke` await the same
+// resolved namespace, which avoids repeated `import()` calls confusing
+// vitest's mock layer (it has trouble re-applying mocks to repeated dynamic
+// imports of the same module).
+let eventP: Promise<typeof import('@tauri-apps/api/event')> | null = null;
+let coreP: Promise<typeof import('@tauri-apps/api/core')> | null = null;
+const loadEvent = () => (eventP ??= import('@tauri-apps/api/event'));
+const loadCore = () => (coreP ??= import('@tauri-apps/api/core'));
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -46,8 +56,10 @@ export function useGlobalShortcuts() {
   // to wait for at stop time and we can short-circuit the tail timeout.
   const receivedAnyTranscriptRef = useRef(false);
 
-  /** Paste accumulated transcript, close WS, clear transcribing state */
-  function finishDictation() {
+  /** Paste accumulated transcript, close WS, clear transcribing state.
+   *  Async because `invoke` is dynamically imported (see ISSUES.md #51);
+   *  callers don't await — fire-and-forget is the desired semantics. */
+  async function finishDictation() {
     if (transcribingTimerRef.current) {
       window.clearTimeout(transcribingTimerRef.current);
       transcribingTimerRef.current = null;
@@ -55,6 +67,7 @@ export function useGlobalShortcuts() {
     const transcript = fullTranscriptRef.current;
     if (transcript) {
       console.log('[Actio] Pasting transcript:', transcript);
+      const { invoke } = await loadCore();
       invoke('paste_text', { text: transcript }).catch(console.error);
       // Brief 'success' pulse on the wordmark to mark the paste; after it
       // expires the wordmark falls back to the live state (listening if the
@@ -81,7 +94,7 @@ export function useGlobalShortcuts() {
     (async () => {
       let shortcuts: Record<string, string> = { ...DEFAULT_GLOBAL_SHORTCUTS };
       try {
-        const res = await fetch('http://127.0.0.1:3000/settings');
+        const res = await fetch(await getApiUrl('/settings'));
         if (res.ok) {
           const data = await res.json();
           const persisted: Record<string, string> | undefined =
@@ -102,6 +115,7 @@ export function useGlobalShortcuts() {
 
       if (cancelled) return;
       try {
+        const { invoke } = await loadCore();
         await invoke('reregister_shortcuts', { shortcuts });
         console.log('[Actio] Global shortcuts registered:', shortcuts);
       } catch (e) {
@@ -121,72 +135,78 @@ export function useGlobalShortcuts() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<string>('shortcut-triggered', async (event) => {
+    (async () => {
+      const { listen } = await loadEvent();
       if (cancelled) return;
-      const action = event.payload;
-      console.log('[Actio] shortcut-triggered:', action, 'showNewReminderBar:', useStore.getState().ui.showNewReminderBar);
 
-      if (action === 'toggle_board_tray') {
-        const current = useStore.getState().ui.showBoardWindow;
-        setBoardWindow(!current);
-      } else if (action === 'new_todo') {
-        const current = useStore.getState().ui.showNewReminderBar;
-        setNewReminderBar(!current);
-      } else if (action === 'start_dictation') {
-        // If the new-item window is open, route dictation to the composer's
-        // mic button instead of the global paste pipeline.
-        if (useStore.getState().ui.showNewReminderBar) {
-          console.log('[Actio] Routing dictation to composer mic');
-          window.dispatchEvent(new CustomEvent('actio-toggle-composer-dictation'));
-          return;
-        }
-        const { isDictating, isDictationTranscribing } = useStore.getState().ui;
-        if (isDictating || isDictationTranscribing) {
-          console.log('[Actio] Stopping dictation...');
-          invoke('stop_dictation').catch(console.error);
-          // If we already have a transcript, paste immediately
-          if (fullTranscriptRef.current) {
-            console.log('[Actio] Transcript ready, pasting now');
-            finishDictation();
-          } else {
-            // Enter "transcribing" phase; keep WS open to catch final result.
-            useStore.setState((s) => ({
-              ui: { ...s.ui, isDictating: false, isDictationTranscribing: true },
-            }));
-            // If we never received any transcript during capture, there's
-            // nothing in flight — use a near-instant tail so the wordmark
-            // doesn't dwell on processing for 5s of silence.
-            const timeoutMs = receivedAnyTranscriptRef.current
-              ? TRANSCRIBING_TIMEOUT
-              : NO_SPEECH_TAIL_TIMEOUT;
-            transcribingTimerRef.current = window.setTimeout(() => {
-              console.log('[Actio] Transcribing timeout, pasting what we have');
-              finishDictation();
-            }, timeoutMs);
+      const fn = await listen<string>('shortcut-triggered', async (event) => {
+        if (cancelled) return;
+        const action = event.payload;
+        console.log('[Actio] shortcut-triggered:', action, 'showNewReminderBar:', useStore.getState().ui.showNewReminderBar);
+
+        if (action === 'toggle_board_tray') {
+          const current = useStore.getState().ui.showBoardWindow;
+          setBoardWindow(!current);
+        } else if (action === 'new_todo') {
+          const current = useStore.getState().ui.showNewReminderBar;
+          setNewReminderBar(!current);
+        } else if (action === 'start_dictation') {
+          // If the new-item window is open, route dictation to the composer's
+          // mic button instead of the global paste pipeline.
+          if (useStore.getState().ui.showNewReminderBar) {
+            console.log('[Actio] Routing dictation to composer mic');
+            window.dispatchEvent(new CustomEvent('actio-toggle-composer-dictation'));
+            return;
           }
-        } else {
-          console.log('[Actio] Starting dictation...');
-          invoke('start_dictation').catch(console.error);
+          const { invoke } = await loadCore();
+          const { isDictating, isDictationTranscribing } = useStore.getState().ui;
+          if (isDictating || isDictationTranscribing) {
+            console.log('[Actio] Stopping dictation...');
+            invoke('stop_dictation').catch(console.error);
+            // If we already have a transcript, paste immediately
+            if (fullTranscriptRef.current) {
+              console.log('[Actio] Transcript ready, pasting now');
+              void finishDictation();
+            } else {
+              // Enter "transcribing" phase; keep WS open to catch final result.
+              useStore.setState((s) => ({
+                ui: { ...s.ui, isDictating: false, isDictationTranscribing: true },
+              }));
+              // If we never received any transcript during capture, there's
+              // nothing in flight — use a near-instant tail so the wordmark
+              // doesn't dwell on processing for 5s of silence.
+              const timeoutMs = receivedAnyTranscriptRef.current
+                ? TRANSCRIBING_TIMEOUT
+                : NO_SPEECH_TAIL_TIMEOUT;
+              transcribingTimerRef.current = window.setTimeout(() => {
+                console.log('[Actio] Transcribing timeout, pasting what we have');
+                void finishDictation();
+              }, timeoutMs);
+            }
+          } else {
+            console.log('[Actio] Starting dictation...');
+            invoke('start_dictation').catch(console.error);
+          }
+        } else if (action === 'toggle_listening') {
+          const current = useStore.getState().ui.listeningEnabled;
+          if (current === null) return;
+          const next = !current;
+          await useStore.getState().setListening(next);
+          // setListening reverts + pushes its own failure toast on PATCH failure;
+          // only emit the success toast if the post-call state matches what we
+          // optimistically tried to apply (i.e., no rollback occurred).
+          if (useStore.getState().ui.listeningEnabled === next) {
+            useStore.getState().setFeedback(
+              next ? 'feedback.listeningOn' : 'feedback.listeningOff',
+              'success',
+            );
+          }
         }
-      } else if (action === 'toggle_listening') {
-        const current = useStore.getState().ui.listeningEnabled;
-        if (current === null) return;
-        const next = !current;
-        await useStore.getState().setListening(next);
-        // setListening reverts + pushes its own failure toast on PATCH failure;
-        // only emit the success toast if the post-call state matches what we
-        // optimistically tried to apply (i.e., no rollback occurred).
-        if (useStore.getState().ui.listeningEnabled === next) {
-          useStore.getState().setFeedback(
-            next ? 'feedback.listeningOn' : 'feedback.listeningOff',
-            'success',
-          );
-        }
-      }
-    }).then((fn) => {
+      });
+
       if (cancelled) { fn(); return; }
       unlisten = fn;
-    });
+    })();
 
     return () => {
       cancelled = true;
@@ -201,66 +221,71 @@ export function useGlobalShortcuts() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<string>('dictation-status', async (e) => {
+    (async () => {
+      const { listen } = await loadEvent();
       if (cancelled) return;
-      const isListening = e.payload === 'listening';
-      console.log('[Actio] dictation-status:', e.payload);
 
-      if (isListening) {
-        // Close any prior WS
-        if (wsRef.current) {
-          wsRef.current.close();
-          wsRef.current = null;
-        }
-        setDictating(true);
-        setDictationTranscript('');
-        fullTranscriptRef.current = '';
-        receivedAnyTranscriptRef.current = false;
-
-        // Resolve via getWsUrl so port-fallback (3000-3009) and the eventual
-        // production WebView origin both work — hardcoding ws://127.0.0.1:3000
-        // breaks dictation when another process holds 3000.
-        let wsUrl: string;
-        try {
-          wsUrl = await getWsUrl('/ws');
-        } catch (err) {
-          console.error('[Actio] Could not resolve WS URL, dictation aborted:', err);
-          return;
-        }
+      const fn = await listen<string>('dictation-status', async (e) => {
         if (cancelled) return;
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
+        const isListening = e.payload === 'listening';
+        console.log('[Actio] dictation-status:', e.payload);
 
-        const finalizedIds = new Set<string>();
-        ws.onmessage = (msg) => {
+        if (isListening) {
+          // Close any prior WS
+          if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+          }
+          setDictating(true);
+          setDictationTranscript('');
+          fullTranscriptRef.current = '';
+          receivedAnyTranscriptRef.current = false;
+
+          // Resolve via getWsUrl so port-fallback (3000-3009) and the eventual
+          // production WebView origin both work — hardcoding ws://127.0.0.1:3000
+          // breaks dictation when another process holds 3000.
+          let wsUrl: string;
           try {
-            const data = JSON.parse(msg.data);
-            if (data.kind === 'transcript' && data.text) {
-              if (data.transcript_id && data.is_final && finalizedIds.has(data.transcript_id)) return;
-              if (data.transcript_id && data.is_final) finalizedIds.add(data.transcript_id);
+            wsUrl = await getWsUrl('/ws');
+          } catch (err) {
+            console.error('[Actio] Could not resolve WS URL, dictation aborted:', err);
+            return;
+          }
+          if (cancelled) return;
+          const ws = new WebSocket(wsUrl);
+          wsRef.current = ws;
 
-              receivedAnyTranscriptRef.current = true;
-              console.log('[Actio] Live transcript:', data.text, data.is_final ? '(final)' : '(partial)', 'id:', data.transcript_id);
-              if (data.is_final) {
-                fullTranscriptRef.current += data.text;
-              }
-              setDictationTranscript(data.is_final ? fullTranscriptRef.current : `${fullTranscriptRef.current}${data.text}`);
+          const finalizedIds = new Set<string>();
+          ws.onmessage = (msg) => {
+            try {
+              const data = JSON.parse(msg.data);
+              if (data.kind === 'transcript' && data.text) {
+                if (data.transcript_id && data.is_final && finalizedIds.has(data.transcript_id)) return;
+                if (data.transcript_id && data.is_final) finalizedIds.add(data.transcript_id);
 
-              // If we're in "transcribing" phase and got a final, auto-paste
-              if (data.is_final && useStore.getState().ui.isDictationTranscribing) {
-                finishDictation();
+                receivedAnyTranscriptRef.current = true;
+                console.log('[Actio] Live transcript:', data.text, data.is_final ? '(final)' : '(partial)', 'id:', data.transcript_id);
+                if (data.is_final) {
+                  fullTranscriptRef.current += data.text;
+                }
+                setDictationTranscript(data.is_final ? fullTranscriptRef.current : `${fullTranscriptRef.current}${data.text}`);
+
+                // If we're in "transcribing" phase and got a final, auto-paste
+                if (data.is_final && useStore.getState().ui.isDictationTranscribing) {
+                  void finishDictation();
+                }
               }
-            }
-          } catch { /* ignore non-JSON messages like pings */ }
-        };
-        ws.onerror = (err) => console.error('[Actio] Dictation WS error:', err);
-      }
-      // Note: we don't close WS on 'idle' status; the shortcut handler
-      // manages the transition to transcribing phase, which keeps WS open.
-    }).then((fn) => {
+            } catch { /* ignore non-JSON messages like pings */ }
+          };
+          ws.onerror = (err) => console.error('[Actio] Dictation WS error:', err);
+        }
+        // Note: we don't close WS on 'idle' status; the shortcut handler
+        // manages the transition to transcribing phase, which keeps WS open.
+      });
+
       if (cancelled) { fn(); return; }
       unlisten = fn;
-    });
+    })();
 
     return () => {
       cancelled = true;
