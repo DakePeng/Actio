@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 84. Legacy session-end reminder generator (`engine/todo_generator.rs`) is fully dead — never called
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — `git rm`'d the 141-line `engine/todo_generator.rs` (4 tests went with it); dropped `pub mod todo_generator;` from `engine/mod.rs`; removed `has_reminders`, `create_reminders_batch`, the now-orphan `clone_new_reminder` helper, and the `// ── todo_generator compat ──` section header from `repository/reminder.rs`. `create_reminders_batch_with_labels` (still used by `window_extractor`) survives. `LlmRouter::generate_todos` survives because `api/reminder.rs` keeps the chat-composer on-demand path. Verification: `cargo build -p actio-core --tests` clean (no new unused-import warnings); `cargo test -p actio-core --lib` 214 → 210 (exactly the 4 dropped todo_generator tests); `cargo clippy -p actio-core --all-targets` lib warnings unchanged at 30; `git grep` for the four dead symbol patterns returns zero matches. Total cleanup: ~165 LoC.
+
+**Found:** 2026-04-27
 
 `backend/actio-core/src/engine/todo_generator.rs` (141 lines + 4 tests) is the legacy session-end reminder generator. It was superseded by the rolling-window extractor (`engine/window_extractor.rs`) when ISS- … (the always-listening pipeline shipped, see commit `87dba83`). The module was never removed.
 
