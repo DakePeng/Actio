@@ -1140,6 +1140,85 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 83. `NewReminderBar` LLM-config probe races against port discovery — falsely flips chat → form on slow first launches
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/NewReminderBar.tsx:54-72` runs a one-shot probe when the bar opens in chat mode:
+
+```ts
+useEffect(() => {
+  if (!show || mode !== 'chat') return;
+  let cancelled = false;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 800);
+
+  void fetchLlmConfigured(controller.signal).then((configured) => {
+    if (cancelled || configured) return;
+    setMode('form');
+    setFeedback('feedback.llmNotConfiguredFormMode');
+  });
+
+  return () => { cancelled = true; window.clearTimeout(timeout); controller.abort(); };
+}, [show, mode, setFeedback]);
+```
+
+`fetchLlmConfigured` calls `await getApiUrl('/settings')`. `getApiUrl` lives in `frontend/src/api/backend-url.ts` and, on a cold cache, runs sequential port probes against 3000–3009. **Each probe also has an 800 ms abort** (`PROBE_TIMEOUT_MS = 800`).
+
+Trace what happens when the backend is on port 3001 (because port 3000 is taken by `pnpm mock:api`, or the user has another local service):
+
+| Time | Event |
+|------|-------|
+| 0 ms | NewReminderBar `useEffect` starts; outer `controller.abort()` armed for 800 ms. |
+| 0 ms | `getApiUrl('/settings')` begins port-discovery: probe `http://127.0.0.1:3000/health`. |
+| 800 ms | Probe 3000 times out (no response). Outer NewReminderBar controller fires `abort()` simultaneously. |
+| 800 ms | Probe 3001 begins. |
+| ~880 ms | Probe 3001 succeeds; `getApiBaseUrl` resolves to `http://127.0.0.1:3001`. |
+| ~880 ms | `fetch(url, { signal: alreadyAbortedSignal })` throws `AbortError` immediately. |
+| ~881 ms | `try/catch` in `fetchLlmConfigured` returns `false`. |
+| ~881 ms | NewReminderBar's `.then` callback: `configured === false` → `setMode('form')` + toast "Language model is not configured, so quick capture opened in form mode". |
+
+But the LLM **is** configured — the request just got cancelled by the outer race-deadline before port discovery finished its first miss.
+
+**User-visible damage:**
+1. They open quick-capture expecting their chat composer; get the form view instead.
+2. A red-flag toast claims their language model is misconfigured.
+3. After dismissing, they switch the mode back to chat (button at line 230). The mode preference now persists as `'chat'` in localStorage, so the issue doesn't repeat next time — but the first-launch experience is silently broken on any backend not on port 3000.
+
+**Why the 800 ms timeout exists at all:** the comment trail isn't there; it's a defensive "don't hang the bar opening on a flaky backend" guard. But the bar's `useEffect` already cleans up on unmount via the `cancelled` flag — if the user closes the bar before the probe returns, `cancelled` short-circuits the `.then`. The hard abort isn't doing useful work; it's just creating a false-negative.
+
+**Severity:** Medium · **Platform:** All (worse when a non-3000 backend port is in use) · **Type:** bug · **Scope:** small (~4 LoC: drop the timeout, keep the `cancelled` flag)
+
+**Proposed direction:**
+
+```ts
+useEffect(() => {
+  if (!show || mode !== 'chat') return;
+  let cancelled = false;
+
+  void fetchLlmConfigured().then((configured) => {
+    if (cancelled || configured) return;
+    setMode('form');
+    setFeedback('feedback.llmNotConfiguredFormMode');
+  });
+
+  return () => { cancelled = true; };
+}, [show, mode, setFeedback]);
+```
+
+…and update `fetchLlmConfigured` to drop the now-unused `signal` parameter (or keep it for future use; the call site no longer passes one).
+
+The probe runs in the background. If the backend is genuinely down, the inner port-discovery exhausts all 10 ports in ~8 s and `getApiBaseUrl` rejects → `fetchLlmConfigured` returns `false` → form mode kicks in. That's slower but correct. The user is staring at the chat composer either way — they don't lose anything by it taking ~1 s to settle on first launch.
+
+**Acceptance:**
+1. The 800 ms `setTimeout` + outer `AbortController` are removed from `NewReminderBar.tsx:54-72`.
+2. New vitest covers the regression: stub `getApiUrl` to resolve at 1500 ms (well past the old timeout), have `/settings` return a configured selection, mount the bar with `show=true mode='chat'`, advance fake timers past 1500 ms, assert mode stays `'chat'` and the misconfigured toast was NOT pushed.
+3. `pnpm tsc --noEmit` clean; `pnpm test` 229+/229+ green.
+
+**Out of scope:** the broader "is `PROBE_TIMEOUT_MS = 800` the right value for port discovery?" question (lives in `backend-url.ts`). #83 is the NewReminderBar layer's redundant outer timeout only.
+
+---
+
 ### 82. `LabelManager` deletes labels with one click — silently cascades and untags every reminder using them
 
 **Status:** Resolved 2026-04-27 — wired `useConfirm()` + `<ConfirmDialog>` (destructive tone) into `LabelManager.tsx`. Added a `requestDeleteLabel(id, displayName)` helper that derives the cascade count locally from the existing `reminders` selector — no new API endpoint needed — and picks between two messages: "Delete the X label?" when usage is 0, "Delete the X label? It will be removed from N reminder(s)." otherwise. Three new i18n keys (`settings.labels.delete`, `settings.labels.confirmDelete`, `settings.labels.confirmDeleteUnused`) landed in both `en.ts` and `zh-CN.ts` (parity test passes); reuses the existing `archive.cancel` for the cancel button. New `LabelManager.confirm.test.tsx` (4 tests) pins: cascade-count message accuracy, Cancel = no API call, Confirm = exactly one deleteLabel with the right id, unused-label uses the shorter copy. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 225 → 229, `pnpm build` succeeded.
