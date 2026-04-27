@@ -261,8 +261,10 @@ pub async fn find_match_by_centroid(
     .fetch_all(pool)
     .await?;
 
-    let candidates: Vec<(String, Vec<u8>)> =
-        enrolled.into_iter().chain(provisional.into_iter()).collect();
+    let candidates: Vec<(String, Vec<u8>)> = enrolled
+        .into_iter()
+        .chain(provisional.into_iter())
+        .collect();
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -324,20 +326,17 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 pub async fn mark_as_self(pool: &SqlitePool, speaker_id: Uuid) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
 
-    let row: (String, String) = sqlx::query_as(
-        "SELECT tenant_id, display_name FROM speakers WHERE id = ?1",
-    )
-    .bind(speaker_id.to_string())
-    .fetch_one(&mut *tx)
-    .await?;
+    let row: (String, String) =
+        sqlx::query_as("SELECT tenant_id, display_name FROM speakers WHERE id = ?1")
+            .bind(speaker_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
     let (tenant_id, speaker_name) = row;
 
-    sqlx::query(
-        "UPDATE speakers SET is_self = 0 WHERE tenant_id = ?1 AND is_self = 1",
-    )
-    .bind(&tenant_id)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("UPDATE speakers SET is_self = 0 WHERE tenant_id = ?1 AND is_self = 1")
+        .bind(&tenant_id)
+        .execute(&mut *tx)
+        .await?;
 
     sqlx::query("UPDATE speakers SET is_self = 1 WHERE id = ?1")
         .bind(speaker_id.to_string())
@@ -455,22 +454,18 @@ mod tests {
         let tenant_id = Uuid::new_v4();
         let alice = Uuid::new_v4();
         let bob = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Alice')",
-        )
-        .bind(alice.to_string())
-        .bind(tenant_id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Bob')",
-        )
-        .bind(bob.to_string())
-        .bind(tenant_id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Alice')")
+            .bind(alice.to_string())
+            .bind(tenant_id.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Bob')")
+            .bind(bob.to_string())
+            .bind(tenant_id.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
 
         super::mark_as_self(&pool, alice).await.unwrap();
         super::mark_as_self(&pool, bob).await.unwrap();
@@ -494,22 +489,34 @@ mod tests {
         use crate::repository::db::run_migrations;
         use sqlx::sqlite::SqlitePoolOptions;
         let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:").await.unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await.unwrap();
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
         run_migrations(&pool).await.unwrap();
 
         let tenant_id = Uuid::new_v4();
         let speaker_id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Tray Mic 1')",
-        ).bind(speaker_id.to_string()).bind(tenant_id.to_string())
-        .execute(&pool).await.unwrap();
+        )
+        .bind(speaker_id.to_string())
+        .bind(tenant_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
 
         super::mark_as_self(&pool, speaker_id).await.unwrap();
 
-        let profile_name: (String,) = sqlx::query_as(
-            "SELECT display_name FROM tenant_profile WHERE tenant_id = ?1"
-        ).bind(tenant_id.to_string()).fetch_one(&pool).await.unwrap();
+        let profile_name: (String,) =
+            sqlx::query_as("SELECT display_name FROM tenant_profile WHERE tenant_id = ?1")
+                .bind(tenant_id.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(profile_name.0, "Tray Mic 1");
     }
 
@@ -518,7 +525,9 @@ mod tests {
         use crate::repository::db::run_migrations;
         use sqlx::sqlite::SqlitePoolOptions;
         let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:").await.unwrap();
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
         run_migrations(&pool).await.unwrap();
 
         let tenant_id = Uuid::new_v4();
@@ -527,20 +536,37 @@ mod tests {
         sqlx::query(
             r#"INSERT INTO tenant_profile (tenant_id, display_name, aliases, bio)
                VALUES (?1, 'Old Name', '["DK","彭大可"]', 'I build things.')"#,
-        ).bind(tenant_id.to_string()).execute(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Dake')",
-        ).bind(speaker_id.to_string()).bind(tenant_id.to_string())
-        .execute(&pool).await.unwrap();
+        )
+        .bind(tenant_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO speakers (id, tenant_id, display_name) VALUES (?1, ?2, 'Dake')")
+            .bind(speaker_id.to_string())
+            .bind(tenant_id.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
 
         super::mark_as_self(&pool, speaker_id).await.unwrap();
 
         let row: (String, String, Option<String>) = sqlx::query_as(
-            "SELECT display_name, aliases, bio FROM tenant_profile WHERE tenant_id = ?1"
-        ).bind(tenant_id.to_string()).fetch_one(&pool).await.unwrap();
-        assert_eq!(row.0, "Dake", "display_name should be overwritten by the speaker name");
+            "SELECT display_name, aliases, bio FROM tenant_profile WHERE tenant_id = ?1",
+        )
+        .bind(tenant_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            row.0, "Dake",
+            "display_name should be overwritten by the speaker name"
+        );
         assert_eq!(row.1, r#"["DK","彭大可"]"#, "aliases must be preserved");
-        assert_eq!(row.2.as_deref(), Some("I build things."), "bio must be preserved");
+        assert_eq!(
+            row.2.as_deref(),
+            Some("I build things."),
+            "bio must be preserved"
+        );
     }
 
     #[tokio::test]

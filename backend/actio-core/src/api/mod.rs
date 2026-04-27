@@ -174,7 +174,10 @@ pub fn router(state: AppState) -> Router {
         .route("/labels/:id", patch(label::patch_label))
         .route("/labels/:id", delete(label::delete_label))
         // profile
-        .route("/profile", get(profile::get_profile).put(profile::put_profile))
+        .route(
+            "/profile",
+            get(profile::get_profile).put(profile::put_profile),
+        )
         // speakers
         .route("/speakers", post(session::create_speaker))
         .route("/speakers", get(session::list_speakers))

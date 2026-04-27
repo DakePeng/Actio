@@ -170,14 +170,14 @@ async fn close_current_clip(
     started_slot: &mut Option<i64>,
     segments: &mut Vec<ClipManifestSegment>,
 ) {
-    let (clip_id, dir, started) =
-        match (clip_id_slot.take(), dir_slot.take(), started_slot.take()) {
-            (Some(c), Some(d), Some(s)) => (c, d, s),
-            _ => {
-                segments.clear();
-                return;
-            }
-        };
+    let (clip_id, dir, started) = match (clip_id_slot.take(), dir_slot.take(), started_slot.take())
+    {
+        (Some(c), Some(d), Some(s)) => (c, d, s),
+        _ => {
+            segments.clear();
+            return;
+        }
+    };
     let ended_at_ms = segments.last().map(|s| s.end_ms).unwrap_or(started);
     let manifest = ClipManifest {
         clip_id,
@@ -256,10 +256,7 @@ mod tests {
         assert_eq!(spec.channels, 1);
         assert_eq!(spec.sample_rate, 16_000);
         assert_eq!(spec.bits_per_sample, 32);
-        let back: Vec<f32> = reader
-            .samples::<f32>()
-            .filter_map(|s| s.ok())
-            .collect();
+        let back: Vec<f32> = reader.samples::<f32>().filter_map(|s| s.ok()).collect();
         assert_eq!(back.len(), samples.len());
         // Identity for f32 round-trip.
         for (a, b) in samples.iter().zip(back.iter()) {
@@ -378,7 +375,11 @@ mod tests {
         let manifest_pb = std::path::PathBuf::from(manifest_path);
         let clip_dir = manifest_pb.parent().expect("manifest path has parent");
         assert!(clip_dir.exists(), "clip dir {:?} must exist", clip_dir);
-        assert!(manifest_pb.exists(), "manifest must exist at {:?}", manifest_pb);
+        assert!(
+            manifest_pb.exists(),
+            "manifest must exist at {:?}",
+            manifest_pb
+        );
         assert!(
             clip_dir.join("seg_0001.wav").exists(),
             "first segment WAV must exist in {:?}",

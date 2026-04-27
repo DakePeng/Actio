@@ -106,15 +106,14 @@ pub fn start_clip_dir_cleanup_task(dir: PathBuf, retention_days: u32) {
 }
 
 fn sweep_clip_dirs(dir: &Path, retention_days: u32) {
-    let cutoff = match SystemTime::now()
-        .checked_sub(Duration::from_secs(retention_days as u64 * 86_400))
-    {
-        Some(t) => t,
-        None => {
-            warn!("clip dir sweep cutoff underflow — skipping");
-            return;
-        }
-    };
+    let cutoff =
+        match SystemTime::now().checked_sub(Duration::from_secs(retention_days as u64 * 86_400)) {
+            Some(t) => t,
+            None => {
+                warn!("clip dir sweep cutoff underflow — skipping");
+                return;
+            }
+        };
     let sessions = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,

@@ -57,10 +57,7 @@ fn tenant_id_from_headers(headers: &HeaderMap) -> Uuid {
         (status = 404, description = "No profile set"),
     )
 )]
-pub async fn get_profile(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+pub async fn get_profile(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     let tenant_id = tenant_id_from_headers(&headers);
     match repo::get_for_tenant(&state.pool, tenant_id).await {
         Ok(Some(p)) => Json(ProfileResponse::from(p)).into_response(),
@@ -95,9 +92,12 @@ pub async fn put_profile(
         display_name: req
             .display_name
             .or_else(|| existing.as_ref().and_then(|p| p.display_name.clone())),
-        aliases: req
-            .aliases
-            .unwrap_or_else(|| existing.as_ref().map(|p| p.aliases.clone()).unwrap_or_default()),
+        aliases: req.aliases.unwrap_or_else(|| {
+            existing
+                .as_ref()
+                .map(|p| p.aliases.clone())
+                .unwrap_or_default()
+        }),
         bio: req.bio.or_else(|| existing.and_then(|p| p.bio)),
     };
     if let Err(e) = repo::upsert(&state.pool, &merged).await {

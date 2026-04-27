@@ -201,12 +201,10 @@ mod tests {
 
     #[test]
     fn build_messages_includes_target_lang_and_lines_json() {
-        let lines = vec![
-            TranslateLineRequest {
-                id: "line-1".into(),
-                text: "hello".into(),
-            },
-        ];
+        let lines = vec![TranslateLineRequest {
+            id: "line-1".into(),
+            text: "hello".into(),
+        }];
         let msgs = build_translate_messages("zh-CN", &lines);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].role, "system");
@@ -218,7 +216,8 @@ mod tests {
 
     #[test]
     fn parse_canonical_response() {
-        let raw = r#"{"translations":[{"id":"00000000-0000-0000-0000-000000000001","text":"你好"}]}"#;
+        let raw =
+            r#"{"translations":[{"id":"00000000-0000-0000-0000-000000000001","text":"你好"}]}"#;
         let out = parse_translate_response(raw).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, "你好");

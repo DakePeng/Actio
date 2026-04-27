@@ -28,8 +28,7 @@ pub async fn get_for_tenant(
 }
 
 pub async fn upsert(pool: &SqlitePool, profile: &TenantProfile) -> sqlx::Result<()> {
-    let aliases_json =
-        serde_json::to_string(&profile.aliases).unwrap_or_else(|_| "[]".to_string());
+    let aliases_json = serde_json::to_string(&profile.aliases).unwrap_or_else(|_| "[]".to_string());
     sqlx::query(
         r#"INSERT INTO tenant_profile (tenant_id, display_name, aliases, bio, updated_at)
            VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -98,7 +97,9 @@ mod tests {
         assert_eq!(got.bio.as_deref(), Some("now with bio"));
 
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tenant_profile")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count.0, 1, "upsert must not insert duplicate rows");
     }
 
@@ -106,13 +107,11 @@ mod tests {
     async fn aliases_check_rejects_non_array_json() {
         let pool = fresh_pool().await;
         let tenant_id = Uuid::new_v4();
-        let result = sqlx::query(
-            "INSERT INTO tenant_profile (tenant_id, aliases) VALUES (?1, ?2)",
-        )
-        .bind(tenant_id.to_string())
-        .bind(r#""not an array""#)
-        .execute(&pool)
-        .await;
+        let result = sqlx::query("INSERT INTO tenant_profile (tenant_id, aliases) VALUES (?1, ?2)")
+            .bind(tenant_id.to_string())
+            .bind(r#""not an array""#)
+            .execute(&pool)
+            .await;
         assert!(result.is_err(), "expected CHECK constraint violation");
     }
 }

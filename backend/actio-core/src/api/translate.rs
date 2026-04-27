@@ -146,9 +146,7 @@ mod tests {
             metrics: Arc::new(Metrics::new()),
             model_manager: Arc::new(ModelManager::new(model_dir.clone())),
             inference_pipeline: Arc::new(tokio::sync::Mutex::new(InferencePipeline::new())),
-            batch_processor: Arc::new(
-                crate::engine::batch_processor::BatchProcessorHandle::new(),
-            ),
+            batch_processor: Arc::new(crate::engine::batch_processor::BatchProcessorHandle::new()),
             capture_daemon: Arc::new(crate::engine::capture_daemon::CaptureDaemon::new(
                 None,
                 model_dir.join("silero_vad.onnx"),
@@ -218,8 +216,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_translations_for_stub_router() {
-        let (state, _tmp) =
-            make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
+        let (state, _tmp) = make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
         let body = serde_json::json!({
             "target_lang": "zh-CN",
             "lines": [
@@ -248,8 +245,7 @@ mod tests {
     async fn accepts_non_uuid_ids() {
         // Defensive — keeps this endpoint usable even if a caller sends
         // a synthetic id like `local-…` from `appendLiveTranscript`.
-        let (state, _tmp) =
-            make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
+        let (state, _tmp) = make_state(LlmRouter::stub_with_translation_suffix(" [zh]")).await;
         let body = serde_json::json!({
             "target_lang": "zh-CN",
             "lines": [{"id": "local-not-a-uuid", "text": "hello"}],

@@ -165,8 +165,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
     // constructed unconditionally so the API and supervisor have stable
     // references; whether they actually run is decided each tick by the
     // batch supervisor below based on `always_listening`.
-    let batch_processor =
-        Arc::new(crate::engine::batch_processor::BatchProcessorHandle::new());
+    let batch_processor = Arc::new(crate::engine::batch_processor::BatchProcessorHandle::new());
     let capture_daemon = {
         // Default device for now — when audio.device_name is wired through
         // settings updates, the daemon's start() will pick it up via the
@@ -179,12 +178,10 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
             vad_path,
         ))
     };
-    let live_streaming = Arc::new(
-        crate::engine::live_streaming::LiveStreamingService::new(
-            capture_daemon.clone(),
-            aggregator.clone(),
-        ),
-    );
+    let live_streaming = Arc::new(crate::engine::live_streaming::LiveStreamingService::new(
+        capture_daemon.clone(),
+        aggregator.clone(),
+    ));
 
     // Phase-A voiceprint-candidate retention: clips land in <data_dir>/audio_clips/
     // and get swept hourly per the user's `audio.clip_retention_days` setting.
@@ -276,12 +273,7 @@ pub async fn start_server(config: CoreConfig) -> anyhow::Result<()> {
 
     // Pick the always-on pipeline based on the user's opt-in. The two paths
     // are mutually exclusive — both would try to grab the microphone.
-    let use_batch_pipeline = state
-        .settings_manager
-        .get()
-        .await
-        .audio
-        .use_batch_pipeline;
+    let use_batch_pipeline = state.settings_manager.get().await.audio.use_batch_pipeline;
     if use_batch_pipeline {
         info!("Always-on pipeline: batch clip processing (new)");
         let state_clone = state.clone();
@@ -498,9 +490,7 @@ async fn start_always_on_capture(state: &AppState) -> anyhow::Result<()> {
 /// caller already holds `state`. Used by start_server so the cleanup task
 /// can read its retention setting once at spawn time without forcing the
 /// caller to await inside the spawn block.
-fn settings_manager_ref(
-    state: &AppState,
-) -> crate::engine::app_settings::AppSettings {
+fn settings_manager_ref(state: &AppState) -> crate::engine::app_settings::AppSettings {
     // settings_manager.get() is async; we use try_read on the inner RwLock
     // when we know the caller is in startup (no contention). Falling back
     // to defaults is harmless — the user can always patch settings later.
@@ -520,13 +510,12 @@ async fn batch_pipeline_supervisor(state: AppState) {
     // Construct the ProductionClipRunner once. It re-reads settings each
     // run_clip call so model selection + thresholds can change without a
     // restart.
-    let runner: Arc<crate::engine::batch_processor::ProductionClipRunner> = Arc::new(
-        crate::engine::batch_processor::ProductionClipRunner {
+    let runner: Arc<crate::engine::batch_processor::ProductionClipRunner> =
+        Arc::new(crate::engine::batch_processor::ProductionClipRunner {
             settings_manager: state.settings_manager.clone(),
             model_manager: state.model_manager.clone(),
             router: state.router.clone(),
-        },
-    );
+        });
 
     loop {
         interval.tick().await;

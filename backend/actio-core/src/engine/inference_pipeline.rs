@@ -84,11 +84,7 @@ impl InferencePipeline {
         // (for the enrollment UI mic meter) AND broadcast to anyone holding
         // a subscription on `audio_levels` (the WS handler, for the live
         // tab's voice wave). Both consumers are no-ops when not active.
-        let audio_rx = install_level_observer(
-            audio_rx,
-            live_enrollment.clone(),
-            audio_levels,
-        );
+        let audio_rx = install_level_observer(audio_rx, live_enrollment.clone(), audio_levels);
 
         // 2. Select ASR model based on user setting and route audio to the
         //    appropriate recognizer.
@@ -460,8 +456,7 @@ fn install_level_observer(
         // Throttle the broadcast to ~15Hz regardless of chunk rate; the
         // live tab's voice wave doesn't need every sample, and dropping
         // updates here keeps the WS quiet on busy devices.
-        let mut last_broadcast = std::time::Instant::now()
-            - std::time::Duration::from_millis(200);
+        let mut last_broadcast = std::time::Instant::now() - std::time::Duration::from_millis(200);
         while let Some(chunk) = rx.recv().await {
             if !chunk.is_empty() {
                 let sum_sq: f32 = chunk.iter().map(|x| x * x).sum();
@@ -469,9 +464,7 @@ fn install_level_observer(
                 ema = 0.7 * ema + 0.3 * rms;
                 crate::engine::live_enrollment::publish_level(&live_enrollment, ema);
                 if let Some(levels) = &audio_levels {
-                    if last_broadcast.elapsed()
-                        >= std::time::Duration::from_millis(66)
-                    {
+                    if last_broadcast.elapsed() >= std::time::Duration::from_millis(66) {
                         // Lossy: we don't care if no receivers are attached.
                         let _ = levels.send(ema);
                         last_broadcast = std::time::Instant::now();

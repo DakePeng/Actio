@@ -724,13 +724,12 @@ pub async fn get_reminder_trace(
     }
     let (source_kind, window_start_ms, window_end_ms) = match window_id {
         Some(wid) => {
-            let clip: Option<(i64, i64)> = sqlx::query_as(
-                "SELECT started_at_ms, ended_at_ms FROM audio_clips WHERE id = ?1",
-            )
-            .bind(wid.to_string())
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| AppApiError::Internal(e.to_string()))?;
+            let clip: Option<(i64, i64)> =
+                sqlx::query_as("SELECT started_at_ms, ended_at_ms FROM audio_clips WHERE id = ?1")
+                    .bind(wid.to_string())
+                    .fetch_optional(&state.pool)
+                    .await
+                    .map_err(|e| AppApiError::Internal(e.to_string()))?;
             match clip {
                 Some((s, e)) => (SourceKind::Clip, Some(s), Some(e)),
                 None => {
@@ -757,7 +756,18 @@ pub async fn get_reminder_trace(
     let lines = match (&source_kind, session_id, window_start_ms, window_end_ms) {
         (SourceKind::Clip, _, _, _) => {
             let wid = window_id.expect("Clip kind implies window_id present");
-            sqlx::query_as::<_, (i64, i64, String, Option<String>, Option<String>, String, Option<String>)>(
+            sqlx::query_as::<
+                _,
+                (
+                    i64,
+                    i64,
+                    String,
+                    Option<String>,
+                    Option<String>,
+                    String,
+                    Option<String>,
+                ),
+            >(
                 r#"SELECT t.start_ms, t.end_ms, t.text, sp.id, sp.display_name,
                           s.id, s.clip_id
                    FROM transcripts t

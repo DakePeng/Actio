@@ -352,7 +352,12 @@ impl RemoteLlmClient {
             "Calling remote LLM for windowed action extraction"
         );
 
-        let messages = build_window_messages(attributed_transcript, label_names, window_local_date, profile);
+        let messages = build_window_messages(
+            attributed_transcript,
+            label_names,
+            window_local_date,
+            profile,
+        );
         let openai_messages: Vec<serde_json::Value> = messages
             .iter()
             .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
