@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 85. `Card.tsx` calls 32 hooks AFTER a conditional early return — Rules-of-Hooks violation that fires on every auto-extract
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — extracted the skeleton JSX into a new `frontend/src/components/CardSkeleton.tsx` (1 hook, `useT` only). Dropped the `if (reminder.isExtracting) return …` block from `Card.tsx`; its hook list is now unconditional. Updated the only consumer, `Board.tsx`, to branch at the call site: `reminder.isExtracting` → `<CardSkeleton key={reminder.id} />`, otherwise → `<Card …>`. Two distinct components, two distinct hook lists, no order corruption. New `Card.skeleton-transition.test.tsx` mounts a Board with one extracting reminder, asserts the skeleton renders, flips `isExtracting: false` via store update, asserts the real card renders, AND uses `vi.spyOn(console, 'error')` to assert no "Rendered more hooks" / "Rules of Hooks" / "change in the order of Hooks" warning fired. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 230 → 231, `pnpm build` succeeded.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/Card.tsx:51-104` is structured as:
 

@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react';
 import { useFilteredReminders, useStore } from '../store/use-store';
 import { sortByPriority } from '../utils/priority';
 import { Card } from './Card';
+import { CardSkeleton } from './CardSkeleton';
 import { EmptyState } from './EmptyState';
 import { AnimatePresence } from 'framer-motion';
 import { useT, type TKey } from '../i18n';
@@ -145,6 +146,9 @@ export function Board() {
           <AnimatePresence mode="popLayout">
             {sorted.map((reminder, index) => {
               const isFocused = focusedCardIndex === index;
+              if (reminder.isExtracting) {
+                return <CardSkeleton key={reminder.id} />;
+              }
               return (
                 <Card
                   key={reminder.id}
