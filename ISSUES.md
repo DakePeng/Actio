@@ -1140,6 +1140,89 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 85. `Card.tsx` calls 32 hooks AFTER a conditional early return — Rules-of-Hooks violation that fires on every auto-extract
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/Card.tsx:51-104` is structured as:
+
+```tsx
+export function Card({ reminder, … }: CardProps) {
+  const t = useT();                                  // hook #1 — before the return
+
+  if (reminder.isExtracting) {
+    return (<motion.div>…skeleton…</motion.div>);    // ← early return
+  }
+
+  const setFilter = useStore((s) => s.setFilter);    // hook #2 — only reached
+  const archiveReminder = useStore((s) => s.…);      //   when isExtracting === false
+  // … 31 more hooks (useState, useEffect, useMotionValue, useRef, etc.)
+}
+```
+
+**Total:** 33 hooks. **One** of them runs in skeleton mode; **all 33** run in real mode.
+
+This is a textbook React Rules-of-Hooks violation. The hooks runtime tracks state by call ORDER, so when the same component instance transitions between the two render paths, React's hook list count changes — going from 1 → 33 mid-lifecycle. In dev mode + strict mode, React should throw `"Rendered more hooks than during the previous render"`. Ship-mode it can corrupt hook state silently.
+
+**The transition is hit on every auto-extracted reminder.** When the rolling-window extractor produces a new item:
+1. Card renders with `reminder.isExtracting === true` (skeleton path: 1 hook).
+2. LLM finishes; parent updates `reminder.isExtracting = false`.
+3. Same `<Card>` component instance re-renders (no key change, no unmount); now follows the real-card path: 33 hooks.
+
+Whether React 19 hard-errors on this depends on whether `<motion.div>` or framer-motion's layout animations end up unmounting/remounting the inner Card. If they do, the bug is dormant; if they don't, it's an active footgun.
+
+**Why it might not have surfaced loudly yet:**
+- No vitest exercises the `isExtracting: true → false` transition on a single Card instance.
+- `BoardWindow`/`Board` may key cards by `reminder.id` and re-render *new* `<Card>` instances when `isExtracting` changes; if the parent has any layout-shifting that nukes-and-rebuilds the DOM subtree, React may unmount the skeleton card before re-mounting the real one. That would make the order-violation moot at runtime — but it's still a latent bug because future React strict mode passes, future Cards or refactors of the parent could trip it.
+
+**Severity:** Medium · **Platform:** All · **Type:** bug (latent — will fire under React 19 strict mode if/when the parent stops reconciling around it) · **Scope:** small (~30 LoC: extract the skeleton block into a dedicated `<CardSkeleton>` component file)
+
+**Proposed direction:**
+
+1. Create `frontend/src/components/CardSkeleton.tsx`:
+
+   ```tsx
+   import { motion } from 'framer-motion';
+   import { useT } from '../i18n';
+
+   export function CardSkeleton() {
+     const t = useT();
+     return (
+       <motion.div
+         layout
+         initial={{ opacity: 0, y: 30 }}
+         animate={{ opacity: 1, y: 0 }}
+         exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
+       >
+         <article className="reminder-card card--skeleton" aria-busy="true" aria-label={t('card.aria.extracting')}>
+           {/* …same JSX as before… */}
+         </article>
+       </motion.div>
+     );
+   }
+   ```
+
+2. In the parent (`Board.tsx` or wherever Cards render), branch at the call site:
+
+   ```tsx
+   reminder.isExtracting ? <CardSkeleton key={reminder.id} /> : <Card key={reminder.id} reminder={reminder} … />
+   ```
+
+   Two distinct components, two distinct hook lists, no order violation. The `key={reminder.id}` ensures React reconciles correctly when isExtracting flips.
+
+3. Drop the `if (reminder.isExtracting) return …` block from `Card.tsx`. The remaining hook list is now unconditional — clean.
+
+**Acceptance:**
+1. `Card.tsx` no longer has any conditional return before its hook calls.
+2. New `CardSkeleton.tsx` file exists, with at most 1 hook (`useT()`) and no other state.
+3. Every consumer that used to render `<Card reminder={r}>` now branches: skeleton path → `<CardSkeleton key={r.id}>`, real path → `<Card key={r.id} reminder={r}>`. Likely just `Board.tsx`.
+4. New vitest covers the transition: render with `isExtracting: true`, assert skeleton renders; flip to `isExtracting: false` (parent re-renders with the same id), assert real card renders without React's "more hooks" warning. Use `vi.spyOn(console, 'error')` to assert no warning fires.
+5. `pnpm tsc --noEmit` clean; `pnpm test` 230+/230+ green; `pnpm build` flat.
+
+**Out of scope:** Card.tsx still has 32 hooks even after this fix — that's a refactor pass for another day (probably worth grouping the related useStore selectors, extracting the swipe gesture into its own hook, etc.). #85 is the rules-of-hooks violation only.
+
+---
+
 ### 84. Legacy session-end reminder generator (`engine/todo_generator.rs`) is fully dead — never called
 
 **Status:** Resolved 2026-04-27 — `git rm`'d the 141-line `engine/todo_generator.rs` (4 tests went with it); dropped `pub mod todo_generator;` from `engine/mod.rs`; removed `has_reminders`, `create_reminders_batch`, the now-orphan `clone_new_reminder` helper, and the `// ── todo_generator compat ──` section header from `repository/reminder.rs`. `create_reminders_batch_with_labels` (still used by `window_extractor`) survives. `LlmRouter::generate_todos` survives because `api/reminder.rs` keeps the chat-composer on-demand path. Verification: `cargo build -p actio-core --tests` clean (no new unused-import warnings); `cargo test -p actio-core --lib` 214 → 210 (exactly the 4 dropped todo_generator tests); `cargo clippy -p actio-core --all-targets` lib warnings unchanged at 30; `git grep` for the four dead symbol patterns returns zero matches. Total cleanup: ~165 LoC.
