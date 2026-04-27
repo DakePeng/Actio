@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 80. `StandbyTray.tray-transcript` combines `aria-live` with `aria-label` — streaming text never reaches screen readers
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — split the responsibilities. The outer `.tray-transcript` div is now plain (no `role` / `aria-live` / `aria-label`). The inner `.tray-transcript__label` span carries `role="status" aria-live="polite"` (changes only between "Listening" and "Transcribing" — exactly two announcements per dictation cycle). The streaming viewport is `aria-hidden="true"` so the ~10×/sec partial mutations don't flood assistive tech; the consuming input element announces the final pasted text via its own focus/value changes. New `StandbyTray.aria-live.test.tsx` (4 tests) pins the structure: outer-no-aria, label-owns-live, viewport-hidden, label-text-flips-on-phase. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 221 → 225, `pnpm build` succeeded.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/StandbyTray.tsx:198-216` renders the dictation transcript region as:
 

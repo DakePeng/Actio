@@ -198,18 +198,24 @@ export function StandbyTray() {
           {showLiveTranscript && (
             <div
               className={`tray-transcript${transcriptText ? '' : ' tray-transcript--empty'}`}
-              role="status"
-              aria-live="polite"
-              aria-label={
-                isDictationTranscribing
-                  ? t('tray.aria.transcribing')
-                  : t('tray.aria.listening')
-              }
             >
-              <span className="tray-transcript__label">
+              {/* Live region narrowed to the phase label — it changes
+                  exactly once per dictation cycle (Listening → Transcribing).
+                  The streaming viewport below is aria-hidden because its
+                  partials mutate ~10×/sec; the final transcript is announced
+                  by the consuming input element after paste (ISSUES.md #80). */}
+              <span
+                className="tray-transcript__label"
+                role="status"
+                aria-live="polite"
+              >
                 {isDictationTranscribing ? t('tray.status.transcribing') : t('tray.status.listening')}
               </span>
-              <div ref={transcriptViewportRef} className="tray-transcript__viewport">
+              <div
+                ref={transcriptViewportRef}
+                className="tray-transcript__viewport"
+                aria-hidden="true"
+              >
                 {transcriptText || t('tray.status.listening')}
               </div>
             </div>
