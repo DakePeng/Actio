@@ -72,15 +72,15 @@ export function PreferencesSection() {
             {t('settings.preferences.notifications.sub')}
           </div>
         </div>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={preferences.notifications}
-            onChange={(e) => setPreferences({ notifications: e.target.checked })}
-          />
-          <div className="toggle__track" />
-          <div className="toggle__thumb" />
-        </label>
+        <input
+          type="checkbox"
+          className="settings-check"
+          role="switch"
+          aria-checked={preferences.notifications}
+          aria-label={t('settings.preferences.notifications')}
+          checked={preferences.notifications}
+          onChange={(e) => setPreferences({ notifications: e.target.checked })}
+        />
       </div>
 
       <div className="settings-row">
@@ -90,17 +90,17 @@ export function PreferencesSection() {
             {t('settings.preferences.launchAtLogin.sub')}
           </div>
         </div>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={preferences.launchAtLogin}
-            onChange={(e) => {
-              void handleLaunchAtLoginChange(e.target.checked);
-            }}
-          />
-          <div className="toggle__track" />
-          <div className="toggle__thumb" />
-        </label>
+        <input
+          type="checkbox"
+          className="settings-check"
+          role="switch"
+          aria-checked={preferences.launchAtLogin}
+          aria-label={t('settings.preferences.launchAtLogin')}
+          checked={preferences.launchAtLogin}
+          onChange={(e) => {
+            void handleLaunchAtLoginChange(e.target.checked);
+          }}
+        />
       </div>
     </section>
   );

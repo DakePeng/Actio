@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 78. `PreferencesSection` toggles use the legacy `.toggle` style — drift from the documented `.settings-check` pattern
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — rewrote both toggles in `PreferencesSection.tsx` to use `<input className="settings-check" role="switch" aria-checked aria-label … />`, matching `AudioSettings.tsx:306,400`. With zero remaining `className="toggle"` consumers, deleted the `.toggle`, `.toggle input`, `.toggle__track`, `.toggle__thumb`, and the two `:checked` selector rules from `globals.css` (45 lines). Build CSS chunk shrunk 114.01 → 113.32 kB (-690 B uncompressed, -110 B gzipped). Verification: `pnpm tsc --noEmit` clean, `pnpm test` 217/217, `pnpm build` succeeded.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/settings/PreferencesSection.tsx:75,93` renders the **Notifications** and **Launch at login** toggles using the older three-element shape:
 
