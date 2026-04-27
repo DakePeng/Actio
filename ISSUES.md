@@ -854,6 +854,14 @@ This is the natural follow-up to ISS-068: now that the env templates are accurat
 
 ### 70. AGENTS.md drift — embedding dim, session-end vs rolling windows, broken xrefs
 
+**Status:** Won't fix at repo level (2026-04-27) — the audit was correct but the framing was wrong. Both `AGENTS.md` files are matched by `**/AGENTS.md` in `.gitignore`, so they're local-only / per-user files (likely generated or maintained by external AI tooling like OMC, Codex, Cursor). They're not tracked source-of-truth and can't accept committed fixes.
+
+**What did happen:** the local copies in this working tree got updated with the corrected guidance during this tick — the embedding-dim line, the rolling-window-extractor framing, the CAM++ clarification, and the broken `tests/AGENTS.md` xref drop. Those edits sit on disk and will benefit any future AI session reading this repo's local AGENTS.md, but they aren't a repo-level fix.
+
+**Takeaway for future discovery ticks:** pre-check `git check-ignore` before filing issues against any docs file. The AGENTS.md drift was the same class as ISS-049 / ISS-069, but the artifact lives outside the tracked surface, so the rest-of-the-world impact is nil; only this user's local AI tooling consumed the bad guidance.
+
+The original audit findings (a-d) below are kept verbatim as a record of what the local files said before the in-tree fix.
+
 `backend/AGENTS.md` and the root `AGENTS.md` haven't been updated since 2026-04-17 and now contradict the code in ways that would actively mislead a contributor.
 
 **(a) The smoking gun: backend/AGENTS.md:48 has the embedding-dim story exactly backwards.**
@@ -1306,4 +1314,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 70 | AGENTS.md drift — embedding dim story is **backwards** | Medium | All | Open |
