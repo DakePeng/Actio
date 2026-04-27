@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createActioApiClient } from '../api/actio-api';
 import { fetchSettings, patchSettings } from '../api/settings-client';
@@ -536,5 +537,8 @@ export const useStore = create<AppState>((set) => ({
 export function useFilteredReminders() {
   const reminders = useStore((state) => state.reminders);
   const filter = useStore((state) => state.filter);
-  return filterReminders(reminders, filter);
+  // Memoize so the O(N) filter doesn't rerun for unrelated re-renders
+  // (ISSUES.md #88) — the worst offender being focusedCardIndex changes
+  // from j/k keyboard nav, which can fire many times per second.
+  return useMemo(() => filterReminders(reminders, filter), [reminders, filter]);
 }

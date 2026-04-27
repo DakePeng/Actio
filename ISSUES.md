@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 88. `useFilteredReminders` + Board's sort rebuild O(N log N) work on every keyboard nav step
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — wrapped `useFilteredReminders` in `useMemo([reminders, filter])` and Board.tsx's `sorted` in `useMemo([filtered])`. Now the filter and sort skip work entirely on unrelated re-renders (notably `focusedCardIndex` j/k nav, which fires many times per second). New `use-store.memo.test.tsx` (3 tests, via `renderHook`) pins the invariant: the returned array reference is stable across an unrelated `focusedCardIndex` flip (multiple bumps), but a fresh reference is returned when `reminders` or `filter` actually mutate. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 231 → 234, `pnpm build` succeeded with bundle sizes flat.
+
+**Found:** 2026-04-27
 
 `frontend/src/store/use-store.ts:536-540`:
 
