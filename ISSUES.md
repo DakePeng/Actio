@@ -852,6 +852,51 @@ This is the natural follow-up to ISS-068: now that the env templates are accurat
 
 ---
 
+### 70. AGENTS.md drift — embedding dim, session-end vs rolling windows, broken xrefs
+
+`backend/AGENTS.md` and the root `AGENTS.md` haven't been updated since 2026-04-17 and now contradict the code in ways that would actively mislead a contributor.
+
+**(a) The smoking gun: backend/AGENTS.md:48 has the embedding-dim story exactly backwards.**
+
+```
+- Speaker embeddings are 512-dim (3D-Speaker). Any hardcoded `192` in
+  the code is stale from the earlier CAM++ design and should be fixed
+  as you encounter it.
+```
+
+CLAUDE.md "Non-obvious patterns" (line 130) explicitly says: *"Five of six catalog models (CAM++ family + ERes2Net v2 + TitaNet) emit 192-dim vectors; ERes2Net Base emits 512-dim. The DB tracks `embedding_dimension` per row and `speaker_matcher` filters joins on the active dim."*
+
+Confirmed in code: `engine/model_manager.rs` lists CAM++ (`campplus_zh_en`, `campplus_zh`), ERes2Net v2 (`eres2netv2`), TitaNet (`titanet_small_en`) as the live catalog. **192-dim is the majority case; 512 is the outlier (ERes2Net Base only).** A contributor literally following AGENTS.md's instruction to "fix any hardcoded 192" would convert legitimate references and break embedding storage on every CAM++ user.
+
+This is the highest-priority slice of this issue: it's not just stale, it's an *attractive nuisance* — the wording invites a confident wrong fix.
+
+**(b) backend/AGENTS.md:7 — "reminders … at session end".**
+
+> *"optionally generates reminders from transcripts using a local (llama.cpp) or remote (OpenAI-compatible) LLM at session end."*
+
+The current architecture (CLAUDE.md "Always-listening action extractor", `engine/window_extractor.rs`) runs rolling 5-min windows continuously, not at session end. The "session end" model existed in an earlier iteration; the rolling-window extractor superseded it (and lands medium-confidence items in the Needs-Review queue, which is the actual product feature).
+
+**(c) Root AGENTS.md:31 — "Disregard older docs that mention … CAM++ … — all obsolete".**
+
+CAM++ is the *recommended default* speaker embedding model. `engine/app_settings.rs` literally hardcodes `"campplus_zh_en"` as the default for the Chinese+English language pair. The line probably meant "older docs that mentioned CAM++ as a Python-worker dependency are obsolete (CAM++ now runs natively via sherpa-onnx)" — but as written, a contributor would conclude CAM++ is dead and remove it.
+
+**(d) Broken cross-reference: backend/AGENTS.md:27 cites `tests/AGENTS.md`.**
+
+`backend/tests/AGENTS.md` doesn't exist. The Subdirectories table promises documentation that isn't there.
+
+**Severity:** Medium · **Platform:** All · **Type:** docs (the embedding-dim slice is borderline a bug class because it actively misleads) · **Scope:** small (rewrite ~6 lines across 2 files; possibly create or remove the tests/ subsection)
+
+**Acceptance:**
+1. Rewrite `backend/AGENTS.md:48` to mirror CLAUDE.md's Non-obvious-patterns wording: 192-dim is the majority across CAM++ + ERes2Net v2 + TitaNet; 512-dim is ERes2Net Base only; the DB tracks `embedding_dimension` per row; never hardcode either number.
+2. Update line 7 to mention the rolling 5-min window extractor (cite `window_extractor.rs`); the "session end" path is the legacy `InferencePipeline::start_session` shape that #44 tracks.
+3. Either rewrite root `AGENTS.md:31`'s CAM++ phrase to clarify the obsolete bit was the *Python-worker* version, or drop CAM++ from the obsolete list entirely. The other items in the list (python-worker, proto, gRPC, FunASR Python, Postgres) are still correctly flagged.
+4. Resolve the `tests/AGENTS.md` xref: either create a 1-paragraph file documenting the integration-test scaffold, or drop the subsection from the Subdirectories table.
+5. Stamp both files with `Updated: 2026-04-27` (or whatever the landing date is) so future contributors can see the docs were refreshed against the post-batch-pipeline architecture.
+
+These are the AGENTS.md analogue of ISS-049 (CLAUDE.md) and ISS-069 (README) — same drift class, different files.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1261,3 +1306,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 70 | AGENTS.md drift — embedding dim story is **backwards** | Medium | All | Open |
