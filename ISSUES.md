@@ -535,6 +535,9 @@ The audit step (#5) is the bonus; #1-4 are the core cleanup.
 
 ### 63. Reminders/labels client still bypasses port-fallback discovery
 
+**Status:** Resolved 2026-04-26 — `actio-api.ts::request` and `NewReminderBar.tsx::fetchLlmConfigured` both switched to `await getApiUrl(path)`. Dropped the local `API_BASE_URL` / `SETTINGS_API_URL` constants. The reminders/labels load+save flow now uses the same port-discovery path the rest of the app does (closes the asymmetry #52 left). 196/196 frontend tests pass; tsc clean; build clean.
+
+
 When ISS-052 landed, two fetch sites were explicitly carved out as "uses the env-var shape, leave alone": `frontend/src/api/actio-api.ts:13` (the root reminders/labels client) and `frontend/src/components/NewReminderBar.tsx:9`. The carve-out reasoning was: production builds set `VITE_ACTIO_API_BASE_URL`, and dev usually has the backend on port 3000.
 
 Re-examining that with fresh eyes: the seven sites I fixed in #52 face the exact same scenario as these two — a developer running locally with another process holding port 3000 (so the backend lands on 3001-3009 via the existing port-discovery probe). The seven fixed sites now follow the fallback; these two still don't. Net: the **reminders / labels load+save flow**, which is the bulk of the app's actual work, fails silently when the backend isn't on 3000. The same code path that already works in `LlmSettings.tsx`, `AudioSettings.tsx`, etc. fails in the rest of the app.
@@ -974,4 +977,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 63 | Reminders/labels client still bypasses port-fallback | Low | All | Open |

@@ -3,10 +3,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '../store/use-store';
 import { ChatComposer } from './ChatComposer';
 import { useT } from '../i18n';
+import { getApiUrl } from '../api/backend-url';
 
 type CaptureMode = 'chat' | 'form';
 const MODE_STORAGE_KEY = 'actio-capture-mode';
-const SETTINGS_API_URL = `${(import.meta.env.VITE_ACTIO_API_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '')}/settings`;
 
 function isLlmConfigured(settings: unknown): boolean {
   const selection = (settings as { llm?: { selection?: { kind?: string } } })?.llm?.selection;
@@ -15,7 +15,7 @@ function isLlmConfigured(settings: unknown): boolean {
 
 async function fetchLlmConfigured(signal: AbortSignal): Promise<boolean> {
   try {
-    const response = await fetch(SETTINGS_API_URL, { signal });
+    const response = await fetch(await getApiUrl('/settings'), { signal });
     if (!response.ok) return false;
     return isLlmConfigured(await response.json());
   } catch {

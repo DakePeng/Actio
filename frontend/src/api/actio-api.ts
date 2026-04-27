@@ -8,9 +8,9 @@ import type {
   ReminderDraft,
   ReminderPatch,
 } from '../types';
+import { getApiUrl } from './backend-url';
 
 export const DEV_TENANT_ID = '00000000-0000-0000-0000-000000000001';
-const API_BASE_URL = (import.meta.env.VITE_ACTIO_API_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '');
 
 function normalizeDueTime(value?: string) {
   if (!value) {
@@ -22,7 +22,7 @@ function normalizeDueTime(value?: string) {
 }
 
 async function request<T>(path: string, init: RequestInit = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(await getApiUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',
