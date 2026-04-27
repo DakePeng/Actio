@@ -432,6 +432,47 @@ The `applyPendingResolutions` function is currently file-private (no `export`). 
 
 ---
 
+### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
+
+`backend/actio-core/src/engine/live_enrollment.rs` (261 lines, **0 tests**) implements the live voiceprint enrollment flow that CLAUDE.md (line 100) describes:
+
+> Gate checks happen **inside** the Mutex critical section to avoid snapshot-recheck races. Cancelling cleans **only** the rows saved during the current session via `cleanup_partial_embeddings` — prior successful enrollments for the same speaker survive. A watchdog tokio task owns natural-completion teardown (pipeline stop + `session::end_session`) so a Complete status doesn't leak an unbounded DB session.
+
+`consume_segment` (lines 174–261) is the routing entry point with non-trivial ordered logic:
+
+1. Lock the `LiveEnrollment` Arc<Mutex<Option<EnrollmentState>>>.
+2. Bail if no session or `status != Active`.
+3. Duration gate (`MIN 3 s`, `MAX 30 s`) → set `last_rejected_reason`, bump version, bail.
+4. Quality gate (`MIN_QUALITY 0.6`) → reject same way.
+5. On accept: bump `captured`, stamp `last_captured_duration_ms`, clear `last_rejected_reason`, bump version, transition to `Complete` if `captured >= target`.
+6. **Drop the lock**, persist the embedding via `speaker_matcher::save_embedding` (DB write).
+7. **Re-acquire** the lock to push the saved embedding ID onto `saved_embedding_ids` — but only if status is still `Active` (Complete already cleared the staging list, so a post-completion cancel can't wipe legitimate voiceprints).
+
+The race-window between steps 5 and 6/7 is exactly what the CLAUDE.md callout warns about. The check at step 7 (`status == Active`) is load-bearing — if a refactor drops it or moves the staging-list mutation back inside the first lock, completing-then-cancelling could clobber the voiceprint that just got saved.
+
+Other untested behaviours in the same module:
+
+- `start` rejects when a session is already active.
+- `cancel` returns the snapshot at cancel time and clears the slot.
+- `cleanup_partial_embeddings` deletes only the IDs in `saved_embedding_ids`, leaving prior successful rows for the same speaker intact.
+- `is_complete` reflects only `Status::Complete` (not Active or Cancelled).
+- `publish_level` updates `rms_level` without bumping `version` (so quiet sessions don't spin the counter).
+
+**Severity:** Low · **Platform:** All · **Type:** test · **Scope:** medium — async tokio test setup with an in-memory SQLite pool plus the `domain::speaker_matcher::save_embedding` dependency. The existing `repository::speaker` tests show the in-memory-pool scaffold to mirror.
+
+**Acceptance:**
+1. New `actio-core/src/engine/live_enrollment.rs` `mod tests` covers at minimum:
+   - Status gate (Inactive returns Ok(None) without writes).
+   - Each duration gate (too short, too long) sets the right `last_rejected_reason` and bumps version.
+   - Quality gate.
+   - Accept path: counter bumps, version bumps twice on the target-reaching call (once for capture, once for status flip), `last_captured_duration_ms` stamped, `last_rejected_reason` cleared.
+   - Race fix: simulating "cancel between save_embedding and second lock" — the staging list mutation no-ops for Cancelled state. (Either inject a delay via a test seam, or test the post-step-7 behaviour: after `cancel` clears the slot, a subsequent `consume_segment` returning past step 5 won't be possible because step 2 bails. The narrower test is to call `consume_segment` then directly mutate the slot to Cancelled and assert no leak.)
+   - `cleanup_partial_embeddings` only touches rows in `saved_embedding_ids`.
+   - `publish_level` is version-stable.
+2. `cargo test -p actio-core --lib live_enrollment` passes; full lib suite stays green.
+
+---
+
 ### 58. Notifications preference is half-built — toggle persists but nothing fires alerts
 
 `frontend/src/components/settings/PreferencesSection.tsx` exposes a "Notifications — Show alerts for new reminders" toggle bound to `preferences.notifications` (`use-store.ts:71`). The preference round-trips through localStorage and the i18n strings exist in both en/zh-CN. But:
@@ -797,3 +838,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 60 | `live_enrollment::consume_segment` race-fix has no tests | Low | All | Open |
