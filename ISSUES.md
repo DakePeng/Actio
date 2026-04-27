@@ -1140,6 +1140,52 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 76. Backend has 37 clippy warnings in `actio-core` lib (denied by the auto-improve script)
+
+**Status:** Open · **Found:** 2026-04-27
+
+`cd backend && cargo clippy --all-targets -- -D warnings` (the QUALITY-lane lint that the auto-improve loop runs) currently fails with **37 warnings in `actio-core` lib + 7 unique additional in `actio-core` lib tests + 2 in `actio-desktop`**. Cargo.toml has no `[lints]` section so plain `cargo clippy` only emits warnings (37 → exit 0); the `-D warnings` flag in the loop script is what flips them to errors.
+
+That means the loop's `backend clippy` lane is effectively un-runnable as a discovery tool: it always fails on legacy noise, drowning any genuinely new warning a future change might introduce. Future regressions land invisibly.
+
+**Categorisation (lib + lib test, dedup'd):**
+
+| Category                            | Count | Files                                                                 |
+|-------------------------------------|-------|-----------------------------------------------------------------------|
+| `ptr_arg` (`&PathBuf` → `&Path`)    | 6     | `engine/model_manager.rs:651,658,664,1022,1040,1052` (and one more)   |
+| `useless_conversion`                | 5     | `api/ws.rs:134,161,180,194` + `engine/inference_pipeline.rs:822` (test) |
+| `field_reassign_with_default`       | 4     | `engine/app_settings.rs:843,856,866,921` (all in tests)               |
+| `unnecessary_map_or`                | 4     | `engine/cluster.rs:54`, `engine/continuity.rs:171`, `engine/voiceprint_clustering.rs:95`, `repository/speaker.rs:296` |
+| `needless_update`                   | 3     | `engine/diarization.rs:47,62,66`                                      |
+| `too_many_arguments`                | 3     | `engine/inference_pipeline.rs:66`, `repository/segment.rs:203`, `src-tauri/src/main.rs:55` |
+| `type_complexity`                   | 3     | `api/reminder.rs:196`, `engine/window_extractor.rs:403,713`           |
+| `derivable_impls`                   | 2     | `engine/app_settings.rs:382` (`AppSettings`), `engine/llm_router.rs:21` (`LlmSelection`) |
+| `collapsible_if`                    | 2     | `api/reminder.rs:308`, `engine/app_settings.rs:102`                   |
+| `needless_borrow`                   | 2     | `api/reminder.rs:398`, `src-tauri/src/main.rs:296`                    |
+| `unnecessary_cast`                  | 2     | `engine/batch_processor.rs:418,419`                                   |
+| Singletons                          | 7     | `manual_map`, `manual_strip`, `should_implement_trait` (`SpeakerKind::from_str`), `manual_is_multiple_of`, `explicit_auto_deref`, `doc_lazy_continuation`, `map_flatten`, `manual_range_contains` (test), `needless_range_loop` (test) |
+
+**Severity:** Medium · **Platform:** All · **Type:** refactor / cleanup · **Scope:** medium-large overall (touches ~15 files); breaks down into independent SMALL sub-batches that can land separately.
+
+**Proposed direction — split into independent commits, each verifiable in one tick:**
+
+1. **`ptr_arg` sweep in `model_manager.rs`** (single-file, 6 sites, mechanical `&PathBuf` → `&Path` + `use std::path::Path`).
+2. **`useless_conversion` in `api/ws.rs`** (4 sites, drop `.into()` on already-String/Vec values).
+3. **`field_reassign_with_default` test cleanup in `app_settings.rs`** (test code only, lowest risk).
+4. **`needless_update` in `diarization.rs`** (3 sites, drop `..Default::default()` from already-fully-spec'd structs).
+5. **`unnecessary_map_or` → `is_none_or`/`is_some_and`** (4 files, idiomatic Rust 1.82+ migration).
+6. **`derivable_impls`** (`AppSettings` → `#[derive(Default)]`, `LlmSelection` → `#[derive(Default)] + #[default]`).
+7. **`unnecessary_cast` in `batch_processor.rs`** (2 sites: `seg.start_ms as i64` is already i64).
+8. The remaining singletons (8) — bundle the trivial ones, leave `too_many_arguments` (3) and `type_complexity` (3) for a separate refactor pass since they suggest larger structural change.
+
+After all batches land: add a `[workspace.lints.clippy]` block to root `Cargo.toml` denying the categories we cleaned, so regressions trip CI immediately.
+
+**Out of scope for #76:** introducing new lint denials (`pedantic`, `nursery`) or enabling a CI workflow — the goal is to drain the existing warning queue and stand up a deny-on-warnings posture for the *currently-clean* set so the loop's QUALITY lane becomes useful again.
+
+**Acceptance:** After the multi-commit rollup, `cd backend && cargo clippy --all-targets -- -D warnings` passes with exit 0. `cargo test -p actio-core --lib` stays green throughout. No public-API rename (this is intentional — `&PathBuf → &Path` for *internal* helpers; if any of the 6 are `pub`, they get a separate ticket).
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
