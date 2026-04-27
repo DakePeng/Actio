@@ -432,6 +432,61 @@ The `applyPendingResolutions` function is currently file-private (no `export`). 
 
 ---
 
+### 61. 15 duplicate `fresh_pool()` test helpers across backend test modules
+
+`grep -rE "async fn fresh_pool" backend/actio-core/src` finds **15 identical definitions** of the in-memory-SQLite test helper:
+
+```
+backend/actio-core/src/api/candidate_speaker.rs
+backend/actio-core/src/api/clip.rs
+backend/actio-core/src/api/llm.rs
+backend/actio-core/src/api/reminder.rs
+backend/actio-core/src/api/segment.rs
+backend/actio-core/src/api/session.rs
+backend/actio-core/src/domain/speaker_matcher.rs
+backend/actio-core/src/engine/batch_processor.rs
+backend/actio-core/src/engine/clip_writer.rs
+backend/actio-core/src/engine/inference_pipeline.rs
+backend/actio-core/src/engine/live_enrollment.rs    ← added in #60 last tick
+backend/actio-core/src/engine/window_extractor.rs
+backend/actio-core/src/repository/audio_clip.rs
+backend/actio-core/src/repository/extraction_window.rs
+backend/actio-core/src/repository/speaker.rs
+```
+
+Each is the same ~10 lines:
+
+```rust
+async fn fresh_pool() -> SqlitePool {
+    let pool = SqlitePoolOptions::new()
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&pool)
+        .await
+        .unwrap();
+    run_migrations(&pool).await.unwrap();
+    pool
+}
+```
+
+Costs: future migrations changes require touching 15 sites; future test-pool conventions (e.g. seeding a default tenant, enabling WAL mode in tests) get scattered. Each new test module adds another copy.
+
+The crate's CLAUDE.md guidance is "Three similar lines is better than a premature abstraction" — 15 copies is well past that threshold.
+
+**Severity:** Low · **Platform:** All · **Type:** refactor · **Scope:** small
+
+**Acceptance:**
+1. Add a `pub(crate)` test helper module — natural location is `actio-core/src/testing.rs` declared under `#[cfg(test)] pub mod testing;` in `lib.rs`. Inside, expose `pub async fn fresh_pool() -> SqlitePool` with the canonical body.
+2. Each of the 15 sites switches to `use crate::testing::fresh_pool;` and deletes its local copy.
+3. `cargo test -p actio-core --lib` stays green (currently 214 tests, all should still pass).
+4. `cargo clippy -p actio-core --tests` flags no new warnings.
+
+Note: `batch_processor.rs` declares its `fresh_pool` as `pub(super) async fn` so it's already shared with one neighbour. The shared `crate::testing::fresh_pool` subsumes that. Two test modules (`api/segment.rs:tests::nested` and `repository/speaker.rs::tests::partial_unique_index_blocks_two_self_speakers_per_tenant`) have inline `let pool = SqlitePoolOptions::new()...; run_migrations(&pool).await.unwrap();` blocks rather than calling a `fresh_pool` helper — those should also adopt the shared helper for consistency (or be left as-is if they need a custom-shaped pool; check at landing time).
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -841,3 +896,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 61 | 15 duplicate `fresh_pool()` test helpers in backend | Low | All | Open |
