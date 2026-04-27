@@ -398,6 +398,9 @@ No behaviour change; this is a comment-only fix.
 
 ### 57. Live transcript auto-scroll yanks the user back down while they're reading
 
+**Status:** Resolved 2026-04-26 — added a `wasAtBottomRef` + `onScroll` handler to `LiveTab.tsx`. The auto-scroll effect now runs only when the user was within `FOLLOW_THRESHOLD_PX` (64 px) of the bottom **before** the new content arrived. Three new vitest cases pin: at-bottom auto-scrolls; reading-mode does not; resuming-after-read re-engages follow. 188/188 frontend tests pass.
+
+
 `frontend/src/components/LiveTab.tsx:70–74`:
 
 ```ts
@@ -724,4 +727,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
-| 57 | Live transcript auto-scroll yanks user back during reading | Medium | All | Open |

@@ -59,6 +59,13 @@ export function LiveTab() {
   const t = useT();
 
   const transcriptRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the user is currently "following live" — i.e. their
+  // scroll position is at (or within FOLLOW_THRESHOLD_PX of) the bottom of
+  // the transcript. Defaults to true so the very first lines auto-scroll.
+  // Once they scroll up to read older content, this flips to false and
+  // new lines/partials no longer yank them down. It flips back to true the
+  // moment they scroll back to within the threshold. See ISSUES.md #57.
+  const wasAtBottomRef = useRef(true);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -68,10 +75,23 @@ export function LiveTab() {
   }, [listeningEnabled, listeningStartedAt]);
 
   useEffect(() => {
-    if (transcriptRef.current) {
-      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    const el = transcriptRef.current;
+    if (el && wasAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [currentSession?.lines, currentSession?.pendingPartial]);
+
+  /** Threshold (px) within which the user is treated as "at the bottom"
+   *  for follow-live purposes. Picked so a single line of accidental
+   *  inertial overshoot still counts as following, but any deliberate
+   *  scroll-up to read older content (which usually moves the viewport
+   *  by more than one bubble) flips out of follow mode. */
+  const FOLLOW_THRESHOLD_PX = 64;
+  const handleTranscriptScroll = (e: React.UIEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    wasAtBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD_PX;
+  };
 
   const isOn = listeningEnabled === true;
   const headerLabel = isOn ? t('live.header.on') : t('live.header.off');
@@ -94,7 +114,12 @@ export function LiveTab() {
         </div>
       </header>
 
-      <main className="live-tab__main" ref={transcriptRef} aria-live="polite">
+      <main
+        className="live-tab__main"
+        ref={transcriptRef}
+        aria-live="polite"
+        onScroll={handleTranscriptScroll}
+      >
         {isOn && currentSession ? (
           <LiveTranscript
             lines={currentSession.lines}
