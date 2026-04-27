@@ -643,6 +643,55 @@ These branches survived the codebase ~unchanged since the API client was first w
 
 ---
 
+### 66. OpenAPI / Swagger UI is missing ~half the API surface
+
+`backend/actio-core/src/api/mod.rs:33-72` declares the OpenAPI doc with `#[derive(OpenApi)] paths(...)`. The `paths(...)` list registers **28** routes — speaker/session/segment/candidate-speaker/profile. CLAUDE.md (line 138) advertises `/docs` as the source of truth: *"Full request/response schemas live at http://localhost:3000/docs while the backend is running."*
+
+But `mod.rs` actually mounts **47 routes**. The 19 missing from OpenAPI cover entire user-facing API surfaces:
+
+```
+/reminders                  list / post
+/reminders/extract          post
+/reminders/:id              get / patch / delete
+/reminders/:id/trace        get
+/labels                     list / post
+/labels/:id                 patch / delete
+/settings                   get / patch
+/settings/llm/test          post
+/settings/models            get
+/settings/models/warmup     post
+/settings/models/:id        delete
+/settings/audio-devices     get
+/settings/llm/models        get
+/settings/llm/models/:id    delete
+/settings/llm/load          post
+/settings/llm/cancel-load   post
+/settings/llm/load-status   get
+/llm/translate              post
+/v1/models                  get      (OpenAI-compatible shim)
+/v1/chat/completions        post     (OpenAI-compatible shim)
+/clips                      get
+```
+
+Counts confirm: `grep -c '#[utoipa::path' actio-core/src/api/*.rs` shows `reminder.rs:1` and zero in `label.rs`, `settings.rs`, `llm.rs`, `translate.rs`, `clip.rs`. The single annotation in `reminder.rs` isn't even in the `paths(...)` list, so it's a dangling doc-comment that doesn't render.
+
+A new contributor opening `/docs` to learn the API gets a misleading partial picture — they see the speaker/segment ceremony but not the reminders + labels CRUD that's the actual app's core. The frontend's `actio-api.ts` was hand-written against the backend with no OpenAPI cross-check, which is workable today but fragile when the schemas diverge.
+
+The selection of *what* to document looks accidental: speaker enrollment got annotated as part of its feature work; reminders/labels/settings predate the OpenAPI introduction and never got back-filled. Not a directional decision — just unfinished.
+
+**Severity:** Low · **Platform:** All · **Type:** docs · **Scope:** medium — adding `#[utoipa::path]` + `ToSchema` to 20+ handlers and their request/response types, plus extending `paths(...)` and `components(schemas(...))` in `api/mod.rs`. Each handler is mechanical; the volume is the cost.
+
+**Acceptance:**
+1. Each of the 19 routes above has a `#[utoipa::path]` annotation with `responses(...)` covering at minimum the success status and the `AppApiError` shape.
+2. Request bodies and DTOs (`BackendReminderDto`, `BackendLabelDto`, `LabelDraft`, `SettingsPatch`, `LlmLoadRequest`, etc.) derive `utoipa::ToSchema` and are included in `components(schemas(...))`.
+3. `paths(...)` in `api/mod.rs` lists the new entries.
+4. Visiting `/docs` while the backend is running shows the full surface; the existing speaker/segment routes still render correctly.
+5. `cargo test -p actio-core --lib` 214/214 stays green; no new test failures from the schema derives.
+
+Lower-cost incremental option: tackle one route group per tick (reminders, labels, settings/*, llm/*, translate, clips, v1/*) — six small commits instead of one large one. The acceptance can be split that way too if the user prefers smaller units.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1052,3 +1101,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 66 | OpenAPI missing ~half the API surface (reminders, labels, settings, …) | Low | All | Open |
