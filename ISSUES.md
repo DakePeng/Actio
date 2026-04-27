@@ -1009,6 +1009,8 @@ While extending coverage in this file, consider also pinning `computeLabelCounts
 
 ### 73. Dead exports in `utils/labels.ts` (`computeLabelCounts`, `BUILTIN_LABELS`)
 
+**Status:** Resolved 2026-04-27 — deleted `BUILTIN_LABELS` (8 hardcoded labels, predates backend seeding) and `computeLabelCounts` (zero callers; only referenced by an old plan doc) from `frontend/src/utils/labels.ts`. `getLabelById` (the actually-used export) stays. 214/214 frontend tests still pass; tsc clean. Bundle delta is ~negligible (Vite/Rollup were already tree-shaking the unused exports — the cleanup is source-level clarity rather than a runtime win, which is the right outcome and confirms the dead-code finding).
+
 `frontend/src/utils/labels.ts` exports three things; only `getLabelById` is actually used. The other two are residue from an earlier design:
 
 ```ts
@@ -1449,4 +1451,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 73 | Dead exports in `utils/labels.ts` | Low | All | Open |
