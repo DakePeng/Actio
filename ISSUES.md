@@ -1140,6 +1140,90 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 86. `engine/audio_capture.rs` resampler + downmix helpers have zero unit tests despite carrying real edge cases
+
+**Status:** Open · **Found:** 2026-04-27
+
+`backend/actio-core/src/engine/audio_capture.rs` (285 lines) has zero `#[cfg(test)]` blocks, but two of its private helpers are *pure functions* with non-trivial edge cases that nothing else in the workspace exercises:
+
+**1. `resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32>` (line 56-72).** Linear interpolation between adjacent samples. Edge cases that should be pinned:
+
+| Case | Expected behaviour | Risk if regressed |
+|------|-------------------|------------------|
+| `from_rate == to_rate` | Returns `input.to_vec()` (identity) | Wasteful 1:1 interpolation that introduces floating-point noise. |
+| Empty input | Returns empty | `idx.min(input.len() - 1)` overflows when `len == 0`. |
+| Single-sample input | Returns ~1 sample at the new rate | Same overflow path. |
+| 48 kHz → 16 kHz (production path) | Output length is `ceil(input.len() / 3)`, monotonic | Off-by-one would shift the audio by 1 sample per chunk → cumulative drift. |
+| 16 kHz → 48 kHz (upsampling) | Output is 3× length, smoothly interpolated | The same code handles both directions; needs verification. |
+| Last sample at the boundary | `(idx + 1).min(input.len() - 1)` clamp prevents OOB | The clamp is the only thing keeping the resampler from panicking. |
+
+**2. `process_chunk(data, device_channels, device_rate, cb_tx, metrics)` (line 76-103).** The capture-callback hot path. Pure with respect to its inputs (writes go to a `crossbeam_channel::Sender` and `Arc<AudioCaptureMetrics>` counters). Edge cases:
+
+| Case | Expected behaviour |
+|------|-------------------|
+| `device_channels == 1` | Mono passthrough — no downmix allocation. |
+| `device_channels == 2` | Frames are `[L, R, L, R, …]`; output averages each pair. |
+| `device_channels == 6` (5.1 surround) | Each 6-frame chunk averages to one mono sample. |
+| `device_rate == 16000` | Skip resample (no interpolation noise on the no-op path). |
+| `cb_tx` is full | Drop counter increments by 1; success counter does NOT increment. |
+| `cb_tx` succeeds | Success counter += `resampled.len()`; drop counter unchanged. |
+
+The metrics counters (`frames_captured`, `frames_dropped`) are observable from the rest of the engine — if `process_chunk` regresses on either path the diagnostic numbers shipped to the metrics endpoint go silently wrong.
+
+**Why this matters more than typical "no tests on a private fn":** these two helpers are on the **audio capture hot path**. Every microphone frame the user records gets routed through both. A regression would either drop audio, skew timing across the entire pipeline (resample drift), or corrupt the diagnostic counters operators rely on. And neither helper interacts with cpal — they're 100% unit-testable with hand-built input vectors and a `crossbeam_channel::bounded(N)` channel.
+
+**Severity:** Low · **Platform:** All · **Type:** test · **Scope:** small (one new `#[cfg(test)] mod tests` block in `audio_capture.rs`, ~80-120 LoC, ~10 tests)
+
+**Proposed direction — minimum viable test set:**
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::bounded;
+
+    // ── resample_linear ─────────────────────────────────────────────
+    #[test] fn resample_identity_when_rates_match() { … }
+    #[test] fn resample_empty_returns_empty() { … }
+    #[test] fn resample_single_sample_does_not_panic() { … }
+    #[test] fn resample_48k_to_16k_outputs_third_length_monotonic() { … }
+    #[test] fn resample_16k_to_48k_outputs_triple_length_interpolated() { … }
+    #[test] fn resample_last_sample_clamp_no_oob() { /* feed exact-multiple input, assert no panic */ }
+
+    // ── process_chunk ───────────────────────────────────────────────
+    #[test] fn process_chunk_mono_passthrough() { … }
+    #[test] fn process_chunk_stereo_averages_pairs() { … }
+    #[test] fn process_chunk_six_channel_averages_to_mono() { … }
+    #[test] fn process_chunk_resample_skipped_at_16k() { /* verify by length */ }
+    #[test] fn process_chunk_full_channel_increments_dropped_counter() {
+        let (tx, _rx) = bounded(0);  // immediately full
+        let metrics = AudioCaptureMetrics { /* zeroed */ };
+        process_chunk(&[0.5; 100], 1, 16000, &tx, &metrics);
+        assert_eq!(metrics.frames_dropped.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.frames_captured.load(Ordering::Relaxed), 0);
+    }
+    #[test] fn process_chunk_success_increments_captured_counter() {
+        let (tx, _rx) = bounded(8);
+        let metrics = AudioCaptureMetrics { /* zeroed */ };
+        process_chunk(&[0.5; 100], 1, 16000, &tx, &metrics);
+        assert_eq!(metrics.frames_captured.load(Ordering::Relaxed), 100);
+        assert_eq!(metrics.frames_dropped.load(Ordering::Relaxed), 0);
+    }
+}
+```
+
+Note that `AudioCaptureMetrics` (line 37) and `process_chunk` are private (`pub(crate)` / non-`pub`); the tests sit in the same module so they have access without widening visibility.
+
+**Acceptance:**
+1. New `mod tests` block in `engine/audio_capture.rs` with at least the 12 cases sketched above (or equivalent coverage of all edge cases listed in the tables).
+2. `cargo test -p actio-core --lib` test count goes 210 → 222 (or thereabouts; one per test).
+3. `cargo clippy -p actio-core --all-targets` lib warning count: same or lower.
+4. No new `pub` exports needed — tests are in-module.
+
+**Out of scope:** the `start_capture` integration path itself (touches cpal, host devices, real streams). That requires an integration harness with mocked cpal — not a one-tick fix. #86 is the pure-helper coverage only.
+
+---
+
 ### 85. `Card.tsx` calls 32 hooks AFTER a conditional early return — Rules-of-Hooks violation that fires on every auto-extract
 
 **Status:** Resolved 2026-04-27 — extracted the skeleton JSX into a new `frontend/src/components/CardSkeleton.tsx` (1 hook, `useT` only). Dropped the `if (reminder.isExtracting) return …` block from `Card.tsx`; its hook list is now unconditional. Updated the only consumer, `Board.tsx`, to branch at the call site: `reminder.isExtracting` → `<CardSkeleton key={reminder.id} />`, otherwise → `<Card …>`. Two distinct components, two distinct hook lists, no order corruption. New `Card.skeleton-transition.test.tsx` mounts a Board with one extracting reminder, asserts the skeleton renders, flips `isExtracting: false` via store update, asserts the real card renders, AND uses `vi.spyOn(console, 'error')` to assert no "Rendered more hooks" / "Rules of Hooks" / "change in the order of Hooks" warning fired. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 230 → 231, `pnpm build` succeeded.
