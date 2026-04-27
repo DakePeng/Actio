@@ -396,6 +396,52 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 57. Live transcript auto-scroll yanks the user back down while they're reading
+
+`frontend/src/components/LiveTab.tsx:70–74`:
+
+```ts
+useEffect(() => {
+  if (transcriptRef.current) {
+    transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+  }
+}, [currentSession?.lines, currentSession?.pendingPartial]);
+```
+
+This unconditionally jumps to the bottom every time `lines` or `pendingPartial` changes. Two problems:
+
+1. **`pendingPartial` updates many times per second during active speech** (each ASR partial fires a store mutation). Combined with the React reference-equality check on the dep array, this effect runs roughly at the partial cadence. Every time it does, `scrollTop = scrollHeight` is applied.
+2. **No "user is reading" guard.** If the user scrolls up mid-meeting to revisit an earlier point, the next partial yanks them back to the bottom. They can't read the past five minutes without pausing the session.
+
+The standard "follow when at bottom, freeze when reading" pattern: capture whether `scrollTop + clientHeight` is within a small threshold of `scrollHeight` (say 64 px) **before** the new content lands; only re-apply auto-scroll if the user was already there.
+
+```ts
+const wasAtBottom = useRef(true);
+const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+  const el = e.currentTarget;
+  wasAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+};
+useEffect(() => {
+  if (wasAtBottom.current && transcriptRef.current) {
+    transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+  }
+}, [currentSession?.lines, currentSession?.pendingPartial]);
+```
+
+Wire `onScroll` to the `<main>` element. The check runs before the imperative scroll, so manual scroll-up freezes the follow until the user comes back near the bottom.
+
+Bonus: a small "Jump to live" button could appear when `wasAtBottom` is false, mimicking Slack/Discord. Out of scope for the minimum fix.
+
+**Severity:** Medium · **Platform:** All · **Type:** ui (bug-shaped UX gap) · **Scope:** small (one ref, one onScroll handler, one conditional in the existing effect)
+
+**Acceptance:**
+1. With the user at the bottom of the transcript, new lines/partials still auto-scroll.
+2. With the user scrolled up by more than ~64 px, new lines/partials do **not** scroll the view; the read position is preserved.
+3. Once the user manually scrolls back to within 64 px of the bottom, auto-scroll resumes.
+4. Existing tests still pass; ideally add a vitest using `Object.defineProperty` to mock `scrollHeight`/`scrollTop`/`clientHeight` and assert the conditional.
+
+---
+
 ### 56. Doc-comment drift: `clip_retention_days` is not actually replaced by `audio_retention_days`
 
 **Status:** Resolved 2026-04-26 — both `clip_retention_days` and `audio_retention_days` doc-comments rewritten to call out the coexistence and the Plan Task 17 retirement reference. `cargo check` clean; no behaviour change.
@@ -678,3 +724,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 57 | Live transcript auto-scroll yanks user back during reading | Medium | All | Open |
