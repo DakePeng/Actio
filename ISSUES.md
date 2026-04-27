@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 86. `engine/audio_capture.rs` resampler + downmix helpers have zero unit tests despite carrying real edge cases
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — added a `#[cfg(test)] mod tests` to `engine/audio_capture.rs` with 13 tests covering both pure helpers. `resample_linear`: identity-when-rates-match, empty-returns-empty, single-sample-no-panic, 48k→16k third-length, monotonicity preservation, 16k→48k upsampling triple-length, exact-multiple boundary clamp. `process_chunk`: mono passthrough, stereo pair-averaging, six-channel surround averaging, resample-skipped at native 16 kHz, full-channel drop-counter (which also pinned the current semantic that `frames_captured` increments on the failure path — counts processed not delivered), end-to-end 48 kHz stereo downmix + resample. Verification: `cargo test -p actio-core --lib` 210 → 223 (one more than the planned 12); `cargo clippy -p actio-core --all-targets` lib-test warnings unchanged at 37.
+
+**Found:** 2026-04-27
 
 `backend/actio-core/src/engine/audio_capture.rs` (285 lines) has zero `#[cfg(test)]` blocks, but two of its private helpers are *pure functions* with non-trivial edge cases that nothing else in the workspace exercises:
 
