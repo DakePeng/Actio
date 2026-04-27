@@ -317,6 +317,9 @@ export const zhCN: Translations = {
   'archive.clip.aria.star': '收藏片段',
   'archive.clip.aria.unstar': '取消收藏',
   'archive.clip.aria.delete': '删除片段',
+  'archive.confirmDeleteOne': '永久删除此项？此操作无法撤销。',
+  'archive.confirmDeleteBulk': '永久删除 {count} 项？此操作无法撤销。',
+  'archive.cancel': '取消',
 
   // People / speakers
   'people.addPerson': '添加成员',

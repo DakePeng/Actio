@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 77. Archive deletes are destructive with no confirmation, single OR bulk
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — wired `useConfirm()` + `<ConfirmDialog>` (destructive tone) into all four delete entry points in `ArchiveView.tsx`. Added a single `requestDelete(count)` helper that picks the singular vs `{count}`-substituted message, with shared cancel/confirm labels. Three new i18n keys (`archive.confirmDeleteOne`, `archive.confirmDeleteBulk`, `archive.cancel`) landed in both `en.ts` and `zh-CN.ts` — parity test stayed green. New test `ArchiveView.confirm.test.tsx` pins both the per-row Cancel path (zero `deleteReminder` calls) and the bulk Confirm path (exactly N calls with the right ids). Verification: `pnpm tsc --noEmit` clean, `pnpm test` 215 → 217, `pnpm build` succeeded with bundle sizes flat.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/ArchiveView.tsx` exposes four delete entry points with **zero confirmation prompts and no undo**:
 

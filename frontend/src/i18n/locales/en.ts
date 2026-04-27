@@ -317,6 +317,9 @@ export const en = {
   'archive.clip.aria.star': 'Star clip',
   'archive.clip.aria.unstar': 'Unstar clip',
   'archive.clip.aria.delete': 'Delete clip',
+  'archive.confirmDeleteOne': 'Permanently delete this item? This cannot be undone.',
+  'archive.confirmDeleteBulk': 'Permanently delete {count} items? This cannot be undone.',
+  'archive.cancel': 'Cancel',
 
   // People / speakers
   'people.addPerson': 'Add person',
