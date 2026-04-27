@@ -1083,6 +1083,61 @@ External consumers import the *function* (`fetchProfile`, `translateLines`) and 
 
 ---
 
+### 75. `LlmSettings` swallows `patchLlmSettings` errors on two paths, divorcing UI state from server state
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/settings/LlmSettings.tsx` has three sibling paths that persist a `LlmSelection` change. Two of them route through `handleSelectionChange` (lines 157–177), which captures errors into `setError(...)` so a failed save surfaces as red text inline. The other two skip that wrapper and use `.catch(() => {})` — meaning a failed save silently leaves the radio looking selected while the backend still has the prior value.
+
+**The inconsistency, side-by-side:**
+
+```ts
+// "Disabled" radio (line 232) — error-aware
+onChange={() => handleSelectionChange({ kind: 'disabled' })}
+
+// "Local" radio (line 241) — error-silent
+onChange={() => {
+  setSelection({ kind: 'local', id: '' });
+  patchLlmSettings({ selection: { kind: 'local', id: '' } }).catch(() => {});
+}}
+
+// "Remote" radio (line 253) — error-aware
+onChange={() => handleSelectionChange({ kind: 'remote' })}
+```
+
+The same anti-pattern shows up in `cancelAndUnselect` (line 294–300):
+
+```ts
+const cancelAndUnselect = async () => {
+  await cancelLlmLoad();
+  setLoadStatus({ state: 'idle' });
+  const cleared: LlmSelection = { kind: 'local', id: '' };
+  setSelection(cleared);
+  patchLlmSettings({ selection: cleared }).catch(() => {});  // ← swallowed
+};
+```
+
+**Why the duplication exists:** the Local-radio onChange duplicates the first half of `handleSelectionChange` because it knows `id: ''` doesn't need the load-status flow (`if (sel.kind === 'local' && sel.id)` is false). But that's exactly what `handleSelectionChange` already handles — it falls through to `setLoadStatus({ state: 'idle' })` for the no-id case. So the duplication is unnecessary.
+
+**Failure modes:**
+1. User clicks "Local" radio while offline / backend down. UI shows Local selected; backend still has Disabled/Remote. After page refresh, the Disabled/Remote radio reappears with no explanation.
+2. During `cancelAndUnselect`, the cancel succeeds against the load endpoint but the persistence-clear fails. Same divorce: UI shows cleared, backend still has the old `{ kind: 'local', id: '<x>' }`.
+
+**Severity:** Low · **Platform:** All · **Type:** bug (silent failure) / refactor · **Scope:** small (~6 LoC change in one file)
+
+**Proposed direction:**
+1. Replace the Local-radio onChange (lines 241–244) with `() => handleSelectionChange({ kind: 'local', id: '' })` — `handleSelectionChange` already handles the empty-id branch correctly.
+2. Convert `cancelAndUnselect`'s trailing `.catch(() => {})` into `try { await patchLlmSettings(...) } catch (e) { setError(e instanceof Error ? e.message : t('settings.llm.saveFailed')) }`. The user already saw `await cancelLlmLoad()` succeed; if the persistence clear fails, they need to know.
+
+**Acceptance:**
+1. Both error-silent paths (`onChange` Local radio, `cancelAndUnselect`) now route through `handleSelectionChange` or surface via `setError`.
+2. Add a vitest covering one of the two paths: stub `patchLlmSettings` to reject; assert the component renders the error message instead of leaving the radio in a phantom-selected state.
+3. `pnpm tsc --noEmit` clean; full `pnpm test` green.
+
+**Out of scope:** other `.catch(() => {})` in this file (e.g. `fetchLoadStatus().then(setLoadStatus).catch(() => {})` at line 141 — that's a status fetch with no UI commitment, swallow is defensible). Only state-persisting calls that diverge from sibling paths' behaviour are in scope here.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
