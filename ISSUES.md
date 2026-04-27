@@ -645,10 +645,9 @@ These branches survived the codebase ~unchanged since the API client was first w
 
 ### 66. OpenAPI / Swagger UI is missing ~half the API surface
 
-**Status:** Partial 2026-04-26 — `/reminders` (7 routes) and `/labels` (4 routes) slices landed. `paths(...)` extended with both groups; reminder request types + `ReminderTrace`/`ReminderTraceLine` added to `components(schemas(...))`. The dangling annotation on `get_reminder_trace` is now wired through. 214/214 backend lib tests pass at each slice; cargo check clean.
+**Status:** Partial 2026-04-26 — `/reminders` (7), `/labels` (4), and `/settings/*` (11) slices landed. The settings slice uses bodyless responses for the routes whose response shape (`AppSettings`, `ModelStatus`, `Vec<AsrModelInfo>`) is too sprawling to derive `ToSchema` cheaply — those routes are documented (path + status + tag) without the response schema, which is a deliberate trade-off; the simple shapes (`DownloadRequest`, `WarmupRequest`, `DeleteModelResult`, `LlmTestResult`, `DownloadTarget`, `AudioDeviceInfo`) do get `ToSchema` and render fully. 214/214 backend lib tests pass at each slice; cargo check clean.
 
-Remaining slices for follow-up ticks (one per group keeps the diffs auditable):
-- `/settings/*` (10 routes including the model + audio-devices subpaths)
+Remaining slices for follow-up ticks:
 - `/llm/translate` and `/v1/*` OpenAI-compat shim
 - `/clips`
 
@@ -1108,4 +1107,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 66 | OpenAPI gaps — settings / llm / clips still pending | Low | All | Partial — /reminders + /labels done; 3 surfaces remain |
+| 66 | OpenAPI gaps — llm / clips still pending | Low | All | Partial — reminders + labels + settings done; 2 surfaces remain |

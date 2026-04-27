@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 /// Audio device info for API response
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct AudioDeviceInfo {
     pub name: String,
     pub is_default: bool,

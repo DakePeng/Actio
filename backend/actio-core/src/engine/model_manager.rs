@@ -20,7 +20,7 @@ use crate::engine::llm_catalog::DownloadSource;
 ///   "funasr_nano").
 /// - `Embedding(id)`: a specific speaker-embedding model from the catalog
 ///   (e.g. "campplus_zh_en", "eres2netv2", "titanet_small_en").
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 #[serde(tag = "type", content = "id", rename_all = "snake_case")]
 pub enum DownloadTarget {
     Shared,
