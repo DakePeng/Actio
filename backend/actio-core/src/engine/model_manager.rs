@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -648,20 +648,20 @@ fn files_for_target(target: &DownloadTarget) -> Result<Vec<ModelFile>> {
 }
 
 /// Check whether all files for a given model id are present on disk.
-fn model_downloaded(model_dir: &PathBuf, files: &[ModelFile]) -> bool {
+fn model_downloaded(model_dir: &Path, files: &[ModelFile]) -> bool {
     files.iter().all(|f| {
         let p = model_dir.join(f.dest_name);
         p.exists() && std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false)
     })
 }
 
-fn embedding_downloaded(model_dir: &PathBuf, def: &SpeakerEmbeddingModelDef) -> bool {
+fn embedding_downloaded(model_dir: &Path, def: &SpeakerEmbeddingModelDef) -> bool {
     let p = model_dir.join(def.dest_name);
     p.exists() && std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false)
 }
 
 /// Check whether a streaming transducer's files are present on disk.
-fn transducer_downloaded(model_dir: &PathBuf, prefix: &str) -> bool {
+fn transducer_downloaded(model_dir: &Path, prefix: &str) -> bool {
     let enc = model_dir.join(format!("{prefix}_encoder.int8.onnx"));
     let dec = model_dir.join(format!("{prefix}_decoder.int8.onnx"));
     let join = model_dir.join(format!("{prefix}_joiner.int8.onnx"));
@@ -1019,7 +1019,7 @@ impl ModelManager {
 /// Extract the bundled Silero VAD into `model_dir/silero_vad.onnx` if the
 /// file is missing or has zero size. Overwrites nothing — a user-deleted VAD
 /// can be restored simply by relaunching the app.
-fn ensure_bundled_vad(model_dir: &PathBuf) -> Result<()> {
+fn ensure_bundled_vad(model_dir: &Path) -> Result<()> {
     let dest = model_dir.join("silero_vad.onnx");
     let needs_write = match std::fs::metadata(&dest) {
         Ok(meta) => meta.len() == 0,
@@ -1037,7 +1037,7 @@ fn ensure_bundled_vad(model_dir: &PathBuf) -> Result<()> {
 /// Detect whether the shared files are already downloaded. With the VAD now
 /// bundled via `include_bytes!`, this should always be Ready after
 /// `ModelManager::new` runs. Kept for robustness in case extraction failed.
-fn detect_existing_status(model_dir: &PathBuf) -> ModelStatus {
+fn detect_existing_status(model_dir: &Path) -> ModelStatus {
     let shared_ok = SHARED_FILES
         .iter()
         .all(|f| model_dir.join(f.dest_name).exists());
@@ -1049,7 +1049,7 @@ fn detect_existing_status(model_dir: &PathBuf) -> ModelStatus {
     }
 }
 
-fn build_transducer(model_dir: &PathBuf, prefix: &str) -> Option<TransducerFiles> {
+fn build_transducer(model_dir: &Path, prefix: &str) -> Option<TransducerFiles> {
     let p = |suffix: &str| model_dir.join(format!("{prefix}_{suffix}"));
     let enc = p("encoder.int8.onnx");
     let dec = p("decoder.int8.onnx");
@@ -1067,7 +1067,7 @@ fn build_transducer(model_dir: &PathBuf, prefix: &str) -> Option<TransducerFiles
     }
 }
 
-fn build_paths(model_dir: &PathBuf, speaker_embedding_id: Option<&str>) -> ModelPaths {
+fn build_paths(model_dir: &Path, speaker_embedding_id: Option<&str>) -> ModelPaths {
     let opt = |name: &str| {
         let path = model_dir.join(name);
         if path.exists() {
@@ -1245,7 +1245,7 @@ fn rewrite_url(url: &str, source: DownloadSource) -> String {
 
 /// Download all files for a target, updating status along the way.
 async fn download_target(
-    model_dir: &PathBuf,
+    model_dir: &Path,
     target: &DownloadTarget,
     source: DownloadSource,
     status_arc: &Arc<RwLock<ModelStatus>>,
@@ -1280,7 +1280,7 @@ async fn download_target(
 async fn download_file_with_retry(
     client: &reqwest::Client,
     file: &ModelFile,
-    model_dir: &PathBuf,
+    model_dir: &Path,
     source: DownloadSource,
 ) -> Result<()> {
     let dest = model_dir.join(file.dest_name);
@@ -1362,4 +1362,3 @@ async fn do_download(
 
     Ok(())
 }
-

@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 76. Backend has 37 clippy warnings in `actio-core` lib (denied by the auto-improve script)
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** In-progress 2026-04-27 — batch 1 of 8 landed (`ptr_arg` sweep in `engine/model_manager.rs`, 7 sites converted from `&PathBuf` → `&Path`). Lib warnings 37 → 30; all 214 backend tests stay green. Remaining batches: `useless_conversion` in `api/ws.rs`, test-only `field_reassign_with_default` in `app_settings.rs`, `needless_update` in `diarization.rs`, `unnecessary_map_or`, `derivable_impls`, `unnecessary_cast`, singletons.
+
+**Found:** 2026-04-27
 
 `cd backend && cargo clippy --all-targets -- -D warnings` (the QUALITY-lane lint that the auto-improve loop runs) currently fails with **37 warnings in `actio-core` lib + 7 unique additional in `actio-core` lib tests + 2 in `actio-desktop`**. Cargo.toml has no `[lints]` section so plain `cargo clippy` only emits warnings (37 → exit 0); the `-D warnings` flag in the loop script is what flips them to errors.
 
