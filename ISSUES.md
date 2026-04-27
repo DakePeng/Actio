@@ -1140,6 +1140,91 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 82. `LabelManager` deletes labels with one click — silently cascades and untags every reminder using them
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/settings/LabelManager.tsx:86-93` renders the per-label delete affordance as a bare `×` button:
+
+```tsx
+<button
+  type="button"
+  aria-label={t('settings.labels.aria.delete', { name: displayName })}
+  onClick={() => void deleteLabel(label.id)}
+  …
+>
+  ×
+</button>
+```
+
+`deleteLabel` calls `DELETE /labels/:id` which runs `DELETE FROM labels WHERE id = ?1` (`backend/actio-core/src/repository/label.rs:102`). The `reminder_labels` join table has `label_id REFERENCES labels(id) ON DELETE CASCADE` (`migrations/001_initial_schema.sql:100`), so SQLite cascades and **silently strips that label from every reminder using it.**
+
+For a user with, say, 23 reminders tagged `Work`, clicking the `×` next to `Work`:
+- Drops the label from the picker.
+- Drops the chip from all 23 reminder cards.
+- Removes the row from `reminder_labels` for each of those 23 reminders.
+- Shows no toast, no count, no "are you sure?", no undo.
+
+The reminders themselves survive (their label list goes from `["work","urgent"]` to `["urgent"]`), but the classification work is gone.
+
+**Comparable patterns already established in this codebase:**
+
+| Surface | Pattern |
+|---------|---------|
+| Archive task delete (ISS-77, resolved) | `useConfirm()` + destructive tone + bulk-count message |
+| Candidate speaker dismiss (ISS-43, resolved) | `useConfirm()` + destructive tone |
+| ModelSetup model delete (ISS-43, resolved) | `useConfirm()` + destructive tone |
+| **Label delete (this issue)** | None — direct fire |
+
+LabelManager is the last destructive surface in Settings that hasn't migrated.
+
+**Why "with cascade count" beats a generic confirm:** the data the user needs to make the decision (how many reminders will lose this tag) is already in the store. `useStore((s) => s.reminders).filter(r => r.labels.includes(label.id)).length` is one selector call. No new API endpoint needed.
+
+**Severity:** Medium · **Platform:** All · **Type:** ui (broken affordance) / bug (silent data loss surface) · **Scope:** small (~25 LoC: import `useConfirm`, derive count in render, wrap onClick handler with confirm, render `<ConfirmDialog>` once at section root, add 1-2 i18n key pairs)
+
+**Proposed direction:**
+
+```ts
+const reminders = useStore((s) => s.reminders);
+const { confirm, dialogProps } = useConfirm();
+
+const handleDeleteLabel = async (label: Label) => {
+  const usage = reminders.filter((r) => r.labels.includes(label.id)).length;
+  const message = usage === 0
+    ? t('settings.labels.confirmDeleteUnused', { name: displayName })
+    : t('settings.labels.confirmDelete', { name: displayName, count: usage });
+  if (!await confirm(message, {
+    confirmLabel: t('settings.labels.delete'),
+    cancelLabel: t('archive.cancel'),  // re-use shared cancel
+    tone: 'destructive',
+  })) return;
+  void deleteLabel(label.id);
+};
+```
+
+**i18n:** two new keys in en + zh-CN (parity test enforces). Suggested copy:
+
+| Key | English | 简体中文 |
+|-----|---------|---------|
+| `settings.labels.confirmDelete` | `Delete the "{name}" label? It will be removed from {count} reminder(s).` | `删除"{name}"标签？将从 {count} 个提醒中移除该标签。` |
+| `settings.labels.confirmDeleteUnused` | `Delete the "{name}" label?` | `删除"{name}"标签？` |
+| `settings.labels.delete` | `Delete` | `删除` |
+
+(Reuse `archive.cancel` for the cancel label — already exists from ISS-77.)
+
+**Acceptance:**
+1. The per-row × button now routes through `useConfirm()` with `tone: 'destructive'`.
+2. The confirm message includes the cascade count when usage > 0; uses the shorter copy when usage === 0.
+3. Three new i18n keys (or two + reuse) in both `en.ts` and `zh-CN.ts` (parity test passes).
+4. Vitest pins one path: render with a label whose id is on 2 reminders, click the ×, assert the dialog message includes "2 reminder(s)" and `deleteLabel` is not called until Confirm fires.
+5. `pnpm tsc --noEmit` clean; `pnpm test` 225+/225+ green; `pnpm build` flat.
+
+**Out of scope (noted for visibility):**
+- The "no edit affordance" gap: `frontend/src/components/settings/AGENTS.md:24` claims `LabelManager` "handles … inline editing", but the current JSX has only delete + create — no rename, no recolor. Either the doc is stale or the feature was removed. Likely AGENTS.md drift covered by ISS-70; not part of #82.
+- The 12-color palette cap: once 12 labels exist, the color wheel is empty and no fallback path lets the user pick (or reuse) a color. Separate ticket if anyone hits the cap.
+
+---
+
 ### 81. Vestigial `#[allow(dead_code)]` annotations across actio-core hide either no-longer-dead code or true cruft
 
 **Status:** Resolved 2026-04-27 — dropped the no-longer-dead attributes on `AppApiError` (`api/error.rs:12`) and the `pub mod speaker_matcher;` declaration (`domain/mod.rs:1`); deleted the unused `chrono::SecondsFormat` import + the 3-line `_force_use_secs_format` helper from `engine/window_extractor.rs`. Verification: `cargo test -p actio-core --lib` stays 214/214; `cargo clippy -p actio-core --all-targets` lib warnings still 30 (no new warnings introduced — confirms the underlying items weren't dead, the attributes just lied). Total cleanup: -10 LoC.
