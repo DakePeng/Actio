@@ -1140,6 +1140,67 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 77. Archive deletes are destructive with no confirmation, single OR bulk
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/ArchiveView.tsx` exposes four delete entry points with **zero confirmation prompts and no undo**:
+
+| Surface | Line | Action |
+|--------|------|--------|
+| Per-row task delete | 297-306 | `void deleteReminder(reminder.id)` |
+| Bulk task delete | 250-252 | `bulkDeleteTasks` → forEach `deleteReminder` |
+| Per-clip delete | 438-450 | `deleteSegment(segment.id)` |
+| Bulk clip delete | 387-389 | `bulkDeleteClips` → forEach `deleteSegment` |
+
+`deleteReminder` (`store/use-store.ts:276`) issues `api.deleteReminder(id)` (server `DELETE /reminders/:id`), strips the row from in-memory state, and pushes a `'feedback.deletedPermanently'` toast. The toast is **informational, not actionable** — there's no undo button, no countdown, nothing reversible. `deleteSegment` (`store/use-voice-store.ts:924`) is local-only but identically irreversible.
+
+**Why this matters:**
+1. **Inconsistency with the rest of the app.** ISS-43 (resolved 2026-04-26) established `ConfirmDialog` + `useConfirm()` (`components/ConfirmDialog.tsx`) and wired it into the two prior destructive surfaces (`CandidateSpeakersPanel:9,151,210`, `settings/ModelSetup:3,92,545`). Archive sits alongside those as the third major destructive entry point but skipped the migration.
+2. **Bulk delete is the worst case.** Selecting 50 items + clicking the bulk Delete button = 50 instant DELETE calls. Mis-tap on an iPad or accidental double-click after a select-all means a measurable chunk of someone's archive is gone with one toast they can't act on.
+3. **Archive ≠ Trash.** From the user's mental model the items are *already* archived (i.e. removed from the active board). The Delete button here means "permanently destroy" — a step further. Users who don't read the button label twice can interpret it as "remove from this view," not "remove from the database."
+
+**Severity:** Medium · **Platform:** All · **Type:** ui (broken affordance) · **Scope:** small (~20 LoC: import `useConfirm`, wrap each of the 4 delete handlers, render `<ConfirmDialog {...dialogProps} />` once at root, add 4 i18n string pairs)
+
+**Proposed direction:** mirror the `CandidateSpeakersPanel` migration. Single deletes → confirm with destructive tone, single-item count. Bulk deletes → confirm with item count substituted into the message:
+
+```ts
+const { confirm, dialogProps } = useConfirm();
+// per-row
+const handleDeleteReminder = async (id: string) => {
+  if (!await confirm({
+    message: t('archive.confirmDeleteOne'),
+    confirmLabel: t('archive.action.delete'),
+    cancelLabel: t('common.cancel'),
+    tone: 'destructive',
+  })) return;
+  void deleteReminder(id);
+};
+// bulk
+const handleBulkDeleteTasks = async () => {
+  if (!await confirm({
+    message: t('archive.confirmDeleteBulk', { count: selectedTaskIds.size }),
+    confirmLabel: t('archive.action.delete'),
+    cancelLabel: t('common.cancel'),
+    tone: 'destructive',
+  })) return;
+  selectedTaskIds.forEach((id) => void deleteReminder(id));
+  setSelectedTaskIds(new Set());
+};
+```
+
+**i18n:** new keys `archive.confirmDeleteOne`, `archive.confirmDeleteBulk` (with `{count}` placeholder) land in BOTH `en.ts` and `zh-CN.ts` (parity test enforces it).
+
+**Acceptance:**
+1. All four delete entry points route through `useConfirm()` with `tone: 'destructive'`.
+2. New i18n keys present in en + zh-CN.
+3. Vitest covers at least one path: e.g. simulate bulk-delete-2 → assert no `deleteReminder` calls until confirm fires; cancel = zero calls; confirm = exactly N calls.
+4. `pnpm tsc --noEmit` clean; `pnpm test` green; `pnpm build` clean.
+
+**Out of scope (noted for visibility):** ArchiveView's tablist/tabpanel ARIA pattern is half-implemented — `role="tablist"` + `role="tab"` on the section buttons (lines 177-202), but the corresponding `<motion.div>` panels (lines 207, 319) lack `role="tabpanel"` + `aria-labelledby`. Same shape on the clip-filter group (line 332-343): `role="group"` is set, but the buttons lack `aria-pressed` to indicate which is active. Separate ticket; #77 is the destructive-action hole, not the a11y sweep.
+
+---
+
 ### 76. Backend has 37 clippy warnings in `actio-core` lib (denied by the auto-improve script)
 
 **Status:** In-progress 2026-04-27 — batch 1 of 8 landed (`ptr_arg` sweep in `engine/model_manager.rs`, 7 sites converted from `&PathBuf` → `&Path`). Lib warnings 37 → 30; all 214 backend tests stay green. Remaining batches: `useless_conversion` in `api/ws.rs`, test-only `field_reassign_with_default` in `app_settings.rs`, `needless_update` in `diarization.rs`, `unnecessary_map_or`, `derivable_impls`, `unnecessary_cast`, singletons.
