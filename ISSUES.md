@@ -605,6 +605,9 @@ This is a small gap on logic I just shipped — surfacing it as a separate issue
 
 ### 65. `mapBackendReminder` null-fallback branches are mostly untested
 
+**Status:** Resolved 2026-04-26 — extended `actio-api.test.ts` with 5 named cases (null title→description, null priority→medium, nullable string fields→undefined family, archived+null archived_at→updated_at fallback, open+non-null archived_at→archivedAt null). Refactored the existing test scaffold to use a `dto(over)` builder so each new case sets only the fields it cares about. 200 → 205 frontend tests; tsc clean.
+
+
 `frontend/src/api/actio-api.ts::mapBackendReminder` (lines 45-62) has four non-trivial null-coalescing branches that the existing test doesn't cover. The single test in `actio-api.test.ts` exercises the all-fields-populated archived path; nullable inputs slip through.
 
 ```ts
@@ -1049,4 +1052,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 65 | `mapBackendReminder` null-fallback branches untested | Low | All | Open |
