@@ -1140,6 +1140,61 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 78. `PreferencesSection` toggles use the legacy `.toggle` style — drift from the documented `.settings-check` pattern
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/components/settings/PreferencesSection.tsx:75,93` renders the **Notifications** and **Launch at login** toggles using the older three-element shape:
+
+```tsx
+<label className="toggle">
+  <input type="checkbox" checked={…} onChange={…} />
+  <div className="toggle__track" />
+  <div className="toggle__thumb" />
+</label>
+```
+
+Every *other* toggle in the codebase has migrated to the canonical `.settings-check` pattern documented in `CLAUDE.md`:
+
+> `settings-check` is an opt-in class. `input[type="checkbox"]` globally is unstyled; add `className="settings-check"` (and `role="switch" aria-checked={v}`) for the iOS-pill toggle.
+
+Audited call sites:
+
+| File | Line | Class | Has `role="switch"`? |
+|------|------|------|----------------------|
+| `components/settings/AudioSettings.tsx` | 306 | `settings-check` | yes |
+| `components/settings/AudioSettings.tsx` | 400 | `settings-check` | yes |
+| `components/PeopleTab.tsx` | 337 | `settings-check` | yes |
+| `components/settings/PreferencesSection.tsx` | 75 (Notifications) | `toggle` | **no** |
+| `components/settings/PreferencesSection.tsx` | 93 (Launch at login) | `toggle` | **no** |
+
+Both styles co-exist in `styles/globals.css`:
+- `.toggle` (lines 3254–3297) — 44×26, three sub-elements (`__track` + `__thumb`), no `:focus-visible` ring.
+- `.settings-check` (lines 4274–4312) — 36×20, single `::after` pseudo, has `:focus-visible` keyboard ring, has `:disabled` state.
+
+**User-facing consequence:**
+1. **Visual drift.** Settings → General → Preferences shows two slightly oversized toggles next to perfectly-sized ones in Settings → Voice (`AudioSettings`). Side-by-side they look like a half-finished refactor.
+2. **A11y gap.** The legacy `.toggle` instances lack `role="switch"` + `aria-checked`. Screen readers announce them as plain "checkbox," not "switch — on/off." NVDA/JAWS users get inconsistent navigation cues across the same Settings panel.
+3. **Focus indicator missing.** `.toggle` has no `:focus-visible` ring. Tab-key users can land on Notifications or Launch-at-login without any visible focus state — a WCAG 2.4.7 fail.
+4. **CLAUDE.md self-inconsistency.** The doc declares `settings-check` is the right pattern, but the highest-traffic settings section (the literal "Preferences" heading users hit first) ignores that.
+
+**Severity:** Low · **Platform:** All · **Type:** ui / a11y / refactor · **Scope:** small (~12 LoC: replace two `<label class="toggle">…three elements</label>` blocks with `<input className="settings-check" role="switch" aria-checked={v} … />`, plus delete now-unused `.toggle*` rules in globals.css if no other consumer remains)
+
+**Proposed direction:**
+1. In `PreferencesSection.tsx`, replace each `<label class="toggle">…</label>` with the same shape used in `AudioSettings.tsx:306` (raw `input.settings-check` with `role="switch"` + `aria-checked={value}` + `onChange`). Wrap with the existing `.settings-row` for layout — that's already the parent here.
+2. After both call sites migrate, grep again for `className="toggle"`. If zero hits, delete the `.toggle`, `.toggle input`, `.toggle__track`, `.toggle__thumb`, `.toggle input:checked + …`, `.toggle input:checked ~ …` rules from `globals.css` (lines 3254–3297). Saves ~600 bytes uncompressed in the production CSS.
+3. Confirm the existing `globals-css.test.ts` doesn't reference `.toggle` selectors (likely doesn't). Add a ParityCheck assertion if useful: e.g. "every setting toggle in any settings file uses `settings-check`".
+
+**Acceptance:**
+1. Both `PreferencesSection` toggles use `settings-check` + `role="switch"` + `aria-checked`.
+2. `grep -rE 'className="toggle"' frontend/src --include="*.tsx"` returns zero.
+3. If step 2 is true, the `.toggle*` rules in `globals.css` are removed; `pnpm build` shows the index CSS chunk shrinks (capture before/after sizes in the commit).
+4. `pnpm tsc --noEmit` clean; `pnpm test` 217/217 unchanged; `pnpm build` succeeds.
+
+**Out of scope:** the broader Settings-panel a11y sweep noted in #77's out-of-scope list (tablist/tabpanel pattern in ArchiveView). #78 is the toggle-style drift only.
+
+---
+
 ### 77. Archive deletes are destructive with no confirmation, single OR bulk
 
 **Status:** Resolved 2026-04-27 — wired `useConfirm()` + `<ConfirmDialog>` (destructive tone) into all four delete entry points in `ArchiveView.tsx`. Added a single `requestDelete(count)` helper that picks the singular vs `{count}`-substituted message, with shared cancel/confirm labels. Three new i18n keys (`archive.confirmDeleteOne`, `archive.confirmDeleteBulk`, `archive.cancel`) landed in both `en.ts` and `zh-CN.ts` — parity test stayed green. New test `ArchiveView.confirm.test.tsx` pins both the per-row Cancel path (zero `deleteReminder` calls) and the bulk Confirm path (exactly N calls with the right ids). Verification: `pnpm tsc --noEmit` clean, `pnpm test` 215 → 217, `pnpm build` succeeded with bundle sizes flat.
