@@ -490,6 +490,46 @@ Note: `batch_processor.rs` declares its `fresh_pool` as `pub(super) async fn` so
 
 ---
 
+### 62. Dead structs and functions hidden behind `#[allow(dead_code)]`
+
+A grep over `#[allow(dead_code)]` markers in `backend/actio-core/src/` surfaces a chain of items that are genuinely unused everywhere — the marker was masking real dead code rather than legitimate "used only behind a feature flag" suppression.
+
+Confirmed dead (`grep -rE '\b<sym>\b' actio-core/src --include='*.rs'` returns zero non-definition references):
+
+```
+domain/types.rs:20  pub struct SpeakerEmbedding   (DB-row shape — superseded by
+                                                   engine/diarization.rs's
+                                                   in-memory SpeakerEmbedding;
+                                                   wholly unreachable)
+domain/types.rs:45  pub struct AudioSegment       (zero references)
+domain/types.rs:110 pub struct NewTodo            (only used inside the
+                                                   also-dead repository/todo.rs
+                                                   functions below)
+repository/todo.rs  pub async fn has_todos        (the "backward-compat alias
+repository/todo.rs  pub async fn create_todos      route" the comment cites
+                                                   has been removed)
+```
+
+`get_todos_for_session` in `repository/todo.rs` is still alive (`api/session.rs` calls it), so the file shouldn't be deleted wholesale — only the two functions above plus the now-orphan `use crate::domain::types::NewTodo;` need to go.
+
+The `domain::types::SpeakerEmbedding` struct collides with the live `engine::diarization::SpeakerEmbedding` — keeping the dead one is also a small footgun. A grep for "SpeakerEmbedding" in the codebase returns hits across both, and the wrong one could land in an import via auto-suggest.
+
+**Severity:** Low · **Platform:** All · **Type:** dead-code / refactor · **Scope:** small
+
+**Acceptance:**
+1. Delete the three structs and the two functions.
+2. Remove the orphaned imports they leave behind (`use NewTodo` in `todo.rs`, the `#[allow(dead_code)]` markers on the deleted items).
+3. `cargo check -p actio-core --tests` clean — no new "unused import" warnings.
+4. `cargo test -p actio-core --lib` 214/214 still passes.
+5. The remaining `#[allow(dead_code)]` markers in the tree are spot-audited; if any other items have zero non-definition references, fold them into the same commit. Likely candidates from the same grep:
+   - `api/session.rs:571 #[allow(dead_code)]` — verify caller exists
+   - `engine/model_manager.rs:1367 #[allow(dead_code)]` — verify caller exists
+   - `engine/window_extractor.rs:1089 #[allow(dead_code)]` (test-mod scope) — likely harmless
+
+The audit step (#5) is the bonus; #1-4 are the core cleanup.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -899,3 +939,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 62 | Dead structs + functions behind `#[allow(dead_code)]` | Low | All | Open |
