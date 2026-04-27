@@ -398,6 +398,9 @@ No behaviour change; this is a comment-only fix.
 
 ### 59. `applyPendingResolutions` has no regression test — "identifying forever" fix is unprotected
 
+**Status:** Resolved 2026-04-26 — exported `applyPendingResolutions` plus three `__*ForTest` helpers (push, reset, count) and added 8 unit tests in `use-voice-store.resolutions.test.ts` covering: empty buffer no-op (referential identity preserved), midpoint-in-window match, no-clobber on already-resolved lines, out-of-window resolution stays buffered, single-pass-each across multiple matching lines, partial drain (only consumed entries are removed), null speaker_id (Unknown case), and the single-resolution-per-line `break` semantics. 196/196 frontend tests pass; 188 → 196 (+8).
+
+
 `frontend/src/store/use-voice-store.ts:372-398` implements a non-trivial speaker-resolution buffering algorithm: when a `speaker_resolved` event arrives for a transcript line that hasn't finalized yet (or that finalizes later out of order), the resolution is parked in a module-level `pendingResolutions` array and replayed against future-finalizing lines whose midpoint falls within the resolution's `[start_ms, end_ms]` window.
 
 CLAUDE.md (line 105) explicitly calls this out as the **fix for the "identifying forever" bug on short utterances**:
@@ -794,4 +797,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 59 | `applyPendingResolutions` has no regression test | Low | All | Open |
