@@ -5,7 +5,7 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, 
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::domain::types::{
     NewReminder, PatchReminderRequest, Reminder, ReminderFilter, ReminderTrace, ReminderTraceLine,
 };

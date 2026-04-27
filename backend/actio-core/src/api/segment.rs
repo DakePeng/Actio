@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::api::session::{tenant_id_from_headers, AppApiError};
+use crate::api::error::AppApiError;
+use crate::api::session::tenant_id_from_headers;
 use crate::domain::types::Speaker;
 use crate::AppState;
 

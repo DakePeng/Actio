@@ -1,5 +1,6 @@
 pub mod candidate_speaker;
 pub mod clip;
+pub mod error;
 pub mod label;
 pub mod llm;
 pub mod profile;
@@ -17,6 +18,7 @@ use axum::Router;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::api::error::AppApiError;
 use crate::api::segment::{
     AssignSegmentRequest, AssignSegmentResponse, ConfirmCandidateRequest, DismissCandidateRequest,
     NewSpeakerSpec, UnknownSegmentResponse, VoiceprintCandidateResponse,

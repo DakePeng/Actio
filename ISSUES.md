@@ -705,6 +705,9 @@ Lower-cost incremental option: tackle one route group per tick (reminders, label
 
 ### 67. `AppApiError` lives in `api/session.rs`; the unused `crate::error::AppError` shadows it
 
+**Status:** Resolved 2026-04-27 — picked option B. New `actio-core/src/api/error.rs` houses `AppApiError` (definition + `IntoResponse` impl). All 8 importers (the original 7 plus `segment.rs`, which had been pulling it via `use crate::api::session::{tenant_id_from_headers, AppApiError}`) now `use crate::api::error::AppApiError;`. The dead `crate::error::AppError` enum and its `error.rs` module file are deleted; `lib.rs` no longer declares the module. OpenAPI registration in `api/mod.rs` updated to import the new path. 214/214 backend lib tests pass; cargo check + cargo check --tests warning-free.
+
+
 Two related code-organization findings:
 
 **(a) Dead module: `crate::error::AppError`** — `backend/actio-core/src/error.rs` (10 lines) declares:
@@ -1167,4 +1170,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 67 | `AppApiError` parked in `session.rs`; dead `crate::error` | Low | All | Open |

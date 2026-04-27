@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::engine::llm_catalog::LocalLlmInfo;
 use crate::engine::local_llm_engine::LoadStatus;
 use crate::AppState;

@@ -22,7 +22,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::domain::types::ClipManifest;
 use crate::repository::audio_clip;
 use crate::AppState;

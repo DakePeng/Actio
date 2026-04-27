@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::repository::speaker as speaker_repo;
 use crate::AppState;
 

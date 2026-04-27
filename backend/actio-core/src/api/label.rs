@@ -3,7 +3,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use uuid::Uuid;
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::domain::types::{CreateLabelRequest, Label, PatchLabelRequest};
 use crate::repository::label as label_repo;
 use crate::AppState;

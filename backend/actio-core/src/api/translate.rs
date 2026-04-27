@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::engine::llm_router::LlmRouterError;
 use crate::engine::llm_translate::TranslateLineRequest;
 use crate::AppState;

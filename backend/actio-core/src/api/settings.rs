@@ -4,7 +4,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
-use crate::api::session::AppApiError;
+use crate::api::error::AppApiError;
 use crate::engine::app_settings::{AppSettings, SettingsPatch};
 use crate::engine::audio_capture::{self, AudioDeviceInfo};
 use crate::engine::model_manager::{AsrModelInfo, DownloadTarget, ModelStatus};
