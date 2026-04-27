@@ -1140,6 +1140,80 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 81. Vestigial `#[allow(dead_code)]` annotations across actio-core hide either no-longer-dead code or true cruft
+
+**Status:** Open · **Found:** 2026-04-27
+
+A grep for `#[allow(dead_code)]` across `backend/actio-core/src/` turns up exactly three sites — and each one is a different flavour of "should not exist anymore":
+
+**(1) `api/error.rs:12` — false positive, all variants now used.**
+
+```rust
+#[derive(Debug, ToSchema)]
+#[allow(dead_code)]
+pub enum AppApiError {
+    Internal(String),
+    BadRequest(String),
+    Conflict(String),
+}
+```
+
+The annotation was added defensively when the type was extracted in ISS-67 to silence false positives until call sites migrated. They have:
+
+- `Internal(...)` — used in `api/candidate_speaker.rs`, `api/label.rs`, `api/session.rs`, etc.
+- `BadRequest(...)` — used in `api/candidate_speaker.rs` (twice).
+- `Conflict(...)` — used in `api/session.rs` (5 sites).
+
+The `#[allow(dead_code)]` is misleading and should go.
+
+**(2) `domain/mod.rs:1` — false positive on a heavily-used module.**
+
+```rust
+#[allow(dead_code)]
+pub mod speaker_matcher;
+pub mod types;
+```
+
+`speaker_matcher` has 9+ consumer sites: `api/segment.rs`, `engine/continuity.rs`, `engine/inference_pipeline.rs` (multiple), `engine/live_enrollment.rs` (multiple). Probably also a leftover from an earlier extraction. Drop the attribute.
+
+**(3) `engine/window_extractor.rs:1094-1097` — a function that exists *only* to launder an unused `chrono::SecondsFormat` import.**
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::SecondsFormat;        // ← line 750
+    // …
+    // Unused import silencer for the parse path.
+    #[allow(dead_code)]
+    fn _force_use_secs_format() -> SecondsFormat {
+        SecondsFormat::Secs
+    }
+}
+```
+
+`git log -S "SecondsFormat"` shows the import + the `_force_use_secs_format` helper landed together in `87dba83` (always-listening pipeline + rolling window action extractor). Production code has never called `to_rfc3339_opts(SecondsFormat::Secs, ...)` or any related API in this file — `grep -c SecondsFormat` returns exactly **3** lines (the import, the function definition, the function body). The import is genuinely dead; the function is a 4-line band-aid that's lived for years to keep clippy quiet about it.
+
+**Severity:** Low · **Platform:** All · **Type:** refactor / cleanup · **Scope:** small (~10 LoC: drop two attributes + an unused import + a 3-line helper)
+
+**Proposed direction:**
+1. Delete `#[allow(dead_code)]` above `AppApiError` (`api/error.rs:12`).
+2. Delete `#[allow(dead_code)]` above `pub mod speaker_matcher;` (`domain/mod.rs:1`).
+3. Delete the `use chrono::SecondsFormat;` line and the `_force_use_secs_format` helper (`engine/window_extractor.rs:750, 1094-1097`).
+
+After all three drop:
+- `cd backend && cargo build -p actio-core --tests` should succeed without new warnings (verifying that `SecondsFormat` truly isn't referenced through any `mod` that re-exports it).
+- `cargo clippy -p actio-core --all-targets` should keep the same warning count as before *minus* whatever the bare attribute was suppressing — practically a 0-warning delta because none of the underlying items are dead anymore.
+
+**Acceptance:**
+1. Three locations cleaned per the diff above.
+2. `cd backend && cargo test -p actio-core --lib` stays at 214/214.
+3. `cargo clippy -p actio-core --all-targets` reports no *new* warning categories. (Existing ISS-076 backlog of 30 lib warnings is independent.)
+
+**Out of scope:** wider clippy backlog (ISS-076 batches) and the `#[allow(unused)]` / `#[allow(non_snake_case)]` family of annotations. #81 is the three `#[allow(dead_code)]` sites only.
+
+---
+
 ### 80. `StandbyTray.tray-transcript` combines `aria-live` with `aria-label` — streaming text never reaches screen readers
 
 **Status:** Resolved 2026-04-27 — split the responsibilities. The outer `.tray-transcript` div is now plain (no `role` / `aria-live` / `aria-label`). The inner `.tray-transcript__label` span carries `role="status" aria-live="polite"` (changes only between "Listening" and "Transcribing" — exactly two announcements per dictation cycle). The streaming viewport is `aria-hidden="true"` so the ~10×/sec partial mutations don't flood assistive tech; the consuming input element announces the final pasted text via its own focus/value changes. New `StandbyTray.aria-live.test.tsx` (4 tests) pins the structure: outer-no-aria, label-owns-live, viewport-hidden, label-text-flips-on-phase. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 221 → 225, `pnpm build` succeeded.
