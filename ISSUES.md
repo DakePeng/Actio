@@ -1140,6 +1140,80 @@ const cancelAndUnselect = async () => {
 
 ---
 
+### 88. `useFilteredReminders` + Board's sort rebuild O(N log N) work on every keyboard nav step
+
+**Status:** Open · **Found:** 2026-04-27
+
+`frontend/src/store/use-store.ts:536-540`:
+
+```ts
+export function useFilteredReminders() {
+  const reminders = useStore((state) => state.reminders);
+  const filter = useStore((state) => state.filter);
+  return filterReminders(reminders, filter);
+}
+```
+
+…called from `Board.tsx:41`, then sorted at `Board.tsx:60`:
+
+```ts
+const sorted = [...filtered].sort(sortByPriority);
+```
+
+Both `filterReminders(...)` and the `[...].sort(...)` run on **every Board render**, regardless of whether the inputs they depend on actually changed.
+
+**What causes Board to re-render?** The selectors there subscribe to:
+
+| Subscription | Re-render trigger |
+|--------------|-------------------|
+| `reminders` | Anything that mutates the list (server sync, optimistic update, archive, edit). |
+| `filter` | `setFilter`, `clearFilter`. |
+| `labels` | Label CRUD. |
+| `expandedCardId` | Every click-to-expand / click-to-collapse. |
+| `focusedCardIndex` | **Every j/k keyboard nav step.** |
+
+The last one is the worst offender. `useKeyboardShortcuts.ts:103-129` calls `setFocusedCard(...)` on every `j` (next) / `k` (prev) keystroke. Each press → `focusedCardIndex` changes → Board re-renders → `filterReminders` rebuilds the filtered array → `[...filtered].sort()` rebuilds the sorted array.
+
+For a power user holding `j` to scan through 100 reminders: **100 × (O(N) filter + O(N log N) sort)** — roughly 100 × 100 × log₂(100) ≈ 70,000 comparisons per second. None of that work is needed; the filter and reminder list haven't changed.
+
+**Secondary effect on `<Card>`:** because `filtered` and `sorted` are *new array references* every render, every Card inside the AnimatePresence loop sees a "new" `reminder` prop reference (well — the contents are the same `Reminder` objects from the store, so the Card props ARE reference-stable; React.memo on Card would catch this. But there's no React.memo on Card.) framer-motion's `<motion.div layout>` does additional work on every parent render.
+
+**Severity:** Low (works fine today at typical N) · **Platform:** All · **Type:** perf · **Scope:** small (~6 LoC: two `useMemo` wrappers)
+
+**Proposed direction:**
+
+1. In `use-store.ts`:
+
+   ```ts
+   import { useMemo } from 'react';
+   // …
+   export function useFilteredReminders() {
+     const reminders = useStore((state) => state.reminders);
+     const filter = useStore((state) => state.filter);
+     return useMemo(() => filterReminders(reminders, filter), [reminders, filter]);
+   }
+   ```
+
+2. In `Board.tsx`:
+
+   ```ts
+   const sorted = useMemo(() => [...filtered].sort(sortByPriority), [filtered]);
+   ```
+
+3. (Optional follow-up, NOT in scope here) wrap `Card` in `React.memo` so cards don't re-render on focus-step changes when their own props are equal — but only do this in a separate ticket since `Card` props include callbacks and `React.memo` does not work for them without `useCallback` plumbing on the parent.
+
+**Acceptance:**
+1. `useFilteredReminders` and Board's `sorted` are both `useMemo`-wrapped.
+2. Board renders during keyboard nav don't recompute the filter/sort — verifiable with a vitest that mounts Board with N reminders, runs `vi.fn()` on `filterReminders` (after spying via module mock), bumps `focusedCardIndex` 5 times via `setFocusedCard`, asserts the filter/sort spy ran exactly once total (the initial render).
+3. `pnpm tsc --noEmit` clean; `pnpm test` 231+/231+ green; `pnpm build` flat.
+4. Existing tests unchanged — this is a pure perf refactor.
+
+**Out of scope:**
+- Wrapping `<Card>` in `React.memo` (separate ticket; needs `useCallback` audit on Board's `onToggle`).
+- The `pendingReminders(reminders)` selector in `NeedsReviewView.tsx` — same shape (filterReminders-equivalent) but called from a less-hot path. Worth memoizing too, but #88 is Board only.
+
+---
+
 ### 87. CORS predicate uses `starts_with` without boundary checks — `http://localhost.evil.com` and `http://127.0.0.1.evil.com` are accepted
 
 **Status:** Resolved 2026-04-27 — replaced the inline predicate with two top-level helpers in `lib.rs`: `origin_starts_with_at_boundary(origin, prefix)` requires the byte after the prefix to be `None` (exact), `:` (port), or `/` (path); `is_allowed_actio_origin(origin)` composes the two Tauri schemes plus the boundary-checked loopback prefixes. The CORS predicate now reduces to `origin.to_str().map(is_allowed_actio_origin).unwrap_or(false)`. Added `mod cors_origin_tests` with two test cases covering 10 allowed origins (Tauri schemes, bare hosts, port suffixes including the dev port range and the port-discovery range, trailing-path forms) and 14 rejected origins (the two look-alike hostnames from the issue body, look-alike with port, look-alike with trailing slash, suffix garbage like `XYZ`, userinfo tricks, wrong scheme, unrelated origins, empty string). Verification: `cargo test -p actio-core --lib` 223 → 225; `cargo clippy -p actio-core --all-targets` lib-test warnings unchanged at 37.
