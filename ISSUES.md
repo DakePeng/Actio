@@ -533,6 +533,38 @@ The audit step (#5) is the bonus; #1-4 are the core cleanup.
 
 ---
 
+### 63. Reminders/labels client still bypasses port-fallback discovery
+
+When ISS-052 landed, two fetch sites were explicitly carved out as "uses the env-var shape, leave alone": `frontend/src/api/actio-api.ts:13` (the root reminders/labels client) and `frontend/src/components/NewReminderBar.tsx:9`. The carve-out reasoning was: production builds set `VITE_ACTIO_API_BASE_URL`, and dev usually has the backend on port 3000.
+
+Re-examining that with fresh eyes: the seven sites I fixed in #52 face the exact same scenario as these two — a developer running locally with another process holding port 3000 (so the backend lands on 3001-3009 via the existing port-discovery probe). The seven fixed sites now follow the fallback; these two still don't. Net: the **reminders / labels load+save flow**, which is the bulk of the app's actual work, fails silently when the backend isn't on 3000. The same code path that already works in `LlmSettings.tsx`, `AudioSettings.tsx`, etc. fails in the rest of the app.
+
+Concretely, `request` at `actio-api.ts:24-43` is an async function that today does:
+
+```ts
+const API_BASE_URL = (import.meta.env.VITE_ACTIO_API_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '');
+async function request<T>(path: string, init: RequestInit = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, { ... });
+  ...
+}
+```
+
+The shape mirrors `http.ts::requestJson` exactly except for the URL resolution. Switching to `await getApiUrl(path)` is a one-line change inside an already-async function — no API-shape ripple to the 30+ callers of `createActioApiClient()`.
+
+`NewReminderBar.tsx:9` is the same pattern: a single `SETTINGS_API_URL` constant feeding one fetch.
+
+**Severity:** Low · **Platform:** All · **Type:** refactor (extension of #52) · **Scope:** small (2 files, ~5 lines)
+
+**Acceptance:**
+1. `actio-api.ts::request` switches to `await getApiUrl(path)` and drops the local `API_BASE_URL` constant. Existing tests (`actio-api.test.ts`, etc.) still pass.
+2. `NewReminderBar.tsx`'s settings PATCH fetch switches to `await getApiUrl('/settings')`.
+3. `pnpm tsc --noEmit` clean; `pnpm test` 188+ pass.
+4. The carve-out note in #52 is updated to acknowledge that this followup also landed.
+
+(The `DEV_TENANT_ID` constant in `actio-api.ts:12` is unrelated — leave it.)
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -942,3 +974,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 63 | Reminders/labels client still bypasses port-fallback | Low | All | Open |
