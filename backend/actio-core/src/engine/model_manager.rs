@@ -1363,31 +1363,3 @@ async fn do_download(
     Ok(())
 }
 
-/// Extract a single named file from a tar.bz2 in-memory blob.
-#[allow(dead_code)]
-fn extract_bz2_tar(data: &[u8], inner_name: &str, dest: &PathBuf) -> Result<()> {
-    use bzip2::read::BzDecoder;
-    use tar::Archive;
-
-    let bz = BzDecoder::new(data);
-    let mut archive = Archive::new(bz);
-
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        let path = entry.path()?;
-        // Match filename (any directory prefix is ignored)
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if file_name == inner_name {
-            let mut out = std::fs::File::create(dest)
-                .with_context(|| format!("creating {}", dest.display()))?;
-            std::io::copy(&mut entry, &mut out)?;
-            return Ok(());
-        }
-    }
-
-    Err(anyhow!(
-        "Could not find '{}' inside tar.bz2 archive",
-        inner_name
-    ))
-}
-

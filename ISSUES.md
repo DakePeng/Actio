@@ -492,6 +492,9 @@ Note: `batch_processor.rs` declares its `fresh_pool` as `pub(super) async fn` so
 
 ### 62. Dead structs and functions hidden behind `#[allow(dead_code)]`
 
+**Status:** Resolved 2026-04-26 — deleted `domain::types::SpeakerEmbedding` (the colliding ghost), `AudioSegment`, and `NewTodo` structs; deleted `repository::todo::has_todos` and `create_todos` functions; deleted the `extract_bz2_tar` helper from the bonus audit (model_manager.rs:1367) along with its `bzip2` + `tar` direct-dependency entries in `actio-core/Cargo.toml`. The other two `#[allow(dead_code)]` markers (`api/session.rs:571 AppApiError`, `engine/window_extractor.rs:1089 _force_use_secs_format`) are legitimate (all 3 enum variants are used; underscore-prefixed import-silencer is intentional). 214/214 backend lib tests still pass; cargo check + cargo build clean.
+
+
 A grep over `#[allow(dead_code)]` markers in `backend/actio-core/src/` surfaces a chain of items that are genuinely unused everywhere — the marker was masking real dead code rather than legitimate "used only behind a feature flag" suppression.
 
 Confirmed dead (`grep -rE '\b<sym>\b' actio-core/src --include='*.rs'` returns zero non-definition references):
@@ -939,4 +942,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 62 | Dead structs + functions behind `#[allow(dead_code)]` | Low | All | Open |
