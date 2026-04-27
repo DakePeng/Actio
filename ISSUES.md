@@ -909,6 +909,50 @@ These are the AGENTS.md analogue of ISS-049 (CLAUDE.md) and ISS-069 (README) —
 
 ---
 
+### 71. `formatTimeShort` is unrendered-everywhere and untested
+
+`frontend/src/utils/time.ts::formatTimeShort` (32 lines) is the function rendered on every reminder card (Board, Needs-Review, Card.tsx, NeedsReviewView.tsx) for the "due time" display — and it has zero direct test coverage. `frontend/src/utils/__tests__/` only contains `platform.test.ts`.
+
+The function has 6+ branches with real edge cases:
+
+```ts
+if (diffMin < 0) {
+  if (absDiffMin < 1440) return timeStr;        // (1) past, same day
+  return `Due ${dayLabel()}`;                    // (2) past, older
+}
+if (diffMin < 60) return `In ${diffMin} min`;   // (3) imminent
+if (diffMin < 1440) return `${timeStr} today`;  // (4) later today
+if (diffDays === 1) return `Tomorrow at …`;     // (5) tomorrow
+if (diffDays <= 6) return `${dayLabel()} at …`; // (6) this week
+return d.toLocaleDateString(…);                  // (7) further out
+```
+
+Plus subtleties:
+- **`hours % 12 || 12`** — noon renders as `12 PM` (not `0 PM`), midnight as `12 AM`. A refactor that wrote `hours % 12` plain would render midnight as `0 AM`.
+- **`(now.getDay() + diffDays) % 7`** — week-day-name rollover. Sunday → +1 → Monday is straightforward; Friday → +3 → Monday should give "Monday", but a refactor that dropped `% 7` would index out of bounds.
+- **`Math.floor(diffMin / 1440)`** — DST nights have 23 or 25 hours; this divides by a fixed 1440 minutes. Acceptable for "due Tuesday" UX but worth knowing.
+- **`d.toLocaleDateString('en-US', …)`** — hardcoded `en-US` despite the bilingual UI. The Chinese locale renders dates differently; a `MMM D` of "Apr 27" doesn't translate to 中文. Probably intentional (the rest of the function uses English idioms like "Tomorrow" and "AM/PM" too — full i18n would be a bigger lift), but worth pinning the current behavior.
+
+A regression in any of these branches lands silently because nothing exercises them.
+
+**Severity:** Low · **Platform:** All · **Type:** test · **Scope:** small (extend or create `utils/__tests__/time.test.ts`)
+
+**Acceptance:**
+1. New `frontend/src/utils/__tests__/time.test.ts` under `vi.useFakeTimers()` (set a fixed `Date.now()` so `new Date()` inside the function is deterministic) covering at minimum:
+   - Past same-day → time string only
+   - Past older → `Due {dayName}` for 2-6 days back, `Due {dayName}` rolls over correctly
+   - Within an hour → `In N min` for N=1, 30, 59
+   - Later today → `h:mm AM/PM today`
+   - Tomorrow → `Tomorrow at h:mm AM/PM`
+   - This week (2-6 days out) → `{Monday|Tuesday|…} at h:mm AM/PM`
+   - Further out → `MMM D` formatted via `toLocaleDateString`
+   - 12-hour edge cases: noon → `12:00 PM`, midnight → `12:00 AM`, 1pm → `1:00 PM`, 11am → `11:00 AM`
+2. 205 → ~215 frontend tests, all green.
+
+While extending coverage in this file, consider also pinning `computeLabelCounts` (utils/labels.ts:16) — same accumulator pattern, 6 lines of logic, easy bonus. `getLabelById` and `sortByPriority` are too trivial to need direct tests.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1318,3 +1362,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 71 | `formatTimeShort` (every reminder card) untested | Low | All | Open |
