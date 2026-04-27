@@ -434,6 +434,9 @@ The `applyPendingResolutions` function is currently file-private (no `export`). 
 
 ### 61. 15 duplicate `fresh_pool()` test helpers across backend test modules
 
+**Status:** Resolved 2026-04-26 — added `actio-core/src/testing.rs` (compiled under `#[cfg(test)] pub mod testing;` in `lib.rs`) exposing the canonical `fresh_pool()`. All 14 sites now `use crate::testing::fresh_pool;` and dropped their local copies. Pruned the unused `run_migrations` / `SqlitePoolOptions` imports they pulled in solely for the helper. 214/214 backend lib tests still pass; `cargo check --tests` clean.
+
+
 `grep -rE "async fn fresh_pool" backend/actio-core/src` finds **15 identical definitions** of the in-memory-SQLite test helper:
 
 ```
@@ -896,4 +899,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 61 | 15 duplicate `fresh_pool()` test helpers in backend | Low | All | Open |

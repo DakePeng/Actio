@@ -891,22 +891,9 @@ mod tests {
     use super::*;
     use crate::domain::types::ClipManifestSegment;
     use crate::engine::clip_writer::write_manifest;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
     use tempfile::tempdir;
 
-    pub(super) async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    pub(super) use crate::testing::fresh_pool;
 
     pub(super) async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();

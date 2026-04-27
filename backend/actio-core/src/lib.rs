@@ -5,6 +5,9 @@ pub mod engine;
 pub mod error;
 pub mod repository;
 
+#[cfg(test)]
+pub mod testing;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

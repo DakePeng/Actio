@@ -365,21 +365,8 @@ fn clone_new_reminder(item: &NewReminder) -> NewReminder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     #[test]
     fn open_to_archived_sets_timestamp() {

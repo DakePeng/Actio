@@ -276,22 +276,9 @@ mod tests {
 
     use crate::engine::capture_daemon::{CaptureDaemon, CaptureEvent};
     use crate::engine::vad::SpeechSegment;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::SqlitePool;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();

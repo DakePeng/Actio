@@ -799,24 +799,11 @@ async fn handle_segment_embedding(
 mod tests {
     use super::*;
     use crate::engine::continuity::{ContinuityConfig, ContinuityState, MatchEvidence};
-    use crate::repository::db::run_migrations;
     use crate::repository::session::create_session as create_session_row;
     use crate::repository::speaker::create_speaker;
-    use sqlx::sqlite::SqlitePoolOptions;
     use std::path::PathBuf;
 
-    async fn fresh_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     #[tokio::test]
     async fn finalize_segment_carries_over_after_confirmed() {

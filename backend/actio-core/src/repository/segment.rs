@@ -342,22 +342,9 @@ pub async fn upsert_segment_for_clip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::db::run_migrations;
     use crate::repository::speaker::create_speaker;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     async fn insert_session(pool: &SqlitePool) -> String {
         let id = Uuid::new_v4().to_string();

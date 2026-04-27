@@ -200,23 +200,10 @@ mod tests {
     use crate::domain::types::{ClipManifest, ClipManifestSegment};
     use crate::engine::clip_writer::{write_manifest, write_segment_wav};
     use crate::repository::audio_clip;
-    use crate::repository::db::run_migrations;
-    use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::SqlitePool;
     use tempfile::tempdir;
 
-    async fn fresh_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_migrations(&pool).await.unwrap();
-        pool
-    }
+    use crate::testing::fresh_pool;
 
     async fn mk_session(pool: &SqlitePool) -> Uuid {
         let sid = Uuid::new_v4();
