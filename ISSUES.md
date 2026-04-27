@@ -807,6 +807,41 @@ Bonus: a one-line note in the root README.md (if one exists; otherwise the close
 
 ---
 
+### 69. README drift — `.env` example, port semantics, embedding dims
+
+`README.md` accumulated several misalignments with current code, surfaced while reviewing it after the ISS-068 env-template work landed:
+
+**(a) `HTTP_PORT=3000` in the README's example `.env`** (line 92):
+
+```
+Optional `.env` in `backend/`:
+HTTP_PORT=3000
+```
+
+`HTTP_PORT` doesn't exist in the codebase — `grep -rE "HTTP_PORT" backend/` returns zero. The server listens on a hardcoded `127.0.0.1:3000` with port-fallback to 3001–3009 handled on the *frontend* via `getApiBaseUrl()`. My ISS-068 fix two ticks ago dropped `HTTP_PORT` from `backend/.env.example` precisely because it's dead, but the README still suggests setting it.
+
+**(b) Port-fallback not mentioned** (line 87): *"serves on http://localhost:3000"*. True for the happy path, but the codebase has the 3000-3009 fallback shape that several recent issues (#52, #63) built around — a contributor whose port 3000 is taken would be confused.
+
+**(c) Embedding-dim drift** (line 38): *"Speaker embedding — 3D-Speaker (512-dim)"*. CLAUDE.md "Non-obvious patterns" explicitly says: *"Embedding dimension is per-model, not a single repo-wide constant. Five of six catalog models (CAM++ family + ERes2Net v2 + TitaNet) emit 192-dim vectors; ERes2Net Base emits 512-dim."* The README hardcodes 512 — a contributor reading it would assume embeddings are uniform.
+
+**(d) API surface drift** (line 64): the example bullet `POST /speakers/{id}/enroll-live/start` matches code; the listed `GET /enroll-live/status` doesn't (the actual path includes the speaker ID — verify against `api/mod.rs`).
+
+**(e) "Diarization — pyannote segmentation"** (line 39): the engine still references pyannote in `model_manager` paths, but the production diarization path uses cosine clustering against speaker embeddings (per CLAUDE.md's `batch_processor.rs` description). README's wording suggests pyannote does the segmentation itself, which understates the embedding-clustering reality.
+
+**Severity:** Low · **Platform:** All · **Type:** docs · **Scope:** small (rewrite ~5 lines in README)
+
+**Acceptance:**
+1. Drop `HTTP_PORT=3000` from the README example `.env` block. Replace with a one-line note that port-fallback (3000–3009) is handled by the frontend's `getApiBaseUrl()` discovery probe.
+2. Update line 87 to mention "with fallback to 3001–3009 if held".
+3. Soften line 38 to "Speaker embedding — 3D-Speaker family (192- or 512-dim depending on model — see CLAUDE.md Non-obvious patterns)".
+4. Verify line 64's `/enroll-live/status` path against `api/mod.rs` and correct if drifted.
+5. Soften line 39 to mention that production diarization is cosine-clustered embeddings, with pyannote files retained for the legacy / future segmentation path.
+6. `cargo build` / `pnpm build` are unaffected — README changes only.
+
+This is the natural follow-up to ISS-068: now that the env templates are accurate, the README's parallel claims should match.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1216,3 +1251,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 69 | README drift — `.env`, ports, embedding dims | Low | All | Open |
