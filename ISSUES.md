@@ -570,6 +570,9 @@ The shape mirrors `http.ts::requestJson` exactly except for the URL resolution. 
 
 ### 64. `pushFeedback` lifetime branch (actionable vs plain) has no test
 
+**Status:** Resolved 2026-04-26 — added `use-store.feedback.test.ts` with 4 vitest cases under `vi.useFakeTimers()`: plain auto-dismiss at 2200 ms (boundary tested at 2199 / 2200), actionable survives to 5000 ms (boundaries at 4999 / 5000, plus assertion that the Undo callback is the user's choice and auto-dismiss must not fire it), replace-in-flight cancels the prior timer (the second `setFeedback`'s window applies, not the first's), and `clearFeedback` cancels the timer (advancing time after clear doesn't fire a stale callback). 196 → 200 frontend tests pass.
+
+
 `frontend/src/store/use-store.ts::pushFeedback` (added/extended for the undo-toast work in ISS-054) has a load-bearing conditional that picks the toast lifetime:
 
 ```ts
@@ -1009,4 +1012,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 64 | `pushFeedback` lifetime branch has no test | Low | All | Open |
