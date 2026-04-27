@@ -396,6 +396,44 @@ No behaviour change; this is a comment-only fix.
 
 ---
 
+### 56. Doc-comment drift: `clip_retention_days` is not actually replaced by `audio_retention_days`
+
+`backend/actio-core/src/engine/app_settings.rs` documents the relationship between two retention settings:
+
+```rust
+/// Per-clip WAV files older than this many days are swept by the
+/// background cleanup task. Replaces the per-failed-segment retention
+/// path that used `clip_retention_days`.
+#[serde(default = "default_audio_retention_days")]
+pub audio_retention_days: u32,
+```
+
+But `lib.rs:317–321` immediately contradicts this:
+
+```rust
+//   1. Nested clip-dir cleanup — sweeps <clips_dir>/<session>/<clip>/
+//      every hour, removes whole clip directories older than
+//      `audio.audio_retention_days` (default 14). Distinct from the
+//      legacy flat-dir voiceprint candidate sweep above; both run
+//      until Plan Task 17 retires the legacy infra.
+```
+
+Both retention paths are alive concurrently:
+
+- `clip_retention_days` (default 3) → `clip_storage::start_cleanup_task` → flat-dir sweep at `<clips_dir>/` for legacy voiceprint candidates (`lib.rs:194-195`).
+- `audio_retention_days` (default 14) → `clip_storage::start_clip_dir_cleanup_task` → nested-dir sweep at `<clips_dir>/<session>/<clip>/` for batch-pipeline clips (`lib.rs:339-342`).
+
+The "Replaces" word in the doc comment misleads contributors into thinking `clip_retention_days` is dead and pruning it would be safe — when in fact `lib.rs:194` still reads it on every boot to schedule the legacy sweep.
+
+**Severity:** Low · **Platform:** All · **Type:** docs · **Scope:** small (2-line comment edit in `app_settings.rs`; optionally also a one-line note on `clip_retention_days`'s doc-comment that it's a legacy-data-path knob slated for removal in Plan Task 17)
+
+**Acceptance:**
+1. The `audio_retention_days` doc-comment is rewritten to say "Sweeps the nested per-clip directory tree from the batch pipeline. Coexists with the legacy `clip_retention_days` sweep until Plan Task 17 retires the legacy infra" (or similar — the key change is replacing "Replaces" with "Coexists with").
+2. Optionally extend `clip_retention_days`'s doc-comment with the same coexistence note + the Plan Task 17 reference, so contributors reading either field find the same story.
+3. `git diff` is `app_settings.rs`-only; no behavior change.
+
+---
+
 ### 55. Vite bundle warning persists — no `manualChunks` for vendor deps
 
 **Status:** Resolved 2026-04-26 — added `build.rollupOptions.output.manualChunks` to `vite.config.ts` with `vendor-react` and `vendor-motion` entries. Main bundle dropped from **542.11 kB → 399.88 kB (−26 %)**, the chunk-size warning is gone, and the new lazy chunks complement the `core-*.js`/`event-*.js`/`window-*.js` splits from #51. 185/185 tests pass; tsc clean.
@@ -637,3 +675,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 38 | `audio_capture.rs:84-86` device name NFC | Low | macOS | Open |
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
+| 56 | `clip_retention_days` doc says "replaced" but both sweeps still run | Low | All | Open |
