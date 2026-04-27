@@ -9,7 +9,6 @@ use axum::Json;
 use utoipa::ToSchema;
 
 #[derive(Debug, ToSchema)]
-#[allow(dead_code)]
 pub enum AppApiError {
     Internal(String),
     BadRequest(String),

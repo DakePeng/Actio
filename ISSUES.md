@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 81. Vestigial `#[allow(dead_code)]` annotations across actio-core hide either no-longer-dead code or true cruft
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — dropped the no-longer-dead attributes on `AppApiError` (`api/error.rs:12`) and the `pub mod speaker_matcher;` declaration (`domain/mod.rs:1`); deleted the unused `chrono::SecondsFormat` import + the 3-line `_force_use_secs_format` helper from `engine/window_extractor.rs`. Verification: `cargo test -p actio-core --lib` stays 214/214; `cargo clippy -p actio-core --all-targets` lib warnings still 30 (no new warnings introduced — confirms the underlying items weren't dead, the attributes just lied). Total cleanup: -10 LoC.
+
+**Found:** 2026-04-27
 
 A grep for `#[allow(dead_code)]` across `backend/actio-core/src/` turns up exactly three sites — and each one is a different flavour of "should not exist anymore":
 

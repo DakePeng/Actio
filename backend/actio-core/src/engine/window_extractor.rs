@@ -747,7 +747,6 @@ async fn fetch_attributed_lines_for_clip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::SecondsFormat;
 
     use crate::testing::fresh_pool;
 
@@ -1088,12 +1087,6 @@ mod tests {
         let s = format_attributed_transcript(&lines);
         assert!(s.contains("[01:01:05 • Alice]:"));
         assert!(s.contains("hello there"));
-    }
-
-    // Unused import silencer for the parse path.
-    #[allow(dead_code)]
-    fn _force_use_secs_format() -> SecondsFormat {
-        SecondsFormat::Secs
     }
 
     // ───────────────────────────────────────────────────────────────────
