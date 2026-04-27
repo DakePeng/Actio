@@ -1007,6 +1007,39 @@ While extending coverage in this file, consider also pinning `computeLabelCounts
 
 ---
 
+### 73. Dead exports in `utils/labels.ts` (`computeLabelCounts`, `BUILTIN_LABELS`)
+
+`frontend/src/utils/labels.ts` exports three things; only `getLabelById` is actually used. The other two are residue from an earlier design:
+
+```ts
+export const BUILTIN_LABELS: Label[] = [   // 8 lines — hardcoded
+  { id: 'work',     name: 'Work',     ... },
+  { id: 'urgent',   name: 'Urgent',   ... },
+  ...                                       // Personal / Health / Finance / Meeting
+];
+
+export function computeLabelCounts(...)    // 8 lines — accumulator
+```
+
+`BUILTIN_LABELS` predates the backend label seeding work (CLAUDE.md mentions "the six seeded default label names" — those live in `i18n/label-names.ts` and `repository::label::seed_defaults`). The frontend reads labels from the backend via `api/actio-api.ts::listLabels()`, never falling back to hardcoded ones. The export is unreachable.
+
+`computeLabelCounts` is referenced by exactly one file in the entire repo: `frontend/docs/superpowers/plans/2026-04-07-frontend-polish.md`, which is a plan doc that says *"Keep `getLabelById` and `computeLabelCounts` unchanged"*. The plan never landed the consumer; the function was added but no UI ever called it. Same shape as the `repository::todo::has_todos` case in ISS-062 — a function preserved for a "the alias route uses it" comment that itself is stale.
+
+Plus during ISS-071 I noted `computeLabelCounts` as a "bonus while there" target. Re-checking now shows there's nothing to bonus into — it's not called.
+
+**Severity:** Low · **Platform:** All · **Type:** dead-code · **Scope:** small (delete ~14 lines + the `Label` type import if it becomes unused)
+
+**Acceptance:**
+1. Delete the `BUILTIN_LABELS` constant and the `computeLabelCounts` function from `frontend/src/utils/labels.ts`. Keep `getLabelById`.
+2. Drop the `import type { Label }` if `getLabelById`'s signature no longer needs it (it does — leave the import).
+3. `pnpm tsc --noEmit` clean — no other file imports the deleted symbols, so this should just compile.
+4. `pnpm test` 214/214 unchanged.
+5. `pnpm build` — main bundle should drop by ~0.3 kB (the static `BUILTIN_LABELS` array was being included in the entry chunk).
+
+The plan doc reference (`2026-04-07-frontend-polish.md`) is in `frontend/docs/` and refers to past intent — leave it as-is rather than rewriting it; the doc is a historical artifact.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1416,3 +1449,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 73 | Dead exports in `utils/labels.ts` | Low | All | Open |
