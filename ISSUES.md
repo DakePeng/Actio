@@ -809,6 +809,16 @@ Bonus: a one-line note in the root README.md (if one exists; otherwise the close
 
 ### 69. README drift — `.env` example, port semantics, embedding dims
 
+**Status:** Resolved 2026-04-27 — README updated:
+
+- (a) Dropped `HTTP_PORT=3000` from the example `.env` block (the var is dead in code). Added a paragraph framing the env vars as bootstrap-only and pointing at `backend/.env.example` for the canonical list.
+- (b) Both the "serves on…" line and the "Default HTTP port" callout now mention the 3001–3009 fallback handled by `getApiBaseUrl()`.
+- (c) Speaker-embedding bullet now says "3D-Speaker family… vector dim is per-model: CAM++ family + ERes2Net v2 + TitaNet emit 192-dim, ERes2Net Base emits 512-dim", matching CLAUDE.md's Non-obvious-patterns wording.
+- (d) **False alarm at fix time** — verified `api/mod.rs:189-197` against the README's bullets: `enroll-live/start` and `enroll-live/cancel` are scoped to `/speakers/:id/`; `enroll-live/status` is global (no speaker id). The README already says exactly that. No change.
+- (e) Diarization bullet rewritten to lead with cosine clustering of per-segment embeddings; pyannote files mentioned as still-bundled for the alternate segmentation path.
+
+No code changes; README only.
+
 `README.md` accumulated several misalignments with current code, surfaced while reviewing it after the ISS-068 env-template work landed:
 
 **(a) `HTTP_PORT=3000` in the README's example `.env`** (line 92):
@@ -1251,4 +1261,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 69 | README drift — `.env`, ports, embedding dims | Low | All | Open |
