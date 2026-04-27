@@ -22,6 +22,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::api::session::AppApiError;
 use crate::domain::types::ClipManifest;
 use crate::repository::audio_clip;
 use crate::AppState;
@@ -29,7 +30,7 @@ use crate::AppState;
 /// Frontend-shaped clip — matches the `Segment` type in
 /// `frontend/src/types/index.ts` so the Archive view can render backend
 /// clips with the same component used for live-flushed segments.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ClipResponse {
     pub id: String,
     #[serde(rename = "sessionId")]
@@ -47,7 +48,7 @@ pub struct ClipResponse {
     pub duration_ms: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct ListClipsQuery {
     /// Cap returned rows. Default 50; max 500 to bound response size.
     #[serde(default = "default_limit")]
@@ -63,6 +64,16 @@ fn default_limit() -> i64 {
 /// Returns up to `?limit` clips ordered newest-first. Each clip's `text`
 /// is the concatenation of every final transcript across its VAD segments;
 /// empty for clips that ended up containing no speech.
+#[utoipa::path(
+    get,
+    path = "/clips",
+    tag = "clips",
+    params(ListClipsQuery),
+    responses(
+        (status = 200, description = "Recent processed clips", body = Vec<ClipResponse>),
+        (status = 500, description = "Database error", body = AppApiError),
+    ),
+)]
 pub async fn list_clips(
     State(state): State<AppState>,
     Query(q): Query<ListClipsQuery>,
@@ -88,6 +99,22 @@ pub async fn list_clips(
     (StatusCode::OK, Json(body)).into_response()
 }
 
+/// `GET /clips/{clip_id}/segments/{segment_id}/audio` — returns the per-VAD
+/// segment WAV from the batch pipeline so the trace inspector can play it.
+#[utoipa::path(
+    get,
+    path = "/clips/{clip_id}/segments/{segment_id}/audio",
+    tag = "clips",
+    params(
+        ("clip_id" = Uuid, Path, description = "Audio clip ID"),
+        ("segment_id" = Uuid, Path, description = "VAD segment ID inside the clip"),
+    ),
+    responses(
+        (status = 200, description = "audio/wav body", content_type = "audio/wav"),
+        (status = 404, description = "Clip / segment / WAV missing", body = AppApiError),
+        (status = 500, description = "Filesystem error", body = AppApiError),
+    ),
+)]
 pub async fn get_clip_segment_audio(
     State(state): State<AppState>,
     Path((clip_id, segment_id)): Path<(Uuid, Uuid)>,

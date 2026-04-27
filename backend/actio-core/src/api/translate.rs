@@ -9,24 +9,24 @@ use crate::engine::llm_router::LlmRouterError;
 use crate::engine::llm_translate::TranslateLineRequest;
 use crate::AppState;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct TranslateRequest {
     pub target_lang: String,
     pub lines: Vec<TranslateLineRequestWire>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct TranslateLineRequestWire {
     pub id: String,
     pub text: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TranslateResponse {
     pub translations: Vec<TranslateLineWire>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TranslateLineWire {
     pub id: String,
     pub text: String,
@@ -36,6 +36,17 @@ pub struct TranslateLineWire {
 ///
 /// Returns 503 with `{"error":"llm_disabled"}` when the router is in
 /// `Disabled` mode so the frontend can surface a precise toast.
+#[utoipa::path(
+    post,
+    path = "/llm/translate",
+    tag = "llm",
+    request_body = TranslateRequest,
+    responses(
+        (status = 200, description = "Translations (preserves request order via line ids)", body = TranslateResponse),
+        (status = 503, description = "Router disabled — pick Local or Remote in Settings → AI"),
+        (status = 500, description = "Translation failed", body = AppApiError),
+    ),
+)]
 pub async fn translate_lines(
     State(state): State<AppState>,
     Json(req): Json<TranslateRequest>,

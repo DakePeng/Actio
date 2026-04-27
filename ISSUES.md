@@ -645,11 +645,16 @@ These branches survived the codebase ~unchanged since the API client was first w
 
 ### 66. OpenAPI / Swagger UI is missing ~half the API surface
 
-**Status:** Partial 2026-04-26 — `/reminders` (7), `/labels` (4), and `/settings/*` (11) slices landed. The settings slice uses bodyless responses for the routes whose response shape (`AppSettings`, `ModelStatus`, `Vec<AsrModelInfo>`) is too sprawling to derive `ToSchema` cheaply — those routes are documented (path + status + tag) without the response schema, which is a deliberate trade-off; the simple shapes (`DownloadRequest`, `WarmupRequest`, `DeleteModelResult`, `LlmTestResult`, `DownloadTarget`, `AudioDeviceInfo`) do get `ToSchema` and render fully. 214/214 backend lib tests pass at each slice; cargo check clean.
+**Status:** Resolved 2026-04-26 — all 4 user-facing surfaces documented across 4 ticks:
 
-Remaining slices for follow-up ticks:
-- `/llm/translate` and `/v1/*` OpenAI-compat shim
-- `/clips`
+  | Tick      | Slice           | Routes added |
+  |-----------|-----------------|---|
+  | `f75fc5c` | `/reminders`    | 7 |
+  | `f64c656` | `/labels`       | 4 |
+  | `9fa3878` | `/settings/*`   | 11 |
+  | this tick | `/llm` + `/v1/*` + `/clips` | 9 |
+
+  **31 new routes** registered in `paths(...)`, plus the dangling `get_reminder_trace` annotation now wired through. Schemas added to `components(schemas(...))` for every simple request/response body. The complex response shapes (`AppSettings`, `ModelStatus`, `LocalLlmInfo`, `LoadStatus`, `OpenAiChatResponse`, etc.) are intentionally documented with bodyless `responses((status, description))` — they nest too deep to derive `ToSchema` cheaply, and the trade-off documents the route + status code + tag without the schema graph. 214/214 backend lib tests pass at every slice; cargo check clean throughout.
 
 `backend/actio-core/src/api/mod.rs:33-72` declares the OpenAPI doc with `#[derive(OpenApi)] paths(...)`. The `paths(...)` list registers **28** routes — speaker/session/segment/candidate-speaker/profile. CLAUDE.md (line 138) advertises `/docs` as the source of truth: *"Full request/response schemas live at http://localhost:3000/docs while the backend is running."*
 
@@ -1107,4 +1112,3 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 66 | OpenAPI gaps — llm / clips still pending | Low | All | Partial — reminders + labels + settings done; 2 surfaces remain |
