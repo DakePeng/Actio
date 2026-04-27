@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 87. CORS predicate uses `starts_with` without boundary checks — `http://localhost.evil.com` and `http://127.0.0.1.evil.com` are accepted
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — replaced the inline predicate with two top-level helpers in `lib.rs`: `origin_starts_with_at_boundary(origin, prefix)` requires the byte after the prefix to be `None` (exact), `:` (port), or `/` (path); `is_allowed_actio_origin(origin)` composes the two Tauri schemes plus the boundary-checked loopback prefixes. The CORS predicate now reduces to `origin.to_str().map(is_allowed_actio_origin).unwrap_or(false)`. Added `mod cors_origin_tests` with two test cases covering 10 allowed origins (Tauri schemes, bare hosts, port suffixes including the dev port range and the port-discovery range, trailing-path forms) and 14 rejected origins (the two look-alike hostnames from the issue body, look-alike with port, look-alike with trailing slash, suffix garbage like `XYZ`, userinfo tricks, wrong scheme, unrelated origins, empty string). Verification: `cargo test -p actio-core --lib` 223 → 225; `cargo clippy -p actio-core --all-targets` lib-test warnings unchanged at 37.
+
+**Found:** 2026-04-27
 
 `backend/actio-core/src/lib.rs:365-380` configures the Axum CORS layer with a custom predicate:
 
