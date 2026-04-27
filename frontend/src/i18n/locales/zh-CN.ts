@@ -182,6 +182,8 @@ export const zhCN: Translations = {
   'live.header.on': '聆听中',
   'live.header.off': '已静音',
   'live.listeningSince': '从 {time} 开始 • 已运行 {duration}',
+  'live.aria.listeningStarted': '已于 {time} 开始聆听',
+  'live.aria.listeningStopped': '聆听已停止',
   'live.pausedHint': '聆听已暂停。在托盘或此处开启以开始捕捉。',
 
   // Needs-review queue (medium-confidence auto-extracted items)

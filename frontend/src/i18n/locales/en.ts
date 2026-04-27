@@ -182,6 +182,8 @@ export const en = {
   'live.header.on': 'Listening',
   'live.header.off': 'Muted',
   'live.listeningSince': 'Listening since {time} • {duration}',
+  'live.aria.listeningStarted': 'Listening started at {time}',
+  'live.aria.listeningStopped': 'Listening stopped',
   'live.pausedHint': 'Listening is paused. Turn it on in the tray or here to start capturing.',
 
   // Needs-review queue (medium-confidence auto-extracted items)

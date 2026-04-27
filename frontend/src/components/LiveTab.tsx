@@ -96,15 +96,38 @@ export function LiveTab() {
   const isOn = listeningEnabled === true;
   const headerLabel = isOn ? t('live.header.on') : t('live.header.off');
 
+  // One-shot ARIA status that announces only the on/off transitions —
+  // crucially NOT the per-second duration tick. Without this split, the
+  // pill below carries `aria-live` and assistive tech announces the
+  // elapsed-time string ~3,600× per hour (ISSUES.md #79).
+  // Empty on initial mount so the page-load state ("Muted") doesn't
+  // announce as if the user just stopped a session.
+  const [transitionMessage, setTransitionMessage] = useState('');
+  const prevIsOnRef = useRef(isOn);
+  useEffect(() => {
+    if (prevIsOnRef.current === isOn) return;
+    prevIsOnRef.current = isOn;
+    if (isOn && listeningStartedAt) {
+      setTransitionMessage(
+        t('live.aria.listeningStarted', { time: formatTime(listeningStartedAt) }),
+      );
+    } else if (!isOn) {
+      setTransitionMessage(t('live.aria.listeningStopped'));
+    }
+  }, [isOn, listeningStartedAt, t]);
+
   return (
     <div className="live-tab">
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {transitionMessage}
+      </span>
       <header className="live-tab__topbar">
         <div className="live-tab__topbar-left">
           <span className={`live-tab__status${isOn ? ' is-on' : ''}`}>
             {headerLabel}
           </span>
           {isOn && listeningStartedAt && (
-            <p className="live-tab__since" aria-live="polite">
+            <p className="live-tab__since">
               {t('live.listeningSince', {
                 time: formatTime(listeningStartedAt),
                 duration: formatDuration(now - listeningStartedAt),

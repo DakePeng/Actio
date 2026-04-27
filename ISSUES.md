@@ -1142,7 +1142,9 @@ const cancelAndUnselect = async () => {
 
 ### 79. `LiveTab` "Listening since" pill announces elapsed time at 1 Hz to screen readers
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — dropped `aria-live="polite"` from `<p className="live-tab__since">`. Added a separate `<span className="visually-hidden" role="status" aria-live="polite">` whose content is driven by a `useEffect` that fires only on the `isOn` transition (with a `prevIsOnRef` guard). On initial mount the status is empty so the page-load state doesn't announce as if the user just stopped a session. Two new i18n keys (`live.aria.listeningStarted`, `live.aria.listeningStopped`) added in both `en.ts` and `zh-CN.ts`. Added a `.visually-hidden` utility class to `globals.css`. New `LiveTab.aria-live.test.tsx` (4 tests) pins: pill no longer carries aria-live, initial mount = empty status, transition-on = single started-at announcement (stable across `now` ticks), transition-off = "Listening stopped". Verification: `pnpm tsc --noEmit` clean, `pnpm test` 217 → 221, `pnpm build` succeeded.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/LiveTab.tsx:107` renders the listening-since pill as:
 

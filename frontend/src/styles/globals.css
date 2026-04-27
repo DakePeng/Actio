@@ -66,6 +66,21 @@
   box-sizing: border-box;
 }
 
+/* Hide an element from sighted users while keeping it announceable to
+   assistive tech. Used for one-shot status messages that shouldn't take
+   up visual real estate (e.g. LiveTab listening on/off transitions). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 html,
 body {
   background: transparent !important;
