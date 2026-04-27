@@ -481,7 +481,7 @@ fn tenant_id_from_headers(headers: &HeaderMap) -> Uuid {
         .unwrap_or(Uuid::nil())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct ListRemindersQuery {
     pub status: Option<String>,
     pub priority: Option<String>,
@@ -492,6 +492,15 @@ pub struct ListRemindersQuery {
     pub offset: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/reminders",
+    tag = "reminders",
+    params(ListRemindersQuery),
+    responses(
+        (status = 200, description = "List of reminders matching the filter", body = Vec<Reminder>),
+    ),
+)]
 pub async fn list_reminders(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -513,7 +522,7 @@ pub async fn list_reminders(
     Ok(Json(reminders))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateReminderRequest {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -526,6 +535,16 @@ pub struct CreateReminderRequest {
     pub context: Option<String>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/reminders",
+    tag = "reminders",
+    request_body = CreateReminderRequest,
+    responses(
+        (status = 201, description = "Reminder created", body = Reminder),
+        (status = 400, description = "Missing title or description", body = AppApiError),
+    ),
+)]
 pub async fn create_reminder(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -559,6 +578,16 @@ pub async fn create_reminder(
     Ok((StatusCode::CREATED, Json(reminder)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/reminders/{id}",
+    tag = "reminders",
+    params(("id" = Uuid, Path, description = "Reminder ID")),
+    responses(
+        (status = 200, description = "Reminder", body = Reminder),
+        (status = 404, description = "Reminder not found", body = AppApiError),
+    ),
+)]
 pub async fn get_reminder(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -572,6 +601,18 @@ pub async fn get_reminder(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/reminders/{id}",
+    tag = "reminders",
+    params(("id" = Uuid, Path, description = "Reminder ID")),
+    request_body = PatchReminderRequest,
+    responses(
+        (status = 200, description = "Updated reminder", body = Reminder),
+        (status = 400, description = "Invalid status or priority value", body = AppApiError),
+        (status = 404, description = "Reminder not found", body = AppApiError),
+    ),
+)]
 pub async fn patch_reminder(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -598,6 +639,16 @@ pub async fn patch_reminder(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/reminders/{id}",
+    tag = "reminders",
+    params(("id" = Uuid, Path, description = "Reminder ID")),
+    responses(
+        (status = 204, description = "Reminder deleted"),
+        (status = 404, description = "Reminder not found", body = AppApiError),
+    ),
+)]
 pub async fn delete_reminder(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -780,19 +831,30 @@ pub async fn get_reminder_trace(
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ExtractRemindersRequest {
     pub text: String,
     #[serde(default)]
     pub images: Vec<ImageInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ImageInput {
     /// Full data URL, e.g. "data:image/png;base64,...."
     pub data_url: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/reminders/extract",
+    tag = "reminders",
+    request_body = ExtractRemindersRequest,
+    responses(
+        (status = 200, description = "Extracted reminders (may be empty)", body = Vec<Reminder>),
+        (status = 400, description = "Empty text and no images", body = AppApiError),
+        (status = 503, description = "LLM router disabled", body = AppApiError),
+    ),
+)]
 pub async fn extract_reminders(
     State(state): State<AppState>,
     headers: HeaderMap,

@@ -645,6 +645,14 @@ These branches survived the codebase ~unchanged since the API client was first w
 
 ### 66. OpenAPI / Swagger UI is missing ~half the API surface
 
+**Status:** Partial 2026-04-26 — `/reminders` slice landed (7 routes documented: list / create / extract / get / patch / delete / trace). `paths(...)` and `components(schemas(...))` extended with the new entries; `CreateReminderRequest`, `ExtractRemindersRequest`, `ImageInput` derive `ToSchema`; `ListRemindersQuery` derives `IntoParams`. The dangling annotation on `get_reminder_trace` is now wired through. 214/214 backend lib tests still pass; cargo check clean.
+
+Remaining slices for follow-up ticks (one per group keeps the diffs auditable):
+- `/labels` (4 routes)
+- `/settings/*` (10 routes including the model + audio-devices subpaths)
+- `/llm/translate` and `/v1/*` OpenAI-compat shim
+- `/clips`
+
 `backend/actio-core/src/api/mod.rs:33-72` declares the OpenAPI doc with `#[derive(OpenApi)] paths(...)`. The `paths(...)` list registers **28** routes — speaker/session/segment/candidate-speaker/profile. CLAUDE.md (line 138) advertises `/docs` as the source of truth: *"Full request/response schemas live at http://localhost:3000/docs while the backend is running."*
 
 But `mod.rs` actually mounts **47 routes**. The 19 missing from OpenAPI cover entire user-facing API surfaces:
@@ -1101,4 +1109,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
-| 66 | OpenAPI missing ~half the API surface (reminders, labels, settings, …) | Low | All | Open |
+| 66 | OpenAPI gaps — labels / settings / llm / clips still pending | Low | All | Partial — /reminders done; 4 surfaces remain |
