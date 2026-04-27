@@ -2,14 +2,14 @@ import { getApiUrl } from './backend-url';
 import { DEV_TENANT_ID } from './actio-api';
 import { requestJson } from './http';
 
-export type ProfileResponse = {
+type ProfileResponse = {
   tenant_id: string;
   display_name: string | null;
   aliases: string[];
   bio: string | null;
 };
 
-export type UpdateProfileRequest = {
+type UpdateProfileRequest = {
   display_name?: string | null;
   aliases?: string[];
   bio?: string | null;

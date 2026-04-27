@@ -1044,6 +1044,8 @@ The plan doc reference (`2026-04-07-frontend-polish.md`) is in `frontend/docs/` 
 
 ### 74. More dead/over-exported exports across `frontend/src/api/` and `utils/`
 
+**Status:** Resolved 2026-04-27 — deleted `isAutostartEnabled` from `utils/autostart.ts` and `enrollSpeaker` from `api/speakers.ts`; dropped `export` from `ProfileResponse`/`UpdateProfileRequest` in `api/profile.ts` and `TranslateLineRequest`/`TranslateLineResponse` in `api/translate.ts`. Also pruned the now-orphan `EnrollResponse` and `DEV_TENANT_ID` imports in `api/speakers.ts`. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 214/214, `pnpm build` succeeded with chunk sizes flat.
+
 After ISS-073 cleaned up `utils/labels.ts`, a deeper sweep over `src/api/` + `src/utils/` (cross-file word-grep) turned up another batch:
 
 **(a) Truly dead — zero callers:**

@@ -19,14 +19,3 @@ export async function setAutostart(enabled: boolean): Promise<void> {
     await invoke('plugin:autostart|disable');
   }
 }
-
-export async function isAutostartEnabled(): Promise<boolean | null> {
-  if (!isTauri) return null;
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<boolean>('plugin:autostart|is_enabled');
-  } catch (e) {
-    console.error('[Actio] Failed to query autostart state:', e);
-    return null;
-  }
-}

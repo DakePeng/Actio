@@ -1,11 +1,11 @@
 import { getApiUrl } from './backend-url';
 
-export interface TranslateLineRequest {
+interface TranslateLineRequest {
   id: string;
   text: string;
 }
 
-export interface TranslateLineResponse {
+interface TranslateLineResponse {
   id: string;
   text: string;
 }
