@@ -761,6 +761,43 @@ Option B is more idiomatic for a multi-module API crate (the type is API-specifi
 
 ---
 
+### 68. `.env.example` files are stale (backend) or missing (frontend)
+
+Two environment-config docs gaps surfaced during the ISS-067 cleanup:
+
+**(a) Backend `.env.example` is stale and misleading.** `backend/.env.example`:
+
+```
+DATABASE_URL=postgres://actio:actio@localhost:5433/actio   ← codebase uses SQLite
+HTTP_PORT=3000                                              (kept; this works)
+WORKER_HOST=127.0.0.1                                       ← no Python worker
+WORKER_PORT=50051                                           ← no Python worker
+LLM_BASE_URL=https://api.openai.com/v1                      ← env vars unused;
+LLM_API_KEY=sk-...                                            LLM config lives in
+LLM_MODEL=gpt-4o-mini                                         settings.json now
+RUST_LOG=actio_asr=info                                     (kept; standard)
+```
+
+`CLAUDE.md` line 12 explicitly states: *"There is **no** Python worker, no gRPC, no Postgres, no Docker. Older docs mentioning those are obsolete."* The `.env.example` is exactly the obsolete docs CLAUDE.md flags. A new contributor following it would set up invalid Postgres credentials, a phantom worker host, and unused LLM env vars; the resulting confusion ("but the .env.example said…") is exactly the friction CLAUDE.md tries to head off.
+
+**(b) Frontend has no `.env.example`** at all. `VITE_ACTIO_API_BASE_URL` is referenced in 9+ files now (after #52 + #63 plumbed it everywhere) and isn't documented in any README/CLAUDE.md/AGENTS.md. A contributor running `pnpm dev` against a non-default backend host has to grep source for the env-var name.
+
+**Severity:** Low · **Platform:** All · **Type:** docs · **Scope:** small (rewrite the 16-line backend file; add an 8-line frontend one)
+
+**Acceptance:**
+1. `backend/.env.example` rewritten to match the actual environment surface:
+   - `DATABASE_URL` is unused (we open `<config.data_dir>/actio.db` directly via SQLite). Drop it.
+   - `WORKER_HOST` / `WORKER_PORT` — drop.
+   - `LLM_*` — drop. Note that LLM config is round-tripped through `settings.json` and hot-reloaded via `PATCH /settings`.
+   - Keep `RUST_LOG` (standard tracing var).
+   - Add comment block at top noting "Most config is in settings.json (round-tripped via the GUI)" so contributors don't expect every flag to come from env.
+2. `frontend/.env.example` created with `VITE_ACTIO_API_BASE_URL=http://127.0.0.1:3000` and a comment explaining when to override (Vite + Tauri build for a host other than the defaults). Match the existing 9 in-code uses.
+3. The pair satisfies the test "a new contributor cloning the repo can run dev mode without grepping source for env vars."
+
+Bonus: a one-line note in the root README.md (if one exists; otherwise the closest equivalent) pointing at both files.
+
+---
+
 ### 60. `live_enrollment::consume_segment` race-fix and gate logic have no tests
 
 **Status:** Resolved 2026-04-26 — added a `#[cfg(test)] mod tests` to `live_enrollment.rs` with 10 tokio tests covering: no-session bail, non-Active-status bail, three rejection gates (too_short / too_long / low_quality with version bump + last_rejected_reason), accept path (counter + version + last_captured_duration_ms + saved_embedding_ids + cleared rejection), target-reached flip-to-Complete + staging clear, `cleanup_partial_embeddings` selective delete (preserves prior successful enrollment), `cleanup_partial_embeddings` no-op after Complete, and `publish_level` version-stability. Backend lib suite: **204 → 214** tests, all green.
@@ -1170,3 +1207,4 @@ The docs-only slice is trivially safe to ship first; the UI follow-up needs `sup
 | 42 | `icons/icon.png` 1×1 placeholder | Medium | All | Open |
 | 44 | Streaming + batch pipelines mutually exclusive | High | All | Open |
 | 58 | Notifications toggle persists but never fires alerts | Medium | All | Open — directional (NEEDS-REVIEW) |
+| 68 | `.env.example` stale (backend) or missing (frontend) | Low | All | Open |
