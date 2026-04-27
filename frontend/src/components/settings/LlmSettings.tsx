@@ -238,10 +238,7 @@ export function LlmSettings() {
           <input
             type="radio"
             checked={selection.kind === 'local'}
-            onChange={() => {
-              setSelection({ kind: 'local', id: '' });
-              patchLlmSettings({ selection: { kind: 'local', id: '' } }).catch(() => {});
-            }}
+            onChange={() => handleSelectionChange({ kind: 'local', id: '' })}
           />
           <span>{t('settings.llm.local')}</span>
           <span className="settings-row__sublabel">{t('settings.llm.local.sub')}</span>
@@ -296,7 +293,11 @@ export function LlmSettings() {
                 setLoadStatus({ state: 'idle' });
                 const cleared: LlmSelection = { kind: 'local', id: '' };
                 setSelection(cleared);
-                patchLlmSettings({ selection: cleared }).catch(() => {});
+                try {
+                  await patchLlmSettings({ selection: cleared });
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : t('settings.llm.saveFailed'));
+                }
               };
 
               return (

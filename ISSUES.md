@@ -1085,7 +1085,9 @@ External consumers import the *function* (`fetchProfile`, `translateLines`) and 
 
 ### 75. `LlmSettings` swallows `patchLlmSettings` errors on two paths, divorcing UI state from server state
 
-**Status:** Open · **Found:** 2026-04-27
+**Status:** Resolved 2026-04-27 — "Local" radio onChange now routes through `handleSelectionChange`; `cancelAndUnselect` now wraps the `patchLlmSettings` call in try/catch and surfaces failures via `setError`. Added `frontend/src/components/settings/__tests__/LlmSettings.errors.test.tsx` to pin the new behaviour: stubs the `/settings` PATCH to 500, asserts the "Failed to save" banner renders. Verification: `pnpm tsc --noEmit` clean, `pnpm test` 214 → 215, `pnpm build` succeeded with bundle sizes flat.
+
+**Found:** 2026-04-27
 
 `frontend/src/components/settings/LlmSettings.tsx` has three sibling paths that persist a `LlmSelection` change. Two of them route through `handleSelectionChange` (lines 157–177), which captures errors into `setError(...)` so a failed save surfaces as red text inline. The other two skip that wrapper and use `.catch(() => {})` — meaning a failed save silently leaves the radio looking selected while the backend still has the prior value.
 
